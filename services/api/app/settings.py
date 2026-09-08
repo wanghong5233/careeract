@@ -10,8 +10,11 @@ class Settings(BaseSettings):
     )
 
     database_url: PostgresDsn
+    agno_database_url: PostgresDsn
     litellm_base_url: str = "http://localhost:4000"
     litellm_master_key: str
+    litellm_model: str = "careeract-default"
+    web_origin: str = "http://localhost:3000"
 
 
-settings = Settings()
+settings = Settings()  # type: ignore[call-arg]  # Values are validated from the environment.

@@ -1,0 +1,58 @@
+services:
+  postgres:
+    image: postgres:17.6-bookworm@sha256:f3bd19c606e442c3d7bdfa8002e03fe260a1023351e0ea4598032022b68dd6e3
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-careeract}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-careeract}
+      POSTGRES_DB: ${POSTGRES_DB:-careeract}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-careeract}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  litellm:
+    image: docker.litellm.ai/berriai/litellm:latest@sha256:c8756e7b9a61fe45df2ccb5b781d388c3b2f3a21ef9e4956630caef20f9f03aa
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-careeract}:${POSTGRES_PASSWORD:-careeract}@postgres:5432/litellm
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+      LITELLM_SALT_KEY: ${LITELLM_SALT_KEY}
+    ports:
+      - "4000:4000"
+
+  temporal:
+    image: temporalio/temporal:1.8.3@sha256:cea463d98a8d6def4420f903ea5c3fcd0d85c8d10fbcc2770a50c12fff2eb26d
+    command:
+      - server
+      - start-dev
+      - --ip
+      - 0.0.0.0
+      - --db-filename
+      - /data/temporal.db
+    ports:
+      - "7233:7233"
+      - "8233:8233"
+    volumes:
+      - temporal-data:/data
+
+  steel:
+    image: ghcr.io/steel-dev/steel-browser:latest@sha256:6dd29f73c33bb0f5bc9d950e8e4492c3f8458a06313346fa1767f68936a36fc8
+    ports:
+      - "3001:3000"
+      - "9223:9223"
+    shm_size: 2gb
+    volumes:
+      - steel-data:/app/.cache
+
+volumes:
+  postgres-data:
+  temporal-data:
+  steel-data:

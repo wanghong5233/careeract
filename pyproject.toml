@@ -4,9 +4,11 @@ version = "0.1.0"
 description = "CareerAct backend services"
 requires-python = ">=3.11,<3.14"
 dependencies = [
-    "agno",
+    "agno[agui,openai,os,postgres]",
     "browser-use",
+    "docling",
     "fastapi",
+    "playwright",
     "pydantic-settings",
     "sqlalchemy[asyncio]",
     "asyncpg",
@@ -23,7 +25,7 @@ dev = [
 ]
 
 [tool.uv.sources]
-agno = { path = "vendor/agno", editable = true }
+agno = { path = "vendor/agno/libs/agno", editable = true }
 browser-use = { path = "vendor/browser-use", editable = true }
 
 [tool.ruff]
@@ -36,6 +38,11 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 [tool.mypy]
 python_version = "3.11"
 strict = true
+
+[[tool.mypy.overrides]]
+module = ["agno", "agno.*"]
+follow_untyped_imports = false
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

@@ -1,0 +1,13 @@
+{$CAREERACT_DOMAIN:localhost} {
+	handle /agui* {
+		reverse_proxy api:8000
+	}
+
+	handle /api/* {
+		reverse_proxy api:8000
+	}
+
+	handle {
+		reverse_proxy web:3000
+	}
+}
