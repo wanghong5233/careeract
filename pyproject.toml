@@ -1,32 +1,26 @@
 [project]
-name = "careeract"
+name = "careeract-workspace"
 version = "0.1.0"
-description = "CareerAct backend services"
+description = "CareerAct development workspace"
+license = "Apache-2.0"
 requires-python = ">=3.11,<3.14"
-dependencies = [
-    "agno[agui,openai,os,postgres]",
-    "browser-use",
-    "docling",
-    "fastapi",
-    "playwright",
-    "pydantic-settings",
-    "sqlalchemy[asyncio]",
-    "asyncpg",
-    "temporalio",
-    "uvicorn[standard]",
-]
+dependencies = []
 
 [dependency-groups]
 dev = [
+    "httpx",
     "mypy",
     "pytest",
     "pytest-asyncio",
     "ruff",
 ]
 
-[tool.uv.sources]
-agno = { path = "vendor/agno/libs/agno", editable = true }
-browser-use = { path = "vendor/browser-use", editable = true }
+[tool.uv]
+package = false
+default-groups = ["dev"]
+
+[tool.uv.workspace]
+members = ["services/api", "services/browser", "services/worker"]
 
 [tool.ruff]
 line-length = 100
@@ -38,9 +32,11 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 [tool.mypy]
 python_version = "3.11"
 strict = true
+explicit_package_bases = true
+mypy_path = "."
 
 [[tool.mypy.overrides]]
-module = ["agno", "agno.*"]
+module = ["agno", "agno.*", "alembic", "alembic.*"]
 follow_untyped_imports = false
 ignore_missing_imports = true
 

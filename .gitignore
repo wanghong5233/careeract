@@ -23,3 +23,6 @@ data/
 postgres-data/
 steel-data/
 temporal-data/
+
+# Local product strategy and detailed architecture are intentionally private.
+docs/

@@ -1,13 +1,11 @@
 {$CAREERACT_DOMAIN:localhost} {
-	handle /agui* {
-		reverse_proxy api:8000
+	header {
+		-Server
+		Permissions-Policy "camera=(), geolocation=(), microphone=(self)"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
 	}
 
-	handle /api/* {
-		reverse_proxy api:8000
-	}
-
-	handle {
-		reverse_proxy web:3000
-	}
+	reverse_proxy web:3000
 }

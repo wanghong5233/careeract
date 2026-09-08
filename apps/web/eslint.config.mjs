@@ -10,6 +10,8 @@ const eslintConfig = defineConfig([
     rules: {
       "react-hooks/refs": "off",
       "react-hooks/static-components": "off",
+      "@next/next/no-img-element": "off",
+      "jsx-a11y/alt-text": "off",
     },
   },
   // Override default ignores of eslint-config-next.

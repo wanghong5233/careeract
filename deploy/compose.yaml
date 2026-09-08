@@ -1,0 +1,206 @@
+name: careeract
+
+services:
+  caddy:
+    image: caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
+    restart: unless-stopped
+    environment:
+      CAREERACT_DOMAIN: ${CAREERACT_DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ../infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      web:
+        condition: service_started
+
+  web:
+    build:
+      context: ../apps/web
+    restart: unless-stopped
+    environment:
+      API_BASE_URL: http://api:8000
+      AUTH_DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET}
+      BETTER_AUTH_URL: ${CAREERACT_URL}
+    depends_on:
+      api:
+        condition: service_started
+      api-migrate:
+        condition: service_completed_successfully
+
+  api-migrate:
+    build:
+      context: ..
+      dockerfile: services/api/Dockerfile
+    restart: "no"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      AGNO_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?options=-c%20search_path%3Dagno
+      AGNO_DATABASE_SCHEMA: agno
+      AGNO_TELEMETRY: "false"
+      AUTH_JWKS_URL: http://web:3000/api/auth/jwks
+      AUTH_ISSUER: ${CAREERACT_URL}
+      AUTH_AUDIENCE: ${CAREERACT_URL}
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+    command:
+      - uv
+      - run
+      - --no-sync
+      - --package
+      - careeract-api
+      - alembic
+      - -c
+      - services/api/alembic.ini
+      - upgrade
+      - head
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    build:
+      context: ..
+      dockerfile: services/api/Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      AGNO_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?options=-c%20search_path%3Dagno
+      AGNO_DATABASE_SCHEMA: agno
+      AGNO_TELEMETRY: "false"
+      AUTH_JWKS_URL: http://web:3000/api/auth/jwks
+      AUTH_ISSUER: ${CAREERACT_URL}
+      AUTH_AUDIENCE: ${CAREERACT_URL}
+      LITELLM_BASE_URL: http://litellm:4000
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+      LITELLM_MODEL: ${LITELLM_MODEL}
+    depends_on:
+      api-migrate:
+        condition: service_completed_successfully
+      litellm:
+        condition: service_started
+
+  worker:
+    build:
+      context: ..
+      dockerfile: services/worker/Dockerfile
+    restart: unless-stopped
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE}
+      TEMPORAL_TASK_QUEUE: ${TEMPORAL_TASK_QUEUE}
+    depends_on:
+      temporal-namespace:
+        condition: service_completed_successfully
+
+  browser:
+    build:
+      context: ..
+      dockerfile: services/browser/Dockerfile
+    restart: unless-stopped
+    environment:
+      STEEL_BASE_URL: http://steel:3000
+      ANONYMIZED_TELEMETRY: "false"
+      BROWSER_USE_CLOUD_SYNC: "false"
+    depends_on:
+      steel:
+        condition: service_started
+
+  steel:
+    image: ghcr.io/steel-dev/steel-browser:latest@sha256:6dd29f73c33bb0f5bc9d950e8e4492c3f8458a06313346fa1767f68936a36fc8
+    restart: unless-stopped
+    shm_size: 2gb
+    expose:
+      - "3000"
+      - "9223"
+    volumes:
+      - steel-data:/app/.cache
+
+  litellm:
+    image: docker.litellm.ai/berriai/litellm:latest@sha256:c8756e7b9a61fe45df2ccb5b781d388c3b2f3a21ef9e4956630caef20f9f03aa
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/litellm
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+      LITELLM_SALT_KEY: ${LITELLM_SALT_KEY}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  temporal-schema:
+    image: temporalio/admin-tools:1.31.2@sha256:dbc5fcd6ee8f0f4d808bf765af9a87dea9d8a283abfdcfbd2fc148496ba66107
+    restart: on-failure
+    environment:
+      DB_PORT: "5432"
+      POSTGRES_SEEDS: postgres
+      POSTGRES_USER: ${POSTGRES_USER}
+      SQL_PASSWORD: ${POSTGRES_PASSWORD}
+    entrypoint: ["/bin/sh"]
+    command: /scripts/setup-postgres.sh
+    volumes:
+      - ../infra/temporal:/scripts:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  temporal:
+    image: temporalio/server:1.31.2@sha256:b5ecdb8282bededae2a10c36e8d862e27d0bc2d247fc73c5416025997ab4a1da
+    restart: unless-stopped
+    environment:
+      DB: postgres12
+      DBNAME: temporal
+      DB_PORT: "5432"
+      POSTGRES_SEEDS: postgres
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PWD: ${POSTGRES_PASSWORD}
+      VISIBILITY_DBNAME: temporal_visibility
+      VISIBILITY_DB_PORT: "5432"
+      VISIBILITY_POSTGRES_SEEDS: postgres
+      VISIBILITY_POSTGRES_USER: ${POSTGRES_USER}
+      VISIBILITY_POSTGRES_PWD: ${POSTGRES_PASSWORD}
+      BIND_ON_IP: 0.0.0.0
+    expose:
+      - "7233"
+    depends_on:
+      temporal-schema:
+        condition: service_completed_successfully
+
+  temporal-namespace:
+    image: temporalio/admin-tools:1.31.2@sha256:dbc5fcd6ee8f0f4d808bf765af9a87dea9d8a283abfdcfbd2fc148496ba66107
+    restart: on-failure
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE}
+    entrypoint: ["/bin/sh"]
+    command: /scripts/create-namespace.sh
+    volumes:
+      - ../infra/temporal:/scripts:ro
+    depends_on:
+      temporal:
+        condition: service_started
+
+  postgres:
+    image: postgres:17.6-bookworm@sha256:f3bd19c606e442c3d7bdfa8002e03fe260a1023351e0ea4598032022b68dd6e3
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ../infra/postgres:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+volumes:
+  caddy-config:
+  caddy-data:
+  postgres-data:
+  steel-data:

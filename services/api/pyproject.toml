@@ -1,0 +1,21 @@
+[project]
+name = "careeract-api"
+version = "0.1.0"
+license = "Apache-2.0"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "agno[agui,openai,os,postgres]",
+    "alembic",
+    "asyncpg",
+    "fastapi",
+    "pydantic-settings",
+    "pyjwt[crypto]",
+    "sqlalchemy[asyncio]",
+    "uvicorn[standard]",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+agno = { path = "../../vendor/agno/libs/agno", editable = true }
