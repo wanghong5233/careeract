@@ -1,0 +1,42 @@
+[project]
+name = "careeract"
+version = "0.1.0"
+description = "CareerAct backend services"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "agno",
+    "browser-use",
+    "fastapi",
+    "pydantic-settings",
+    "sqlalchemy[asyncio]",
+    "asyncpg",
+    "temporalio",
+    "uvicorn[standard]",
+]
+
+[dependency-groups]
+dev = [
+    "mypy",
+    "pytest",
+    "pytest-asyncio",
+    "ruff",
+]
+
+[tool.uv.sources]
+agno = { path = "vendor/agno", editable = true }
+browser-use = { path = "vendor/browser-use", editable = true }
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
