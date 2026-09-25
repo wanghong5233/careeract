@@ -14,39 +14,14 @@ recruiting communication, interview preparation, and long-term career records.
 - `vendor/agno`: editable Agno fork
 - `vendor/browser-use`: editable browser-use fork
 
-## Local development
+## Development
 
-```powershell
-Copy-Item .env.example .env
-docker compose up -d
-uv sync --frozen --all-packages
-uv run --package careeract-api alembic -c services/api/alembic.ini upgrade head
-uv run --package careeract-api uvicorn services.api.app.main:app --reload
-```
+Start with [current status and scope](docs/STATUS.md), then follow the
+[local development and validation guide](docs/DEVELOPMENT.md).
+The repository currently contains foundations, not a verified job-application product.
 
-Run the web workspace in another terminal:
-
-```powershell
-Set-Location apps/web
-Copy-Item .env.example .env.local
-npm ci
-npm run dev
-```
-
-Run the internal services when working on durable or browser tasks:
-
-```powershell
-uv run --package careeract-worker python -m services.worker.app.main
-uv run --package careeract-browser uvicorn services.browser.app.main:app --port 8001 --reload
-```
-
-Local endpoints:
-
-- Workspace: `http://localhost:3000`
-- AgentOS / AG-UI: `http://localhost:8000`
-- LiteLLM: `http://localhost:4000`
-- Temporal UI: `http://localhost:8233`
-- Steel: `http://localhost:3001`
+Coding agents should read [AGENTS.md](AGENTS.md). Three task-scoped skills and their
+sources are described in [Skills guidance](docs/SKILLS.md); no global plugin is required.
 
 `compose.yaml` contains local infrastructure. The complete domestic
 self-hosting topology is defined in `deploy/compose.yaml`; it keeps PostgreSQL,

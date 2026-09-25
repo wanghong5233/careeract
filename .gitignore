@@ -24,5 +24,8 @@ postgres-data/
 steel-data/
 temporal-data/
 
-# Local product strategy and detailed architecture are intentionally private.
-docs/
+# Keep private strategy and design local; allow only reviewed contributor guidance.
+docs/*
+!docs/STATUS.md
+!docs/DEVELOPMENT.md
+!docs/SKILLS.md
