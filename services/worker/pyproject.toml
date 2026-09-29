@@ -8,6 +8,8 @@ dependencies = [
     "httpx",
     "pydantic-settings",
     "temporalio",
+    "torch",
+    "torchvision",
 ]
 
 [tool.uv]

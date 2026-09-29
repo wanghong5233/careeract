@@ -19,6 +19,15 @@ dev = [
 package = false
 default-groups = ["dev"]
 
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+torchvision = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
 [tool.uv.workspace]
 members = ["services/api", "services/browser", "services/worker"]
 
