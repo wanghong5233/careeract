@@ -7,7 +7,7 @@ description: Implement or review CareerAct React/Next.js workspace data flows, c
 
 读取 [前端指令](../../../apps/web/AGENTS.md) 和本次涉及的现有组件。
 先确认锁文件中的 Next.js/React 版本，按前端指令读取安装包内相应文档；缺少本地文档时查匹配版本的官方资料，
-不把最新示例直接套入当前版本。来源与适配见 [Skills 说明](../../../docs/SKILLS.md)。
+不把最新示例直接套入当前版本。来源与适配见 [Skills 说明](../../../docs/engineering/SKILLS.md)。
 
 ## 先决定数据和状态归谁
 
@@ -34,6 +34,6 @@ description: Implement or review CareerAct React/Next.js workspace data flows, c
 
 ## 验收
 
-按 [开发指南](../../../docs/DEVELOPMENT.md) 选择检查。涉及交互时在实际页面操作关键路径，
+按 [开发指南](../../../docs/engineering/DEVELOPMENT.md) 选择检查。涉及交互时在实际页面操作关键路径，
 包括切换资源、失败/等待状态和窄屏布局；用当前可用浏览器工具，不自动安装另一套工具。
 无法运行时明确未验收的交互，不把 typecheck 或截图当作业务完成证据。

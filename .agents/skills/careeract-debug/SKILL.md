@@ -5,8 +5,8 @@ description: Diagnose unclear CareerAct integration failures across Web/BFF, Fas
 
 # CareerAct 集成排障
 
-先看 [开发指南](../../../docs/DEVELOPMENT.md) 的启动与验收边界；根据实际故障选择下面的步骤，
-不为已明确的简单错误补齐一整套仪式。来源与适配见 [Skills 说明](../../../docs/SKILLS.md)。
+先看 [开发指南](../../../docs/engineering/DEVELOPMENT.md) 的启动与验收边界；根据实际故障选择下面的步骤，
+不为已明确的简单错误补齐一整套仪式。来源与适配见 [Skills 说明](../../../docs/engineering/SKILLS.md)。
 
 ## 缩小故障范围
 

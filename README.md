@@ -16,12 +16,17 @@ recruiting communication, interview preparation, and long-term career records.
 
 ## Development
 
-Start with [current status and scope](docs/STATUS.md), then follow the
-[local development and validation guide](docs/DEVELOPMENT.md).
+Core product and architecture documents stay at the top of `docs/` when available
+locally. Contributor guides and current status live in `docs/engineering/`;
+active implementation plans live in `docs/engineering/plans/`. Directory and
+maintenance rules are defined in [AGENTS.md](AGENTS.md#documentation).
+
+Start with [current status and scope](docs/engineering/STATUS.md), then follow the
+[local development and validation guide](docs/engineering/DEVELOPMENT.md).
 The repository currently contains foundations, not a verified job-application product.
 
 Coding agents should read [AGENTS.md](AGENTS.md). Three task-scoped skills and their
-sources are described in [Skills guidance](docs/SKILLS.md); no global plugin is required.
+sources are described in [Skills guidance](docs/engineering/SKILLS.md); no global plugin is required.
 
 `compose.yaml` contains local infrastructure. The complete domestic
 self-hosting topology is defined in `deploy/compose.yaml`; it keeps PostgreSQL,

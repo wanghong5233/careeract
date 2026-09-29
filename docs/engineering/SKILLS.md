@@ -2,15 +2,16 @@
 
 这三个 Skill 是 CareerAct 自行编写的精简适配，不是原样安装或镜像上游插件。
 它们借鉴下列已审阅资料的工程方法，并通过本项目代码入口、约束和验收方式落地。
-没有安装全局插件、MCP、Hooks 或附带脚本，也没有改变产品运行依赖。
+这三个项目 Skill 本身不安装全局插件、MCP、Hooks 或附带脚本，也不改变产品运行依赖。
+仓库另有凭据扫描 hook，启用和验收方式见[开发指南](DEVELOPMENT.md#凭据拦截)。
 
 ## 选择与发现
 
 | Skill | 何时读取 | 不用于 |
 | --- | --- | --- |
-| [careeract-debug](../.agents/skills/careeract-debug/SKILL.md) | 跨服务故障、原因不清的失败、重复修复无效 | 明确的一行错误、一般问答 |
-| [careeract-web](../.agents/skills/careeract-web/SKILL.md) | React/Next 数据流、复杂工作台交互、性能问题 | 纯文案、简单样式、后端功能 |
-| [careeract-auth](../.agents/skills/careeract-auth/SKILL.md) | Better Auth、BFF/JWT/JWKS、认证 Schema | 一般业务 CRUD、从零换认证方案 |
+| [careeract-debug](../../.agents/skills/careeract-debug/SKILL.md) | 跨服务故障、原因不清的失败、重复修复无效 | 明确的一行错误、一般问答 |
+| [careeract-web](../../.agents/skills/careeract-web/SKILL.md) | React/Next 数据流、复杂工作台交互、性能问题 | 纯文案、简单样式、后端功能 |
+| [careeract-auth](../../.agents/skills/careeract-auth/SKILL.md) | Better Auth、BFF/JWT/JWKS、认证 Schema | 一般业务 CRUD、从零换认证方案 |
 
 Codex 支持仓库根 `.agents/skills/`；新会话确认技能列表中是否可见，也可用 `$careeract-auth` 等点名。
 其他 Agent 的自动发现机制不保证相同：按本文件链接显式读取即可，不为尚未使用的工具复制整套配置。

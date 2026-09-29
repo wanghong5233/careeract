@@ -6,7 +6,7 @@ description: Implement, diagnose or review CareerAct Better Auth sessions, same-
 # CareerAct 认证集成
 
 先定位变更所在边界，不重新初始化已存在的认证。来源与适配见
-[Skills 说明](../../../docs/SKILLS.md)，运行与检查见 [开发指南](../../../docs/DEVELOPMENT.md)。
+[Skills 说明](../../../docs/engineering/SKILLS.md)，运行与检查见 [开发指南](../../../docs/engineering/DEVELOPMENT.md)。
 
 ## 阅读入口
 

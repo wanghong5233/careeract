@@ -26,7 +26,11 @@ temporal-data/
 
 # Keep private strategy and design local; allow only reviewed contributor guidance.
 docs/*
-!docs/STATUS.md
-!docs/DEVELOPMENT.md
-!docs/SKILLS.md
-!docs/BROWSER_SAFETY_PLAN.md
+!docs/engineering/
+docs/engineering/*
+!docs/engineering/STATUS.md
+!docs/engineering/DEVELOPMENT.md
+!docs/engineering/SKILLS.md
+!docs/engineering/plans/
+docs/engineering/plans/*
+!docs/engineering/plans/BROWSER_SAFETY_PLAN.md
