@@ -8,6 +8,8 @@ services:
     image: careeract-api:local
   api-migrate:
     image: careeract-api:local
+  litellm-init:
+    image: careeract-api:local
   worker:
     image: careeract-worker:local
   browser:

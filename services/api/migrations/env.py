@@ -5,11 +5,12 @@ from alembic import context
 from sqlalchemy import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-from services.api.app.settings import get_settings
+from services.api.app.settings import DatabaseSettings
 from services.api.infrastructure.database import Base
 
 config = context.config
-config.set_main_option("sqlalchemy.url", str(get_settings().database_url))
+database_settings = DatabaseSettings()  # type: ignore[call-arg]
+config.set_main_option("sqlalchemy.url", str(database_settings.database_url).replace("%", "%%"))
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)

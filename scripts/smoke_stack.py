@@ -16,6 +16,12 @@ BASE_URL = "http://localhost:18080"
 def prepare() -> None:
     ENV_FILE.parent.mkdir(exist_ok=True)
     if ENV_FILE.exists():
+        from dotenv import dotenv_values
+
+        if not dotenv_values(ENV_FILE).get("LITELLM_API_KEY"):
+            with ENV_FILE.open("a", encoding="utf-8") as output:
+                output.write("\nLITELLM_API_KEY=sk-" + secrets.token_hex(32) + "\n")
+            print("Added service key to existing ignored smoke configuration")
         print("Smoke configuration already exists; preserved")
         return
     values = {
@@ -26,6 +32,7 @@ def prepare() -> None:
         "POSTGRES_DB": "careeract",
         "BETTER_AUTH_SECRET": secrets.token_hex(32),
         "LITELLM_MASTER_KEY": "sk-" + secrets.token_hex(24),
+        "LITELLM_API_KEY": "sk-" + secrets.token_hex(32),
         "LITELLM_SALT_KEY": secrets.token_hex(32),
         "LITELLM_MODEL": "careeract-default",
         "OPENAI_API_KEY": "",
@@ -128,6 +135,31 @@ def check(restart: bool) -> None:
         "[httpx.get(url,timeout=20).raise_for_status() for url in urls]",
     )
     print("PASS: Browser, Steel and LiteLLM reachable inside deployment network")
+    compose(
+        "exec",
+        "-T",
+        "api",
+        "/app/.venv/bin/python",
+        "-c",
+        "import os; "
+        "assert os.environ.get('LITELLM_API_KEY'); "
+        "assert not any(name in os.environ for name in "
+        "['LITELLM_MASTER_KEY','OPENAI_API_KEY','DASHSCOPE_API_KEY'])",
+    )
+    compose(
+        "run",
+        "--rm",
+        "--no-deps",
+        "api-migrate",
+        "/app/.venv/bin/python",
+        "-c",
+        "import os; "
+        "from services.api.app.settings import DatabaseSettings; DatabaseSettings(); "
+        "assert not any(name in os.environ for name in "
+        "['LITELLM_API_KEY','LITELLM_MASTER_KEY','OPENAI_API_KEY','DASHSCOPE_API_KEY'])",
+    )
+    compose("run", "--rm", "--no-deps", "litellm-init")
+    print("PASS: runtime credentials separated; migrations need no model key; provisioning repeats")
 
 
 def check_temporal() -> None:

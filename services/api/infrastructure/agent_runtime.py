@@ -17,7 +17,7 @@ def build_agent_os(settings: Settings) -> AgentOS:
         name="CareerAct",
         model=OpenAIChat(
             id=settings.litellm_model,
-            api_key=settings.litellm_master_key.get_secret_value(),
+            api_key=settings.litellm_api_key.get_secret_value(),
             base_url=str(settings.litellm_base_url),
         ),
         db=db,

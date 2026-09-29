@@ -46,13 +46,6 @@ services:
     restart: "no"
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
-      AGNO_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?options=-c%20search_path%3Dagno
-      AGNO_DATABASE_SCHEMA: agno
-      AGNO_TELEMETRY: "false"
-      AUTH_JWKS_URL: http://web:3000/api/auth/jwks
-      AUTH_ISSUER: ${CAREERACT_URL}
-      AUTH_AUDIENCE: ${CAREERACT_URL}
-      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
     command:
       - uv
       - run
@@ -66,6 +59,22 @@ services:
       - head
     depends_on:
       postgres:
+        condition: service_healthy
+
+  litellm-init:
+    build:
+      context: ..
+      dockerfile: services/api/Dockerfile
+    restart: "no"
+    environment:
+      LITELLM_BASE_URL: http://litellm:4000
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+      LITELLM_API_KEY: ${LITELLM_API_KEY:?Initialize the service key first}
+    volumes:
+      - ../scripts/manage_model_key.py:/app/manage_model_key.py:ro
+    command: ["/app/.venv/bin/python", "/app/manage_model_key.py", "provision", "--environment"]
+    depends_on:
+      litellm:
         condition: service_healthy
 
   api:
@@ -88,13 +97,15 @@ services:
       AUTH_ISSUER: ${CAREERACT_URL}
       AUTH_AUDIENCE: ${CAREERACT_URL}
       LITELLM_BASE_URL: http://litellm:4000
-      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+      LITELLM_API_KEY: ${LITELLM_API_KEY:?Initialize the service key first}
       LITELLM_MODEL: ${LITELLM_MODEL}
     depends_on:
       api-migrate:
         condition: service_completed_successfully
       litellm:
         condition: service_healthy
+      litellm-init:
+        condition: service_completed_successfully
 
   worker:
     build:

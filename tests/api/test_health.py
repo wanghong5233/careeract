@@ -33,7 +33,7 @@ def build_settings() -> Settings:
         auth_jwks_url=AnyHttpUrl("http://localhost:3000/api/auth/jwks"),
         auth_issuer="http://localhost:3000",
         auth_audience="http://localhost:3000",
-        litellm_master_key=SecretStr("test-key"),
+        litellm_api_key=SecretStr("test-key"),
     )
 
 
