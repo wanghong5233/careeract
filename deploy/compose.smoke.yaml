@@ -1,0 +1,14 @@
+services:
+  caddy:
+    ports: !override
+      - "127.0.0.1:18080:80"
+  web:
+    image: careeract-web:local
+  api:
+    image: careeract-api:local
+  api-migrate:
+    image: careeract-api:local
+  worker:
+    image: careeract-worker:local
+  browser:
+    image: careeract-browser:local

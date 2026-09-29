@@ -16,12 +16,18 @@ services:
       - caddy-config:/config
     depends_on:
       web:
-        condition: service_started
+        condition: service_healthy
 
   web:
     build:
       context: ../apps/web
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/auth/get-session').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      start_period: 30s
+      retries: 12
     environment:
       API_BASE_URL: http://api:8000
       AUTH_DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
@@ -29,7 +35,7 @@ services:
       BETTER_AUTH_URL: ${CAREERACT_URL}
     depends_on:
       api:
-        condition: service_started
+        condition: service_healthy
       api-migrate:
         condition: service_completed_successfully
 
@@ -67,6 +73,12 @@ services:
       context: ..
       dockerfile: services/api/Dockerfile
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      start_period: 30s
+      retries: 12
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       AGNO_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?options=-c%20search_path%3Dagno
@@ -82,7 +94,7 @@ services:
       api-migrate:
         condition: service_completed_successfully
       litellm:
-        condition: service_started
+        condition: service_healthy
 
   worker:
     build:
@@ -108,11 +120,17 @@ services:
       BROWSER_USE_CLOUD_SYNC: "false"
     depends_on:
       steel:
-        condition: service_started
+        condition: service_healthy
 
   steel:
     image: ghcr.io/steel-dev/steel-browser:latest@sha256:6dd29f73c33bb0f5bc9d950e8e4492c3f8458a06313346fa1767f68936a36fc8
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/v1/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      start_period: 30s
+      retries: 12
     shm_size: 2gb
     expose:
       - "3000"
@@ -123,6 +141,12 @@ services:
   litellm:
     image: docker.litellm.ai/berriai/litellm:latest@sha256:c8756e7b9a61fe45df2ccb5b781d388c3b2f3a21ef9e4956630caef20f9f03aa
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/readiness', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      start_period: 60s
+      retries: 12
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/litellm
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
@@ -174,6 +198,8 @@ services:
       VISIBILITY_POSTGRES_USER: ${POSTGRES_USER}
       VISIBILITY_POSTGRES_PWD: ${POSTGRES_PASSWORD}
       BIND_ON_IP: 0.0.0.0
+    volumes:
+      - ../infra/temporal/dynamicconfig.yaml:/etc/temporal/config/dynamicconfig/docker.yaml:ro
     expose:
       - "7233"
     depends_on:

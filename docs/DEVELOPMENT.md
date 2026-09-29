@@ -88,6 +88,129 @@ Docker CLI 存在不代表 Linux 引擎已启动。检查可用内存、Docker �
 本地 Compose 暴露开发端口，不可直接当公网部署配置。生产拓扑在 `deploy/compose.yaml`，仍需独立验收。
 停止本项目容器可用 `docker compose stop`；不要把删卷、全局 prune 或清空 Profile 当常规修复。
 
+## 镜像与浏览器底座验收
+
+在根目录构建三个服务镜像，不需要把供应商密钥传入构建器：
+
+```powershell
+docker build -f services/api/Dockerfile -t careeract-api:local .
+docker build -f services/browser/Dockerfile -t careeract-browser:local .
+docker build -f services/worker/Dockerfile -t careeract-worker:local .
+docker run --rm careeract-worker:local /app/.venv/bin/python -c "import torch; assert torch.version.cuda is None; import cv2; from docling.document_converter import DocumentConverter; print('CPU dependencies OK')"
+docker compose up -d --wait steel
+uv run --no-sync python scripts/smoke_steel.py
+```
+
+Worker 的 Torch / Torchvision 从官方 CPU 索引解析并由 `uv.lock` 锁定，避免普通 Linux
+服务器下载 CUDA 依赖；Worker 镜像包含 OpenCV 必需的系统库。导入成功不证明 Docling
+模型资源已下载、中文文档解析或离线解析已通过。
+
+Steel 冒烟脚本仅创建内存中的虚构表单，验证会话、CDP 填写/点击/读取、Viewer HTML 和释放。
+已有 live 会话时拒绝运行，防止打断人工操作；不要与其他浏览器执行器并行运行。
+加 `--viewer-channel msedge` 可用已安装的 Edge 开启独立无登录 headless 浏览器，验证
+Viewer 画面、鼠标点击、普通键盘输入及远端表单结果；不读取用户浏览器 Profile。
+该参数是可重复的自动检查工具；交互开发和页面验收按当前协作约定使用可见 Computer Use，
+让用户能看到页面和操作，不以后台 headless 操作代替可见验收。
+该模式使用 1920×900 的观察窗口。当前上游 Viewer 在较窄窗口下可能裁切画面，且
+`Ctrl+A` 转发实测不符合全选预期，不能据此宣称完整接管体验通过。
+它不验证 CareerAct 同源授权代理、租约隔离、browser-use 智能执行或招聘站点可用性。
+Steel/CDP 开发端口只绑定本机回环地址。CDP 发现请求使用 localhost Host，并把发现的
+WebSocket 地址映射回实际连接端口，兼容当前 Steel Nginx 转发与 Chromium Host 校验。
+开发 Compose 的 `DOMAIN=127.0.0.1:3001` 用于生成本地 Viewer WebSocket 地址；
+该值不可直接用于生产，生产需通过 CareerAct 同源授权代理访问。
+
+容器网络复测（独立执行，结束删除临时容器）：
+
+```powershell
+docker run -d --name careeract-browser-smoke --network careeract-dev_default -e STEEL_BASE_URL=http://steel:3000 -e ANONYMIZED_TELEMETRY=false -e BROWSER_USE_CLOUD_SYNC=false careeract-browser:local
+docker cp scripts/smoke_steel.py careeract-browser-smoke:/tmp/smoke_steel.py
+docker exec careeract-browser-smoke /app/.venv/bin/python /tmp/smoke_steel.py --api-url http://steel:3000 --cdp-url http://steel:9223
+docker rm -f careeract-browser-smoke
+```
+
+## Docling 材料解析验收
+
+`scripts/smoke_docling.py` 在 Linux Worker 镜像内生成虚构中文 DOCX 和英文文本 PDF，
+验证解析成功及关键文本，CPU 单任务运行。默认关闭 OCR 和表格识别，只下载 PDF 布局模型；
+不据此声称扫描件、中文 PDF、复杂表格或真实简历结构准确率已经通过。
+
+在 PowerShell 执行（使用独立容器；`data/` 已忽略）：
+
+```powershell
+New-Item -ItemType Directory -Force data/docling-smoke | Out-Null
+docker create --name careeract-docling-smoke --mount "type=bind,source=$((Resolve-Path data/docling-smoke).Path),target=/data" --entrypoint /app/.venv/bin/python careeract-worker:local /tmp/smoke_docling.py
+docker cp scripts/smoke_docling.py careeract-docling-smoke:/tmp/smoke_docling.py
+docker start -a careeract-docling-smoke
+docker inspect --format '{{.State.ExitCode}}' careeract-docling-smoke
+docker rm careeract-docling-smoke
+```
+
+首次运行需访问 Hugging Face 下载公开模型；缓存保存在 `data/docling-smoke/models`，
+不读取真实简历或模型供应商密钥。确认退出码为 0 后，使用同样缓存做断网验收：
+
+```powershell
+docker create --name careeract-docling-offline --network none --mount "type=bind,source=$((Resolve-Path data/docling-smoke).Path),target=/data" --entrypoint /app/.venv/bin/python careeract-worker:local /tmp/smoke_docling.py --offline
+docker cp scripts/smoke_docling.py careeract-docling-offline:/tmp/smoke_docling.py
+docker start -a careeract-docling-offline
+docker inspect --format '{{.State.ExitCode}}' careeract-docling-offline
+docker rm careeract-docling-offline
+```
+
+`--offline` 禁用 Hub 网络请求，`--network none` 进一步验证容器完全断网仍可解析。
+正式解析 Activity 尚未实现，当前生产 Worker 也尚未挂载此缓存；部署前需将已验证的模型资源
+预置到受控存储/镜像并固定版本，不能依赖服务器首次处理材料时临时从国外下载。
+脚本报告的峰值 RSS 是单个 Python 进程的 Linux 统计，不是整机/容器栈峰值。
+
+## Temporal 恢复验收
+
+```powershell
+uv run --no-sync python -m scripts.smoke_temporal
+```
+
+脚本复用 Compose 中固定的 Temporal 镜像，创建独立临时容器、动态回环端口、临时数据库
+目录和独立测试队列，不重启现有开发容器。诊断 Workflow 不注册到产品 Worker。
+它验证等待状态在 Worker 强制终止后重放、Worker 离线时信号被接受、Temporal 强制
+终止后同一个 Run 完成，以及取消和执行超时的原生终态。重启后重新获取 Docker 动态端口。
+正常结束或断言失败都会清理测试进程、容器和临时目录；整个命令被外部强制终止时可能需
+按本轮创建的 `careeract-recovery-*` 名称人工清理，不要批量删除其他容器或卷。
+
+这证明的是本地 SQLite Dev Server 和 Temporal SDK 的恢复链路，未验证生产 PostgreSQL
+Temporal 拓扑、Activity 副作用重试、浏览器恢复、业务状态回写或产品级状态机。
+
+## 完整容器拓扑验收（本地隔离）
+
+先构建前述三个 Python 镜像，再执行下面命令。需支持 `!override` 的 Docker Compose
+2.24.4 或更新版本。该覆盖文件复用生产拓扑，仅替换应用镜像标签和公网端口映射。
+
+```powershell
+docker build -t careeract-web:local apps/web
+uv run --no-sync python scripts/smoke_stack.py prepare
+docker compose -p careeract-smoke --env-file data/stack-smoke.env -f deploy/compose.yaml -f deploy/compose.smoke.yaml up -d --no-build --wait
+uv run --no-sync python scripts/smoke_stack.py check --restart
+docker compose -p careeract-smoke --env-file data/stack-smoke.env -f deploy/compose.yaml -f deploy/compose.smoke.yaml down
+```
+
+入口仅为 `http://localhost:18080`。脚本首次生成独立随机凭据到被忽略的
+`data/stack-smoke.env`，已有文件不覆盖，不读取根 `.env`，不填入供应商密钥。
+不要删除配置后直接复用旧数据库卷，否则随机密码会与旧数据库不一致。
+`down` 保留本项目测试卷；不要使用全局 prune 或把开发数据库接入这个测试项目。
+
+验收覆盖：Caddy → standalone Web → Better Auth/PostgreSQL → JWT/JWKS → FastAPI；
+匿名和错误 Origin 拒绝；退出登录后拒绝；可选 Web/API 重启后 Session 与 JWKS 保持；
+正式 Temporal Server/PostgreSQL 与 Worker 执行；Browser/Steel/LiteLLM 内网健康接口。
+BFF 使用缺少必需字段的请求，期待通过认证后得到 API 的 422；不调用模型、不产生模型费用。
+每次执行创建虚构测试账号，数据仅留在独立测试库。本地 HTTP 不替代域名、TLS、备案或云端验收。
+
+Web 镜像使用固定 Node digest；构建只用固定占位配置，不支持把真实认证凭据传为 build args。
+正式运行配置仍由 Compose 环境变量注入。Temporal 动态配置文件必须挂载，默认 `{}` 使用
+服务默认参数。`up --wait` 中没有显式健康检查的服务仍可能只代表进程已启动，以脚本结果为准。
+
+单独检查正式 Temporal/Worker 可执行 `uv run --no-sync python scripts/smoke_stack.py temporal`。
+该检查最多进行 12 次只读任务队列探测，要求队列可读取且存在 Workflow poller，
+每次连接/命令限时 2s/3s，失败间隔 2s；
+Docker 子进程另有限时 60s。就绪后只提交一次独立 ID 的健康 Workflow，执行限时 30s，
+失败立即报告，不自动重发 Workflow。就绪重试会打印次数，不能用重试成功掩盖首次失败。
+
 ## 凭据拦截
 
 首次克隆安装 Gitleaks 8.30.1（Windows 可用 `winget install --id Gitleaks.Gitleaks -e`），
