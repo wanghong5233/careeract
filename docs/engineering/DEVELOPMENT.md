@@ -134,6 +134,29 @@ uv run --package careeract-api uvicorn services.api.app.main:app --host 127.0.0.
 不是 CareerAct 工作台，不能拿它代替产品页面展示。
 停止本项目容器可用 `docker compose stop`；不要把删卷、全局 prune 或清空 Profile 当常规修复。
 
+## 职业档案验收
+
+应用 Alembic 最新迁移后，登录工作台即可手动维护并确认档案。产品接口是
+`GET/PUT /api/v1/profile`，浏览器只调用同源 `/api/profile`。保存携带读取时的版本，
+首次创建为 null；每次成功保存生成新版本，旧版本返回 409，未确认或非法内容返回 422。
+同一用例仅写一份档案，仓储在单个事务内原子执行归属过滤和版本条件更新。
+所有者来自 JWT，客户端不能指定；成功及错误响应不缓存，错误不回显提交内容。
+
+```powershell
+$env:RUN_PROFILE_POSTGRES_TESTS = '1'
+try { uv run pytest tests/api/test_profiles.py -q } finally { Remove-Item Env:RUN_PROFILE_POSTGRES_TESTS }
+uv run python scripts/smoke_profile.py --base-url http://localhost:3100
+```
+
+第一项复用现有隔离 Docker PostgreSQL 夹具，验证迁移、真实持久化和并发；HTTP 身份签名
+在测试中生成。第二项要求 Web/API 已启动且认证 URL 一致，经过真实 Better Auth/BFF/JWKS
+链路，创建两个随机虚构账号并退出；账号与合成档案留在本地开发库，不发邮件、不调用模型。
+脚本仅允许本地 HTTP 地址，不读取或打印用户密钥与真实档案。
+
+页面另验收空态、编辑、确认保存、刷新恢复、保存失败保留输入、冲突后重新读取及窄屏。
+草稿暂只在内存中，离开会丢失；没有历史版本浏览、上传导入或 Agent 自动修改。
+调用模型前仍须单独完成只读职业上下文接入，不能从聊天可用推导 Agent 已理解档案。
+
 ## 身份与权限边界
 
 三类身份代表不同的权限边界，不要求现在建立三个账号系统或完整管理后台：

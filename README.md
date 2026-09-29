@@ -24,6 +24,8 @@ maintenance rules are defined in [AGENTS.md](AGENTS.md#documentation).
 Start with [current status and scope](docs/engineering/STATUS.md), then follow the
 [local development and validation guide](docs/engineering/DEVELOPMENT.md).
 The repository currently contains foundations, not a verified job-application product.
+The first working business slice is a manually confirmed career profile with persistent
+storage, ownership checks and stale-write protection; the Agent does not yet read it.
 
 Coding agents should read [AGENTS.md](AGENTS.md). Three task-scoped skills and their
 sources are described in [Skills guidance](docs/engineering/SKILLS.md); no global plugin is required.
