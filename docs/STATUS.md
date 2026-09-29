@@ -33,6 +33,14 @@ CareerAct 是面向个人的职业 Agent Web 工作台，围绕档案、材料�
 
 ## 下一项任务：接管授权与会话互斥边界
 
+基建收尾已提交：`595fa71de` 开发依赖修复、`6f1b90717` Worker CPU/离线解析、
+`f931d3d3e` 容器集成与恢复验收。提交前冻结依赖、Ruff、mypy、17 个 pytest、
+Web lint/typecheck/build 均通过，三个提交的 Gitleaks hook 均通过；未 push。
+
+浏览器安全任务已启动：[分阶段验收计划](BROWSER_SAFETY_PLAN.md)。当前新增进程内租约规则，
+过期不自动让出所有权，交接必须先禁止写入并确认旧执行器停止。尚未接入生产路由、
+持久存储、Steel 或 Viewer；下一步先完成持久归属与服务认证，不把规则测试当作完整互斥验收。
+
 操作入口见[开发指南](DEVELOPMENT.md)。当前本机 `.env` 与 `apps/web/.env.local` 仅用于开发，
 凭据未进入 Git；本机 `OPENAI_API_KEY` 与 `DASHSCOPE_API_KEY` 已确认非空但不记录值。LiteLLM
 健康接口、模型列表、两个别名的真实请求和 BFF Agent SSE 均已通过；Temporal 已启动并通过
