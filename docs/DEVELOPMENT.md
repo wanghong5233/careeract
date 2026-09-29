@@ -88,7 +88,22 @@ Docker CLI 存在不代表 Linux 引擎已启动。检查可用内存、Docker �
 本地 Compose 暴露开发端口，不可直接当公网部署配置。生产拓扑在 `deploy/compose.yaml`，仍需独立验收。
 停止本项目容器可用 `docker compose stop`；不要把删卷、全局 prune 或清空 Profile 当常规修复。
 
-## 按改动选择验收
+## 凭据拦截
+
+首次克隆安装 Gitleaks 8.30.1（Windows 可用 `winget install --id Gitleaks.Gitleaks -e`），
+然后在仓库根目录执行 `git config --local core.hooksPath .githooks`。
+本机还需安装 uv 并完成前面的依赖同步。Git 不会自动启用克隆仓库中的 hooks。
+
+每次 commit 都扫描暂存区；真实 `.env` 文件即使被强制暂存也会被阻止，`.env.example`
+允许提交但仍扫描内容。Gitleaks 缺失或扫描失败会阻止提交，输出启用完整脱敏。
+手动检查：`uv run --no-sync python scripts/check_secrets.py`；历史检查加 `--history`。
+CI 的 Secrets 工作流扫描全部 Git 历史，不需要供应商密钥，也不读取本地环境文件。
+本地 hook 可以被绕过；远程需将 `secrets` 检查设为分支保护必需项才会阻止合并。
+检测有覆盖边界，不能代替审查；发现误报须精确核实，不整体跳过 vendor 或测试文件。
+`.gitleaksignore` 仅记录已核对的上游快照指纹：测试值、截断示例、公开标识和代码误报。
+新提交或不同位置的匹配不继承这些例外。禁止未经核对批量刷新例外。
+
+## 检查范围
 
 | 改动 | 最小有效验收 |
 | --- | --- |

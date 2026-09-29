@@ -6,3 +6,4 @@
 *.yaml text eol=lf
 *.yml text eol=lf
 vendor/** linguist-vendored
+.githooks/* text eol=lf

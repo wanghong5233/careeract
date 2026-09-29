@@ -1,0 +1,4 @@
+title = "CareerAct secret detection"
+
+[extend]
+useDefault = true
