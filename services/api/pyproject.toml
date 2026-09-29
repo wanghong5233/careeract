@@ -8,6 +8,7 @@ dependencies = [
     "alembic",
     "asyncpg",
     "fastapi",
+    "httpx",
     "pydantic-settings",
     "pyjwt[crypto]",
     "sqlalchemy[asyncio]",

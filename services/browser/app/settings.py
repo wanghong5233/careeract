@@ -1,4 +1,6 @@
-from pydantic import AnyHttpUrl
+from pathlib import Path
+
+from pydantic import AnyHttpUrl, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -10,6 +12,8 @@ class Settings(BaseSettings):
     )
 
     steel_base_url: AnyHttpUrl = AnyHttpUrl("http://localhost:3001")
+    browser_database_url: SecretStr | None = None
+    browser_command_public_key_file: Path | None = None
 
 
 settings = Settings()

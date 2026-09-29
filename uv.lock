@@ -976,6 +976,7 @@ dependencies = [
     { name = "alembic" },
     { name = "asyncpg" },
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "pydantic-settings" },
     { name = "pyjwt", extra = ["crypto"] },
     { name = "sqlalchemy", extra = ["asyncio"] },
@@ -988,6 +989,7 @@ requires-dist = [
     { name = "alembic" },
     { name = "asyncpg" },
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "pydantic-settings" },
     { name = "pyjwt", extras = ["crypto"] },
     { name = "sqlalchemy", extras = ["asyncio"] },
@@ -999,21 +1001,27 @@ name = "careeract-browser"
 version = "0.1.0"
 source = { virtual = "services/browser" }
 dependencies = [
+    { name = "asyncpg" },
     { name = "browser-use" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "playwright" },
     { name = "pydantic-settings" },
+    { name = "pyjwt", extra = ["crypto"] },
+    { name = "sqlalchemy", extra = ["asyncio"] },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "asyncpg" },
     { name = "browser-use", editable = "vendor/browser-use" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "playwright" },
     { name = "pydantic-settings" },
+    { name = "pyjwt", extras = ["crypto"] },
+    { name = "sqlalchemy", extras = ["asyncio"] },
     { name = "uvicorn", extras = ["standard"] },
 ]
 

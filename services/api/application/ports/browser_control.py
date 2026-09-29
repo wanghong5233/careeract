@@ -1,0 +1,41 @@
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Literal
+from uuid import UUID
+
+BrowserAction = Literal["register", "revoke", "acquire", "renew", "stop", "check"]
+
+
+@dataclass(frozen=True)
+class BrowserControlContext:
+    """Trusted authorization snapshot, never constructed directly from a request body."""
+
+    user_id: str
+    session_id: UUID
+    task_id: UUID
+    authorization_id: UUID
+    authorization_expires_at: datetime
+    attempt_id: UUID
+    request_id: UUID
+    owner_id: str
+
+
+@dataclass(frozen=True)
+class BrowserLease:
+    session_id: UUID
+    lease_id: UUID
+    owner_id: str
+    expires_at: datetime
+    draining: bool
+
+
+class BrowserControlRejected(Exception):
+    pass
+
+
+class BrowserControlConflict(Exception):
+    pass
+
+
+class BrowserControlUncertain(Exception):
+    pass
