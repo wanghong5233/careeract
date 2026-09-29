@@ -3,6 +3,7 @@ from agno.db.postgres import PostgresDb
 from agno.models.openai import OpenAIChat
 from agno.os import AgentOS
 from agno.os.interfaces.agui import AGUI
+from sqlalchemy import create_engine
 
 from services.api.app.settings import Settings
 
@@ -10,6 +11,12 @@ from services.api.app.settings import Settings
 def build_agent_os(settings: Settings) -> AgentOS:
     db = PostgresDb(
         db_url=str(settings.agno_database_url),
+        db_engine=create_engine(
+            str(settings.agno_database_url),
+            pool_pre_ping=True,
+            hide_parameters=True,
+            connect_args={"connect_timeout": 5},
+        ),
         db_schema=settings.agno_database_schema,
     )
     career_agent = Agent(
