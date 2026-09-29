@@ -26,6 +26,10 @@ temporal-data/
 
 # Keep private strategy and design local; allow only reviewed contributor guidance.
 docs/*
+!docs/product/
+docs/product/*
+!docs/product/WORKSPACE_INTERACTION.md
+!docs/product/DESIGN_PRINCIPLES.md
 !docs/engineering/
 docs/engineering/*
 !docs/engineering/STATUS.md
