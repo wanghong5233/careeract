@@ -69,8 +69,11 @@ Docker CLI 存在不代表 Linux 引擎已启动。检查可用内存、Docker �
    uv run --package careeract-browser uvicorn services.browser.app.main:app --port 8001 --reload
    ```
 
-   LiteLLM 还需要真实 provider/model 映射与可用密钥；`careeract-default` 只是别名，容器启动不能证明模型可调用。
-   `.env` 设置不会自动补齐缺少的 provider 配置。Docling 的模型下载、离线资源与中文字体也需在解析任务中验证。
+   LiteLLM 配置在 `infra/litellm/config.yaml`，当前提供两个服务端模型别名：
+   `careeract-default`（阿里百炼兼容接口）和 `careeract-openai`（OpenAI）。在根目录 `.env`
+   填写 `DASHSCOPE_API_KEY` 与 `OPENAI_API_KEY` 后，按 `LITELLM_MODEL` 选择默认别名；密钥只放
+   在服务端环境，不复制到 `apps/web/.env.local`。容器启动不能证明模型可调用，必须完成一次真实
+   请求和流式响应验收。Docling 的模型下载、离线资源与中文字体也需在解析任务中验证。
 
 | 入口 | 本地地址 |
 | --- | --- |

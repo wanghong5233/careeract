@@ -27,8 +27,19 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-careeract}:${POSTGRES_PASSWORD:-careeract}@postgres:5432/litellm
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
       LITELLM_SALT_KEY: ${LITELLM_SALT_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY}
+      DASHSCOPE_BASE_URL: ${DASHSCOPE_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
+    command:
+      - --config
+      - /app/config.yaml
+      - --port
+      - "4000"
     ports:
       - "4000:4000"
+    volumes:
+      - ./infra/litellm/config.yaml:/app/config.yaml:ro
 
   temporal:
     image: temporalio/temporal:1.8.3@sha256:cea463d98a8d6def4420f903ea5c3fcd0d85c8d10fbcc2770a50c12fff2eb26d
@@ -43,7 +54,7 @@ services:
       - "7233:7233"
       - "8233:8233"
     volumes:
-      - temporal-data:/data
+      - ./data/temporal:/data
 
   steel:
     image: ghcr.io/steel-dev/steel-browser:latest@sha256:6dd29f73c33bb0f5bc9d950e8e4492c3f8458a06313346fa1767f68936a36fc8
@@ -56,5 +67,4 @@ services:
 
 volumes:
   postgres-data:
-  temporal-data:
   steel-data:

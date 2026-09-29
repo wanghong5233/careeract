@@ -12,3 +12,6 @@ postgres-data
 steel-data
 temporal-data
 *.log
+**/.env
+**/.env.*
+!**/.env.example

@@ -1,6 +1,6 @@
 # CareerAct 当前状态
 
-更新：2026-09-25。此文件是当前阶段与交接入口；代码和实际运行证据决定已实现状态。
+更新：2026-09-28。此文件是当前阶段与交接入口；代码和实际运行证据决定已实现状态。
 
 ## 目标与范围
 
@@ -20,27 +20,29 @@ CareerAct 是面向个人的职业 Agent Web 工作台，围绕档案、材料�
 | 项目 | 已知事实 | 不能据此声称 |
 | --- | --- | --- |
 | 仓库 | 前后端、API、Worker、Browser 和 vendor 骨架存在 | 完整产品可用 |
-| 身份与协议 | Better Auth、BFF、JWT/JWKS、初始迁移与 Agent 入口有代码 | 真实登录到模型的全链路通过 |
+| 身份与协议 | PostgreSQL 迁移、真实注册/Session、JWKS、BFF 鉴权、API 入口和 Agent SSE 已在本机通过 | 生产认证配置已通过 |
 | 业务 | 领域边界、端口和规则已有定义，核心求职业务尚未完成 | 已能可靠填表、投递、值班 |
-| 部署 | 本地 Compose 和生产部署描述存在 | 所有镜像在国内可获取、生产可用 |
-| 检查 | CI、健康接口与架构边界测试存在 | 当前提交已通过全套检查或真实站点验收 |
+| 部署 | 本地 PostgreSQL、LiteLLM 双供应商、API/Web、Temporal 健康 Workflow 和 Browser Service 存活检查已通过 | Steel 会话、任务恢复和生产部署可用 |
+| 检查 | 冻结依赖同步、Ruff 格式/检查、mypy、14 个 pytest、Web lint/typecheck/build 已通过 | 真实招聘站点验收或生产部署通过 |
 | 开发硬件 | 32GB 内存、Ultra 7 155H，具备起步条件 | 整套服务峰值占用已经测量 |
 | Agent 初始化 | 短入口、开发指南和三个项目 Skills 已编写 | 新会话自动发现、行为收益已实测 |
 
-不要沿用历史对话中的测试通过数作为当前版本证据。2026-09-25 的环境读取发现 Docker 引擎未运行；
-这是当时快照，每次启动前重新检查，不当成永久故障。
+2026-09-28 环境复核：Docker Desktop Linux 引擎已运行，分配约 22 CPU / 24 GiB 内存；
+本机 C/D/E 盘分别约有 51/91/57 GiB 可用空间。CareerAct PostgreSQL 容器健康，端口为
+`localhost:15432`。API 镜像首次构建因 GHCR 下载层长时间停滞而取消，镜像尚未生成。
 
-## 下一项任务：本地集成验证
+## 下一项任务：完成模型与任务底座验证
 
-先检查 Docker/WSL、磁盘、环境变量与端口，再按依赖启动最少服务。操作入口见
-[开发指南](DEVELOPMENT.md)。模型使用 API，先限制一个浏览器会话和一个解析任务。
+操作入口见[开发指南](DEVELOPMENT.md)。当前本机 `.env` 与 `apps/web/.env.local` 仅用于开发，
+凭据未进入 Git；本机 `OPENAI_API_KEY` 与 `DASHSCOPE_API_KEY` 已确认非空但不记录值。LiteLLM
+健康接口、模型列表、两个别名的真实请求和 BFF Agent SSE 均已通过；Temporal 已启动并通过
+健康 Workflow。Steel 镜像尚未完成拉取，详细限制见下方验证记录。
 
 验收按层推进，不一次铺开全部业务：
 
-1. PostgreSQL、迁移、Web/API 启动；真实注册或登录会话、BFF 与 JWT/JWKS 验证。
-2. LiteLLM provider/model 配置与一次真实模型调用；Agent 流式结果能通过 BFF 返回。
-3. Temporal Worker 连接、任务状态与重启行为；Steel 会话、页面读取与用户接管可行性。
-4. 记录峰值内存、磁盘增长和明确失败；再选择一条真实网申路径做业务闭环。
+1. Temporal Worker 连接、任务状态与重启行为；Steel 会话、页面读取与用户接管可行性。
+2. 实现职业档案这一条最小领域纵切片，再扩展材料版本和岗位记录。
+3. 记录峰值内存、磁盘增长和明确失败；再选择一条真实网申路径做业务闭环。
 
 前一步失败时先定位边界，不靠更换整套架构、升级硬件或购买云资源掩盖问题。
 模型调用可能计费；真实站点登录、提交与消息发送按具体授权执行，不拿真实申请当普通自动化测试。
@@ -54,4 +56,11 @@ CareerAct 是面向个人的职业 Agent Web 工作台，围绕档案、材料�
 - 未验证/阻塞：缺少的条件、mock 的边界及下一步，不把失败写成完成。
 - 证据：链接可公开的测试或脱敏记录；原始账号数据和截图放被忽略的本地位置。
 
-本次初始化仅涉及文档与 Skills，不启动业务服务，不代表本地集成已完成。
+本次初始化提交已完成；本轮已启动 PostgreSQL、LiteLLM、API 和 Web，并完成两家模型供应商及
+认证到 Agent SSE 的本地验证。Temporal Worker 已连接，SystemHealthWorkflow 真实执行返回
+`ok`；本地 Temporal 存储改用被忽略的 `data/temporal`，解决命名卷写权限问题。
+任务中断后的恢复行为仍未验证。Browser Service `/health` 返回 `200` / `status=ok`，
+但该接口仅证明进程存活。Steel 的 GHCR 镜像拉取缓慢，本次取消，浏览器会话尚未验收。
+本地 `.env` 和 Web `.env.local` 经 `git check-ignore` 确认为忽略文件，且未被 Git 跟踪。
+提交前全套代码检查、本地与生产 Compose 静态校验通过；生产配置校验使用示例变量，未部署。
+根目录与 Web Docker 构建上下文均排除真实环境文件。完整 Python 应用镜像仍未构建成功。
