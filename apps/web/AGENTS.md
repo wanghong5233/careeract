@@ -11,8 +11,8 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 ## CareerAct web boundaries
 
 - 工作台围绕职业项目、材料、岗位和任务组织；assistant-ui 是交互组件，不决定整个信息架构。
-- 页面设计与审阅遵循[产品设计原则](../../docs/product/DESIGN_PRINCIPLES.md)，档案与材料行为见
-  [工作台交互规格](../../docs/product/WORKSPACE_INTERACTION.md)；目标设计不等于已实现能力。
+- 页面设计与审阅遵循[产品设计原则](../../docs/handbook/DESIGN_PRINCIPLES.md)；具体任务从
+  [STATUS](../../docs/handbook/STATUS.md)进入当前专题，候选设计不等于已确认或已实现能力。
 - 浏览器只走同源 BFF；领域规则留在 FastAPI，JWT、数据库凭据和 BYOK 不进入客户端 bundle。
 - 修改 React 数据流、复杂组件或性能时按需使用 `careeract-web`；认证问题使用 `careeract-auth`。
   纯文案或简单样式调整不需要加载整套 Skills。

@@ -4,22 +4,22 @@
 
 ## Start here
 
-- 新会话先读 [当前状态](docs/engineering/STATUS.md)，确认本次任务与下一步；开发、启动和验收看
-  [开发指南](docs/engineering/DEVELOPMENT.md)。不要把规划中的能力当作已经实现。
+- 新会话先读 [当前状态](docs/handbook/STATUS.md)，确认本次任务与下一步；开发、启动和验收看
+  [开发指南](docs/handbook/DEVELOPMENT.md)。不要把规划中的能力当作已经实现。
 - 首次接手或修改产品/架构时，若本地有 `docs/PRD.md` 与 `docs/ARCHITECTURE.md`，先读；
   同一任务后续只读相关章节。它们是未公开的长期设计，当前交付范围以 STATUS 为准。
 - 没有私人文档的新克隆可依据本文件、STATUS 和代码开始开发；确实缺少业务定义时再询问，
   不搜索项目所有者的上级私人目录来补上下文。
 - 改哪个服务，读该目录适用的 `AGENTS.md` 和相关职责 README；不用遍历整个 vendor。
 - 项目 Skills 在 `.agents/skills/`，仅按任务匹配加载；来源、边界和维护方式见
-  [Skills 说明](docs/engineering/SKILLS.md)。未自动发现时可按该说明读取对应入口，不假装已调用。
+  [Skills 说明](docs/handbook/SKILLS.md)。未自动发现时可按该说明读取对应入口，不假装已调用。
 
 ## Working agreements
 
 - 先看工作区已有改动；不覆盖他人修改。默认不 commit、push 或创建 PR，除非用户要求。
 - 小改动直接处理；跨服务、行为不明确或有外部副作用的任务，先明确范围、验收和风险。
-  只有跨会话的复杂任务才需要单独计划文件，不为小修复制造文档。
-- 按[单人开发流程](docs/engineering/DEVELOPMENT.md#单人开发流程)一次推进一个可验收目标；
+  重要专题在 `docs/topics/<name>/` 集中维护；工作组织与文档治理按需读 `careeract-engineering`。
+- 按[单人开发流程](docs/handbook/DEVELOPMENT.md#单人开发流程)一次推进一个可验收目标；
   常规顺序开发默认沿当前主线，隔离实验或并行工作再用短期分支，不强制每项任务建立 PR。
 - 优先复用现有组件、接口和检查；不为未来功能预建抽象，不因 Skill 示例添加依赖或换栈。
 - 新的事实、已验证能力或下一步发生变化时更新 STATUS；只记录结果和证据，不抄聊天日志。
@@ -34,8 +34,8 @@
 - PRD 只写需求与业务验收，不混入详细设计或未验证承诺；讨论建议不等于已确认需求。
 - 改变 PRD 范围、优先级或能力承诺前先给出改稿与依据，由用户确认；已有明确授权不重复询问。
 - 优先最小更新现有文档，一类信息只维护一处，不按对话轮次新增文件。
-- `docs/` 顶层只放 PRD/ARCHITECTURE；产品规格放 `docs/product/`，工程资料放 `docs/engineering/`。
-  文档入口、归档及移动规则见[文档维护](docs/engineering/DEVELOPMENT.md#文档维护)。
+- `docs/` 顶层保留 PRD/ARCHITECTURE；全项目手册放 `docs/handbook/`，具体专题放 `docs/topics/`。
+  职责、维护与迁移规则见[文档维护](docs/handbook/DEVELOPMENT.md#文档维护)。
 - 私人设计、研究和真实资料保持 Git 忽略；公开文档逐文件放行，不整体开放目录。
 
 ## Architecture boundaries
@@ -55,7 +55,7 @@ PostgreSQL 中的 CareerAct 领域数据是业务真相。Agent Run、聊天线�
 
 产品身份由 Better Auth 管理，框架运维权限不授予 CareerAct 产品管理权。
 业务读取/写入按服务端验证的 `user_id` 校验归属；资源 ID 和模型网关凭据不是用户授权。
-框架管理凭据与业务运行凭据分离，实施顺序及验收见 [开发指南](docs/engineering/DEVELOPMENT.md#身份与权限边界)。
+框架管理凭据与业务运行凭据分离，实施顺序及验收见 [开发指南](docs/handbook/DEVELOPMENT.md#身份与权限边界)。
 
 ## Reliability
 

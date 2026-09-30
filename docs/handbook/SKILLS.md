@@ -1,8 +1,8 @@
 # 项目 Skills
 
-这三个 Skill 是 CareerAct 自行编写的精简适配，不是原样安装或镜像上游插件。
+这些 Skill 是 CareerAct 自行编写的精简适配，不是原样安装或镜像上游插件。
 它们借鉴下列已审阅资料的工程方法，并通过本项目代码入口、约束和验收方式落地。
-这三个项目 Skill 本身不安装全局插件、MCP、Hooks 或附带脚本，也不改变产品运行依赖。
+项目 Skill 本身不安装全局插件、MCP、Hooks 或附带脚本，也不改变产品运行依赖。
 仓库另有凭据扫描 hook，启用和验收方式见[开发指南](DEVELOPMENT.md#凭据拦截)。
 
 ## 选择与发现
@@ -12,6 +12,7 @@
 | [careeract-debug](../../.agents/skills/careeract-debug/SKILL.md) | 跨服务故障、原因不清的失败、重复修复无效 | 明确的一行错误、一般问答 |
 | [careeract-web](../../.agents/skills/careeract-web/SKILL.md) | React/Next 数据流、复杂工作台交互、性能问题 | 纯文案、简单样式、后端功能 |
 | [careeract-auth](../../.agents/skills/careeract-auth/SKILL.md) | Better Auth、BFF/JWT/JWKS、认证 Schema | 一般业务 CRUD、从零换认证方案 |
+| [careeract-engineering](../../.agents/skills/careeract-engineering/SKILL.md) | 选择工作、组织需求与文档、规划验收、恢复或交接专题、改善协作流程 | 代替 auth/web/debug 的专业实现、小修复强制补文档 |
 
 Codex 支持仓库根 `.agents/skills/`；新会话确认技能列表中是否可见，也可用 `$careeract-auth` 等点名。
 其他 Agent 的自动发现机制不保证相同：按本文件链接显式读取即可，不为尚未使用的工具复制整套配置。
@@ -30,6 +31,11 @@ Codex 支持仓库根 `.agents/skills/`；新会话确认技能列表中是否�
 
 编写与加载方式参考 [OpenAI Skills 文档](https://learn.chatgpt.com/docs/build-skills)。
 技能是开发指导，不是权限来源，不能覆盖用户授权、项目边界或替代可执行测试。
+
+工程管理调研于 2026-09-29–30 核对文档工程、敏捷与 AI coding 实践；
+[调研结论](../../.agents/skills/careeract-engineering/references/research.md)保留来源和取舍，
+包括原有 OpenSpec/Spec Kit 调研的适用边界。项目流程以 DEVELOPMENT 为准，Skill 引用它。
+未安装流程工具，也不把静态检查表述成已经证明效率提高。
 
 ## 暂不引入
 
@@ -51,7 +57,11 @@ Codex 支持仓库根 `.agents/skills/`；新会话确认技能列表中是否�
 | BFF 返回 401，API 直连与 Web 会话表现不一致 | auth；若跨层原因不清再叠加 debug |
 | 材料列表切换后仍显示旧用户数据 | web；检查身份/缓存边界，必要时 auth |
 | Temporal 已接单但 Browser 没动作，多次改配置无效 | debug |
-| 改 README 错字或按钮文案 | 不加载上述三个 Skill |
+| 需求不断增加，不知道下一步做什么 | engineering；结合价值、依赖与可用时间收敛当前目标 |
+| 工作台设计、研究和操作文档重复，分不清最新结论 | engineering；核对作用域、权威位置和文档状态 |
+| 为职业工作台重新设计原型，之后分步接入业务 | engineering；先组织可见原型和验收，再按需读取 web |
+| 调优 Agent Runtime 的延迟和费用，需要保留实验对照 | engineering；明确基线、实验条件、成本与结果 |
+| 改 README 错字或按钮文案 | 不加载这些 Skill，不建立专题 |
 | 开发 API 业务规则但未涉及认证 | 不因 Python/API 关键词触发 auth 或 web |
 
 观察是否减少漏项与返工；若误触发、指令冲突或增加无效操作，收窄描述或移除。

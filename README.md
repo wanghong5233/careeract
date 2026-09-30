@@ -17,18 +17,27 @@ recruiting communication, interview preparation, and long-term career records.
 ## Development
 
 Core product and architecture documents stay at the top of `docs/` when available
-locally. Contributor guides and current status live in `docs/engineering/`;
-active implementation plans live in `docs/engineering/plans/`. Directory and
-maintenance rules are defined in [AGENTS.md](AGENTS.md#documentation).
+locally. Documentation has one home:
 
-Start with [current status and scope](docs/engineering/STATUS.md), then follow the
-[local development and validation guide](docs/engineering/DEVELOPMENT.md).
+```text
+docs/
+├── PRD.md / ARCHITECTURE.md     Private product and architecture definitions
+├── handbook/                   Project-wide workflow, operations, design principles, status
+└── topics/<name>/              Topic-specific requirements, design, research, and evidence
+```
+
+Current work is linked from STATUS; each topic keeps its own scope and results.
+Design decisions and delivery status are recorded separately. Private research
+remains local; public documents are individually allowed by `.gitignore`.
+
+Start with [current status and scope](docs/handbook/STATUS.md), then follow the
+[engineering workflow and development guide](docs/handbook/DEVELOPMENT.md).
 The repository currently contains foundations, not a verified job-application product.
 The first working business slice is a manually confirmed career profile with persistent
 storage, ownership checks and stale-write protection; the Agent does not yet read it.
 
-Coding agents should read [AGENTS.md](AGENTS.md). Three task-scoped skills and their
-sources are described in [Skills guidance](docs/engineering/SKILLS.md); no global plugin is required.
+Coding agents should read [AGENTS.md](AGENTS.md). Task-scoped skills and their
+sources are described in [Skills guidance](docs/handbook/SKILLS.md); no global plugin is required.
 
 `compose.yaml` contains local infrastructure. The complete domestic
 self-hosting topology is defined in `deploy/compose.yaml`; it keeps PostgreSQL,

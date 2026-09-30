@@ -21,7 +21,7 @@ execution, also enforce ownership at the connection/execution boundary. Checking
 and then separately sending CDP commands is not atomic. Restarting the process-local
 prototype loses state and must never authorize reuse of a surviving Steel session.
 
-Integration sequence and acceptance gates: [browser safety plan](../../../docs/engineering/plans/BROWSER_SAFETY_PLAN.md).
+Acceptance gates: [browser release checks](../../../docs/handbook/DEVELOPMENT.md#浏览器开放前检查).
 
 ## Persistent control boundary
 
