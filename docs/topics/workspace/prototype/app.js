@@ -41,6 +41,10 @@ const state = {
   editing: false,
   panelOpen: false,
   taskAdded: false,
+  sharedText: null,
+  sharedRevision: 1,
+  sharedEditing: false,
+  sharedProposal: null,
 };
 let toastTimer;
 const proposals = [
@@ -58,29 +62,24 @@ const proposals = [
   },
 ];
 const navButton = (route, label, glyph, extra = '') => `<button class="nav-button ${state.route === route ? 'active' : ''}" data-route="${route}" ${state.route === route ? 'aria-current="page"' : ''}>${icon(glyph)}<span>${label}</span>${extra}</button>`;
-const resolved = () => state.changes.every((change) => change !== 'pending');
-const pendingCount = () => state.changes.filter((change) => change === 'pending').length;
+const resolved = () => state.changes.every((change) => change !== 'pending') && !state.sharedProposal && !state.sharedEditing;
+const pendingCount = () => state.changes.filter((change) => change === 'pending').length + Number(!!state.sharedProposal);
 
 function sidebar() {
   return `<aside class="sidebar" aria-label="工作区导航">
     <div class="brand row">${icon('raven')}CareerAct<span class="spacer"></span><button class="icon-button mobile-menu" data-action="menu" aria-label="关闭项目导航">${icon('close')}</button></div>
     <button class="nav-button" data-action="new">${icon('plus')}<span>开始一项工作</span></button>
     <button class="nav-button" data-action="search">${icon('search')}<span>查找内容</span><span class="count">⌘ K</span></button>
+    ${navButton('assistant', '渡鸦的工作台', 'raven')}
     <div class="nav-group">
       <div class="nav-label">职业项目</div>
-      ${navButton('project', '2027 秋招', 'folder', '<span class="count">2</span>')}
-      <div class="nav-sub">
-        ${navButton('opportunities', '机会与岗位', 'globe')}
-        ${navButton('applications', '申请与进展', 'inbox')}
-        ${navButton('preparation', '准备与训练', 'book')}
-      </div>
+      ${navButton('project', '2027 秋招', 'folder', `<span class="count">${pendingCount()}</span>`)}
       ${navButton('portfolio', 'Agent 工程作品', 'folder')}
     </div>
     <div class="nav-group">
       <div class="nav-label">待处理</div>
       ${navButton('inbox', '沟通与通知', 'inbox')}
       ${navButton('calendar', '日程与待办', 'clock')}
-      ${navButton('tasks', '任务与报告', 'check')}
     </div>
     <div class="nav-group">
       <div class="nav-label">跨项目复用</div>
@@ -89,6 +88,8 @@ function sidebar() {
       ${navButton('growth', '经历与成长', 'book')}
     </div>
     <div class="sidebar-bottom">
+      <button class="nav-button" data-work-action="capability-map">${icon('grid')}<span>全部能力</span></button>
+      ${navButton('tasks', '任务与报告', 'check')}
       ${navButton('automations', '托管服务', 'clock')}
       ${navButton('settings', '偏好与连接', 'settings')}
       <div class="account row"><span class="avatar">予</span><span>林予的工作区</span><span class="spacer"></span><small class="muted">个人</small></div>
@@ -118,24 +119,13 @@ function composer(placeholder, context, compact = false) {
 
 function projectPage() {
   if (state.scenario === 'empty') return emptyPage();
-  return `<div class="project-page">
-    <div class="project-heading row between"><div><div class="eyebrow">职业项目</div><h1>2027 秋招</h1><p class="muted">找到能持续积累 Agent 与系统能力的第一份工作。</p></div><button class="button quiet" data-action="project-context">${icon('layers')}项目背景</button></div>
-    <div class="project-meta row"><span>9 月 — 12 月</span><span>上海 · 杭州</span><span>校招正职 / 对口实习</span></div>
-    ${projectViews()}
-    <section class="brief"><div class="agent-mark">${icon('raven')}</div><div><h2>${resolved() ? '材料已就绪，可以继续下一步。' : '申请材料准备好了，等你看两处修改。'}</h2><p>星野的岗位重视 Agent 执行可靠性。我调整了项目表达，并保留了推理与系统方向的经历。提交申请前，仍由你决定。</p></div></section>
-    <section class="focus-task" aria-label="等待审阅的成果"><div class="focus-content"><div class="row"><span class="tag attention">${resolved() ? '材料已审阅' : '待你审阅'}</span><span class="muted" style="font-size:11px">申请准备 · 星野智能</span><span class="spacer"></span><small class="muted">12 分钟前</small></div><h2 class="task-title">为 Agent 研发岗位准备一份有依据的申请</h2><p>材料来自已确认背景与项目记录，没有添加新经历或虚构指标。</p><div class="artifact-line row"><div class="file-symbol">${icon('file')}</div><div><strong>简历 · Agent 工程方向</strong><small>基于 v3 · ${resolved() ? '审阅完成' : '2 处修改建议'} · 关联 3 份资料</small></div><span class="spacer"></span><span class="tag">可编辑</span></div></div><div class="focus-footer row between"><span>当前只准备材料，尚未对外提交</span><button class="button primary" data-route="review">${resolved() ? '打开材料' : '审阅并继续'}${icon('arrow')}</button></div></section>
-    <div class="project-lower"><section><div class="row between"><h2 class="section-heading">继续推进</h2><span class="muted" style="font-size:10px">与当前目标相关</span></div>
-      <button class="work-row" data-route="opportunities">${icon('globe')}<span><strong>这周还有哪些值得看的机会？</strong><small>3 个候选 · 1 项关键信息待核实</small></span><span class="tag">已整理</span></button>
-      <button class="work-row" data-route="practice">${icon('book')}<span><strong>把 Agent 项目讲清楚</strong><small>从实际申请材料出发，准备 3 个技术追问</small></span><span class="tag live">准备中</span></button>
-      ${state.taskAdded ? '<button class="work-row" data-route="practice">'+icon('target')+'<span><strong>练习：解释失败恢复与幂等边界</strong><small>来自项目讲述材料 · 已加入当前项目</small></span><span class="tag">待完成</span></button>' : ''}
-    </section><aside><h2 class="section-heading">项目随身资料</h2><button class="resource" data-route="background">${icon('layers')}职业背景与事实</button><button class="resource" data-route="review">${icon('file')}简历 · Agent 工程方向</button><button class="resource" data-action="constraints">${icon('target')}目标、城市与选择边界</button><button class="resource" data-action="applications">${icon('inbox')}申请记录与材料版本</button></aside></div>
-    ${composer('接下来想推进什么？也可以贴入一个岗位链接…', '2027 秋招 · 已连接职业背景')}
-  </div>`;
+  return workbenchPage();
 }
 
 function proposalBlock(index) {
   const proposal = proposals[index];
   const decision = state.changes[index];
+  if (index === 0 && state.sharedText !== null) return `<div class="proposal-resolved"><p class="shared-copy">${escapeText(state.sharedText)}</p><span class="tag">同一份成果 · 页面草稿 ${state.sharedRevision}</span><button class="text-button" data-route="project">回工作室继续修改</button>${sharedProposalMarkup()}</div>`;
   if (state.mode !== 'review' || decision !== 'pending') return `<div class="${decision === 'pending' ? '' : 'proposal-resolved'}"><p>${escapeText(decision === 'rejected' ? proposal.old : proposal.next)}</p>${decision === 'pending' ? '' : `<div class="row between"><span class="tag ${decision === 'accepted' ? 'done' : ''}">${decision === 'accepted' ? '已接受这处修改' : '已保留原文'}</span><button class="text-button" data-action="undo-change" data-index="${index}">撤销</button></div>`}</div>`;
   return `<section class="change" aria-label="修改建议 ${index+1}"><div class="row change-header"><span>修改 ${index+1} / 2</span><span class="spacer"></span><span>表达调整</span></div><p class="change-old"><span class="sr-label">原文：</span>${proposal.old}</p><p class="change-new">${proposal.next}</p><div class="change-reason">${proposal.reason}</div><div class="change-actions row"><button class="button" data-action="accept-change" data-index="${index}">${icon('check')}接受这处</button><button class="button quiet" data-action="reject-change" data-index="${index}">保留原文</button><span class="spacer"></span><button class="text-button" data-action="evidence" data-index="${index}">查看依据 ↗</button></div></section>`;
 }
@@ -143,7 +133,7 @@ function proposalBlock(index) {
 function reviewPage() {
   const failure = state.scenario === 'save-error' ? '<div class="callout error">保存失败。你的审阅仍留在当前页面，可以重试；尚未生成可执行的新版本。<button class="text-button" data-action="recover">重试保存</button></div>' : state.scenario === 'conflict' ? '<div class="callout">背景资料已有新版本，这批建议暂不能合入。先核对变化，再重新生成提议。<button class="text-button" data-action="recover">核对并刷新提议</button></div>' : '';
   return `<div class="task-layout"><section class="task-main"><div class="document-toolbar row"><span class="filename row">${icon('file')}简历 · Agent 工程方向</span><span class="spacer"></span><div class="segmented" aria-label="文档显示方式"><button data-action="mode-review" class="${state.mode === 'review' ? 'selected' : ''}">修改建议${pendingCount() ? ' '+pendingCount() : ''}</button><button data-action="mode-read" class="${state.mode === 'read' ? 'selected' : ''}">阅读</button></div><button class="icon-button" data-action="copy" aria-label="复制纯文本">${icon('copy')}</button></div>
-    <article class="document">${failure}<div class="eyebrow">申请材料 / 星野智能 · Agent 研发</div><h1>林予</h1><p class="doc-subtitle">人工智能硕士 · 2027 届 · Agent / 推理系统</p><hr class="rule"><section class="doc-section"><h2>教育背景</h2><div class="row between"><p>南川大学 · 人工智能 · 硕士</p><small>2024.09 — 2027.06</small></div><p class="muted">研究方向：模型推理与智能系统</p></section><section class="doc-section"><h2>项目经历</h2><div class="row between"><p><strong>Atlas · 资料研究 Agent</strong></p><small>2026.03 — 至今</small></div>${proposalBlock(0)}<p>实现来源关联与内容审阅，支持用户查看依据、局部修改和继续整理。</p></section><section class="doc-section"><h2>技术能力</h2>${proposalBlock(1)}</section><p class="view-badge">${state.mode === 'read' && !resolved() ? '预览建议合入后的内容 · 尚未接受' : '当前审阅基于 v3；接受修改只生成材料版本，不授权申请。'}</p></article>
+<article class="document">${failure}<div class="eyebrow">申请材料 / 星野智能 · Agent 研发</div><h1>林予</h1><p class="doc-subtitle">人工智能硕士 · 2027 届 · Agent / 推理系统</p><hr class="rule"><section class="doc-section"><h2>教育背景</h2><div class="row between"><p>南川大学 · 人工智能 · 硕士</p><small>2024.09 — 2027.06</small></div><p class="muted">研究方向：模型推理与智能系统</p></section><section class="doc-section"><h2>项目经历</h2><div class="row between"><p><strong>Atlas · 资料研究 Agent</strong></p><small>2026.03 — 至今</small></div>${proposalBlock(0)}${state.sharedText === null ? '<p>实现来源关联与内容审阅，支持用户查看依据、局部修改和继续整理。</p>' : ''}</section><section class="doc-section"><h2>技术能力</h2>${proposalBlock(1)}</section><p class="view-badge">${state.mode === 'read' && !resolved() ? '预览建议合入后的内容 · 尚未接受' : '当前审阅基于 v3；接受修改只生成材料版本，不授权申请。'}</p></article>
     <div class="review-bottom row"><span class="muted">${resolved() ? '审阅完成 · 示例材料版本 v4' : `${pendingCount()} 处修改待决定 · 不覆盖历史申请版本`}</span><span class="spacer"></span><button class="button" data-action="accept-all" ${resolved() ? 'disabled' : ''}>接受全部</button><button class="button primary" data-action="prepare-execution" ${!resolved() || state.scenario !== 'normal' ? 'disabled' : ''}>准备申请${icon('arrow')}</button></div>
     </section>${agentPanel('review')}</div>`;
 }
@@ -235,6 +225,7 @@ function decideChange(index, decision) {
 }
 
 document.addEventListener('input', (event) => {
+  if (event.target.id === 'shared-editor') { workspaceState.sharedDraft = event.target.value; return; }
   const inputKey = event.target.dataset.workInput;
   if (inputKey) {
     workspaceState[inputKey] = event.target.value;
@@ -282,7 +273,7 @@ document.addEventListener('click', async (event) => {
   else if (action === 'accept-change') decideChange(index,'accepted');
   else if (action === 'reject-change') decideChange(index,'rejected');
   else if (action === 'undo-change') { decideChange(index,'pending'); state.execution = 'ready'; }
-  else if (action === 'accept-all') { if (state.scenario !== 'normal') toast('请先处理保存或版本问题。'); else { state.changes = ['accepted','accepted']; render(); toast('已生成示例材料 v4；没有对外提交。'); } }
+  else if (action === 'accept-all') { if (state.scenario !== 'normal') toast('请先处理保存或版本问题。'); else { state.changes = ['accepted','accepted']; if (state.sharedProposal) handleWorkbenchAction('accept-shared', target); else render(); toast('已处理本地提议；没有对外提交。'); } }
   else if (action === 'prepare-execution') { if (resolved() && state.scenario === 'normal') navigate('execution'); }
   else if (action === 'recover') { state.scenario = 'normal'; state.execution = 'ready'; render(); toast('已恢复正常演示状态。'); }
   else if (action === 'takeover') { document.getElementById('context-dialog').close(); state.humanControl = !state.humanControl; render(); toast(state.humanControl?'模拟人工接管：Agent 暂停，当前页面没有真实外部会话。':'模拟交还控制：仍等待这一次申请的授权。'); }
@@ -306,7 +297,7 @@ document.addEventListener('click', async (event) => {
   else if (action === 'add-task') { state.taskAdded = true; render(); toast('已加入本地示例项目，可回到“2027 秋招”查看。'); }
   else if (action === 'edit-profile') { state.editing = !state.editing; render(); if (state.editing) document.getElementById('profile-text').focus(); else toast('本地草稿已保留；原型未连接数据库，也未确认新事实。'); }
   else if (action === 'copy') {
-    const text = `林予\n人工智能硕士 · 2027 届\n\n项目经历\nAtlas · 资料研究 Agent\n${state.changes[0]==='rejected'?proposals[0].old:proposals[0].next}\n\n技术能力\n${state.changes[1]==='rejected'?proposals[1].old:proposals[1].next}`;
+    const text = `林予\n人工智能硕士 · 2027 届\n\n项目经历\nAtlas · 资料研究 Agent\n${sharedMaterialText()}\n\n技术能力\n${state.changes[1]==='rejected'?proposals[1].old:proposals[1].next}`;
     try { await navigator.clipboard.writeText(text); toast('已复制纯文本，不包含 Markdown 标记。'); }
     catch { showDialog('纯文本内容',`<textarea aria-label="可复制的纯文本" rows="12" style="width:100%;margin-top:16px">${escapeText(text)}</textarea>`); }
   }

@@ -1,4 +1,5 @@
 const workspaceState = {
+  shape: 'studio', workFocus: 'material', sharedDraft: '', handoffNote: '',
   applicationQuery: '', applicationStage: '全部', selectedApplication: 'xc-21', preparationApplication: 'xc-21',
   libraryTab: '全部', preparationTab: '计划', activeMessage: 'hr', searchQuery: '',
   projectMilestone: false, decision: '', factConfirmed: false, growthSaved: false, growthDraft: '',
@@ -226,12 +227,18 @@ function settingsPage() {
 }
 
 function assistantPage() {
-  return `<div class="collection-page">${workspaceHeader('与 CareerAct 一起工作','讨论方向、查找进展、整理材料或继续准备，使用同一份职业上下文。')}
-    <div class="context-strip">当前项目：2027 秋招 · 已确认背景 v3 · 可选择相关资料</div><div class="intent-links">${[['applications','查一次申请的进度'],['review','把实习写清楚'],['preparation','准备下一场面试'],['decisions','讨论职业选择'],['growth','整理工作成果']].map(([route,label])=>`<button class="button" data-work-action="intent" data-value="${route}">${label}</button>`).join('')}</div>
-    ${workspaceState.conversation.map(turn=>`<article class="conversation-turn"><small>${turn.role === 'user' ? '你的委托' : 'CareerAct · 原型预览'}</small><p>${escapeText(turn.text)}</p>${turn.route ? `<button class="button" data-route="${turn.route}">打开相关工作${icon('arrow')}</button>` : ''}</article>`).join('')}
-    ${composer('告诉我你现在需要解决的职业问题…','阶段目标 · 相关资料 · 历史决定')}
-  </div>`;
+  return partnerDesk();
 }
+
+function partnerDesk() {
+  const research = workspaceState.tasks.find(task => task.id === 'research');
+  const active = ['accepted','running'].includes(research.status);
+  return `<div class="collection-page partner-desk"><div class="partner-identity">${icon('raven')}<div><div class="eyebrow">你的职业行动伙伴</div><h1>渡鸦</h1><p>跟住目标，做完工作，把需要你决定的事带回来。</p></div></div>
+    <div class="partner-controls"><button class="button" data-work-action="partner-memory">我依据哪些背景</button><button class="button" data-route="automations">安排持续职责</button><button class="button" data-route="reports">看已交付的结果</button></div>
+    <div class="section-split"><section><h2>我正在跟进</h2><button class="work-row" data-route="opportunities">${icon('globe')}<span><strong>${research.title}</strong><small>${taskStatusNames[research.status]} · ${research.result}</small></span></button><div class="action-strip"><button class="button" data-work-action="${active ? 'pause-task' : 'resume-task'}" data-id="research">${active ? '暂停这项工作' : '重新受理这项工作'}</button><button class="text-button" data-route="tasks">全部任务与异常</button></div><p class="muted">定期关注目前${workspaceState.automationStatus}。暂停这次工作与关闭长期职责分别管理。</p></section><section><h2>需要你决定</h2><button class="work-row" data-work-action="open-work" data-value="material">${icon('edit')}<span><strong>星野的申请材料</strong><small>${pendingCount()} 处提议待审阅 · 尚未提交</small></span></button><button class="work-row" data-route="inbox">${icon('clock')}<span><strong>能否承诺下周到岗？</strong><small>涉及你的时间安排，不能代你决定</small></span></button></section></div>
+    <details class="delegation-history"><summary>已保留的委托与上下文 · ${workspaceState.conversation.length / 2} 项</summary>${workspaceState.conversation.map(turn=>`<div class="conversation-turn"><small>${turn.role === 'user' ? '你' : '渡鸦'}</small><p>${escapeText(turn.text)}</p>${turn.route ? `<button class="button" data-route="${turn.route}">继续这项工作</button>` : ''}</div>`).join('') || '<p class="muted">还没有新的委托。直接说出希望推进的工作。</p>'}</details><div class="context-strip">同一个伙伴，工作在不同项目与成果之间延续。下方委托会选择去向，原型不进行模型推断。</div>${composer('查一下我的申请进展，或者换一个本周重点…','职业目标 · 已确认背景 · 历史决定')}</div>`;
+}
+
 
 const workspacePages = {applications:applicationsPage,application:applicationPage,inbox:inboxPage,calendar:calendarPage,preparation:preparationPage,interviews:interviewsPage,decisions:decisionsPage,growth:growthPage,library:libraryPage,plan:planPage,tasks:tasksPage,automations:automationsPage,reports:reportsPage,settings:settingsPage,assistant:assistantPage};
 
@@ -249,6 +256,7 @@ function handleWorkspaceAction(action, target) {
   const close = () => document.getElementById('context-dialog').close();
   const value = target.dataset.value;
   const selected = () => workspaceState.applications.find(item=>item.id === workspaceState.selectedApplication);
+  if (handleWorkbenchAction(action, target)) return;
   if (action === 'open-application') { workspaceState.selectedApplication = target.dataset.id; navigate('application'); }
   else if (action === 'library-tab') { workspaceState.libraryTab = value; render(); }
   else if (action === 'preparation-tab') { workspaceState.preparationTab = value; render(); }
@@ -344,5 +352,102 @@ function handleWorkspaceForm(event) {
   workspaceState.automationMaterial = values.get('material');
   workspaceState.automationLimit = Number(values.get('limit'));
   workspaceDialog('审阅托管范围',`<p>来源：${escapeText(channels.join('、'))}</p><p>范围：${escapeText(workspaceState.automationScope)}</p><p>动作：只读巡检与整理${workspaceState.automationActions.length ? '；'+escapeText(workspaceState.automationActions.join('、')) : '；所有对外动作关闭'}</p><p>材料：${escapeText(workspaceState.automationMaterial)}</p><p>${workspaceState.automationFrequency} · 每日最多 ${workspaceState.automationLimit} 次 · 至 ${workspaceState.automationExpiry}</p><p>仅模拟授权；实际平台、调度、预算与风控校验尚未接入。</p>`,'confirm-automation','确认这份样例授权');
+  return true;
+}
+
+function sharedMaterialText() {
+  return state.sharedText ?? (state.changes[0] === 'accepted' ? proposals[0].next : proposals[0].old);
+}
+
+function shapePicker() {
+  return `<nav class="shape-picker" aria-label="候选产品形态"><span>形态评审</span>${[['studio','共创工作室 · 推荐'],['partner','常驻职业伙伴'],['path','职业路线']].map(([value,label])=>`<button data-work-action="choose-shape" data-value="${value}" aria-pressed="${workspaceState.shape === value}">${label}</button>`).join('')}</nav>`;
+}
+
+function partnerPresence() {
+  return `<div class="partner-presence"><span class="partner-symbol">${icon('raven')}</span><div><strong>渡鸦</strong><small>职业行动伙伴 · ${workspaceState.tasks.filter(task=>task.status === 'running').length} 项工作推进中</small></div><span class="spacer"></span><button class="text-button" data-work-action="partner-memory">我依据哪些背景</button><button class="text-button" data-route="assistant">我的职责 ${icon('arrow')}</button></div>`;
+}
+
+function workbenchPage() {
+  const shape = workspaceState.shape;
+  return `<div class="workbench-page">${shapePicker()}<header class="workbench-heading"><div class="eyebrow">2027 秋招 · 当前目标</div><div class="row between"><h1>进入 Agent 与系统研发岗位</h1><button class="button quiet" data-action="constraints">调整方向 ${icon('target')}</button></div><p>上海 / 杭州　·　校招与对口实习并行　·　优先积累可迁移的工程能力</p></header>${projectViews()}${partnerPresence()}
+    ${shape === 'partner' ? partnerLanding() : shape === 'path' ? careerPath() : studioSurface()}
+    <div class="workbench-footer">${composer('交给渡鸦一件事，或告诉它哪里需要调整…','当前项目 · 本次工作 · 已确认背景')}<div class="intent-row"><button data-work-action="open-work" data-value="opportunities">找一手机会</button><button data-work-action="open-work" data-value="material">一起改材料</button><button data-work-action="open-work" data-value="preparation">准备一次面试</button><button data-route="growth">沉淀一段经历</button></div></div></div>`;
+}
+
+function partnerLanding() {
+  return `<section class="partner-brief"><div class="eyebrow">带回给你的工作简报 · 虚构样例</div><h2>申请准备好了；到岗时间，还需要你的判断。</h2><p>星野的岗位强调执行可靠性，我找到了相关项目证据。序川已进入面试，准备会引用当时投出的推理方向 v2，而不是最新简历。</p><div class="brief-actions"><button class="button primary" data-work-action="open-work" data-value="material">一起审阅申请 ${icon('arrow')}</button><button class="button" data-route="inbox">决定到岗回复</button></div></section><div class="section-split"><section><h2>我可以持续负责</h2><button class="work-row" data-route="automations">${icon('globe')}<span><strong>关注指定官网的岗位变化</strong><small>${workspaceState.automationStatus} · 来源、期限与通知条件由你设置</small></span></button><button class="work-row" data-route="automations">${icon('inbox')}<span><strong>整理招聘沟通与待办</strong><small>对外回复默认关闭，时间承诺带回给你</small></span></button></section><section><h2>最近交付</h2><button class="work-row" data-work-action="open-work" data-value="opportunities">${icon('file')}<span><strong>本周一手机会简报</strong><small>3 个候选 · 1 个来源未核实</small></span></button><button class="work-row" data-route="reports">${icon('file')}<span><strong>求职回顾与下一步</strong><small>含失败与跳过，不能当作全部完成</small></span></button></section></div>`;
+}
+
+function careerPath() {
+  const stages = [
+    ['01','发现合适机会','已有岗位判断；职责未知处继续核实','opportunities'],
+    ['02','让经历说服目标团队','有事实来源的表达，不扩充不存在的经验','review'],
+    ['03','推进每一次申请','材料快照、流程状态与下一步保持关联','applications'],
+    ['04','把薄弱项变为能力','从实际投出的版本练习，记录反馈与复测','preparation'],
+    ['05','做选择，积累下一段经历','Offer 判断与入职成果回到长期职业背景','growth'],
+  ];
+  return `<section class="career-route"><div class="row between"><h2>一条正在形成的职业路线</h2><button class="text-button" data-route="plan">看里程碑</button></div><p>这是行动与证据之间的关系；不预测录用概率，不替你选择人生。</p>${stages.map(([number,title,description,route])=>`<button class="route-stage" data-route="${route}"><span class="route-number">${number}</span><span><strong>${title}</strong><small>${description}</small></span>${icon('arrow')}</button>`).join('')}</section>`;
+}
+
+function studioSurface() {
+  const focus = workspaceState.workFocus;
+  return `<div class="studio-grid"><section class="shared-workspace" aria-label="人与 Agent 的共同工作面"><nav class="work-switcher" aria-label="切换当前工作">${[['material','申请准备'],['opportunities','机会简报'],['preparation','面试准备']].map(([value,label])=>`<button data-work-action="focus-work" data-value="${value}" aria-pressed="${focus===value}">${label}</button>`).join('')}</nav>${focus === 'material' ? sharedMaterialSurface() : focus === 'opportunities' ? researchSurface() : preparationSurface()}</section><aside class="studio-aside"><div class="eyebrow">需要你决定</div><button class="decision-item" data-route="review"><span class="decision-marker">${icon('edit')}</span><span><strong>申请材料的表达</strong><small>${pendingCount()} 处建议 · 审阅后继续</small></span>${icon('arrow')}</button><button class="decision-item" data-route="inbox"><span class="decision-marker">${icon('clock')}</span><span><strong>下周能否到岗？</strong><small>涉及时间承诺，由你决定</small></span>${icon('arrow')}</button><div class="aside-heading">继续的工作</div><button class="context-item" data-route="applications">${icon('inbox')}查找每一次申请</button><button class="context-item" data-route="preparation">${icon('book')}算法、面经与项目讲述</button><button class="context-item" data-route="portfolio">${icon('folder')}推进工程代表作</button><div class="aside-heading">随工作带来的背景</div><button class="context-item" data-route="background">${icon('layers')}已确认职业背景 v3</button><button class="context-item" data-route="library">${icon('file')}原件、材料与锁定快照</button><button class="context-item" data-work-action="partner-memory">${icon('target')}目标、约束与历史决定</button></aside></div>`;
+}
+
+function sharedMaterialSurface() {
+  const proposal = state.sharedProposal;
+return `<div class="shared-work-header"><span class="tag attention">${proposal ? '等你审阅' : state.sharedEditing ? '你在编辑' : '共同准备中'}</span><small>星野智能 · Agent 研发 · 尚未对外提交</small><h2>把做过的事，变成有依据的表达</h2><p>同一份成果，你可以直接改，渡鸦接着你的修改继续工作。</p></div><div class="shared-toolbar"><span>${icon('file')} 申请材料 / 项目经历</span><button class="text-button" data-work-action="${state.sharedEditing ? 'save-shared' : 'edit-shared'}">${state.sharedEditing ? '保留我的修改' : '我来改'}</button><button class="text-button" data-route="review">全文与修改建议 ${icon('external')}</button></div><article class="shared-document"><div class="document-kicker">ATLAS / PROJECT EXPERIENCE</div><h3>资料研究 Agent</h3>${state.sharedEditing ? `<label class="sr-label" for="shared-editor">共同成果正文</label><textarea id="shared-editor" aria-label="共同成果正文">${escapeText(workspaceState.sharedDraft)}</textarea>` : `<p class="shared-copy">${escapeText(sharedMaterialText())}</p>`}<div class="evidence-line">${icon('link')} 依据：项目记录 §3 · 事实已确认，表达仍可修改</div>${sharedProposalMarkup()}</article><div class="handoff-bar"><span>${workspaceState.handoffNote || '你的修改 → Agent 提议 → 由你审阅'}</span><button class="button primary" data-work-action="continue-shared" ${state.sharedEditing || !!proposal ? 'disabled' : ''}>交给渡鸦继续 ${icon('arrow')}</button></div>`;
+}
+
+function researchSurface() {
+  return `<div class="shared-work-header"><span class="tag">调研成果</span><h2>一手机会，直接对照你的目标</h2><p>优先企业官网与官方招聘源。信息不足时保留问题，继续研究。</p></div><div class="research-preview"><h3>星野智能 · Agent 研发工程师</h3><p>岗位强调工具调用和可靠执行，与你的项目证据相关。</p><div class="evidence-line">官网岗位页 · 编号 XY-18 · 示例来源</div><div class="callout">仍需核实：团队实际研发与交付职责比例。</div><button class="button" data-route="opportunities">打开完整研究与候选 ${icon('arrow')}</button><button class="button primary" data-work-action="focus-work" data-value="material">带着岗位准备材料</button></div>`;
+}
+
+function sharedProposalMarkup() {
+  if (!state.sharedProposal) return '';
+  return `<section class="inline-proposal" aria-label="接着用户修改的提议"><div class="row between"><strong>接着当前正文补充证据</strong><span class="tag">待接受</span></div><p class="muted">保留当前内容，建议追加：</p><p class="proposal-addition">+ ${escapeText(state.sharedProposal.addition)}</p><small>来自已有项目证据 · 固定示例，未调用模型</small><div class="action-strip"><button class="button primary" data-work-action="accept-shared">接受补充</button><button class="button" data-work-action="reject-shared">保留我的版本</button></div></section>`;
+}
+
+function preparationSurface() {
+  return `<div class="shared-work-header"><span class="tag live">准备中</span><h2>从实际投出的经历开始练习</h2><p>序川 · 技术一面 · 推理方向 v2；历史快照不随最新简历改变。</p></div><div class="research-preview"><h3>如何解释 Agent 任务失败后的恢复？</h3><p>把执行流程、恢复边界、结果核验分别讲清楚。准备不止一份讲稿，还要记录回答、反馈和复测。</p><div class="evidence-line">来源：实投材料 · JD · 已记录的薄弱项</div><div class="action-strip"><button class="button primary" data-route="preparation">打开准备与练习 ${icon('arrow')}</button><button class="button" data-route="interviews">模拟一轮问答</button></div></div>`;
+}
+
+function handleWorkbenchAction(action, target) {
+  if (action === 'choose-shape') { workspaceState.shape = target.dataset.value; render(); }
+  else if (action === 'focus-work' || action === 'open-work') {
+    if (state.sharedEditing) {
+      toast('先保留正文修改，再切换工作；当前输入不会丢失。');
+      return true;
+    }
+    workspaceState.workFocus = target.dataset.value;
+    workspaceState.shape = 'studio';
+    if (state.route !== 'project') navigate('project'); else render();
+  }
+  else if (action === 'edit-shared') { workspaceState.sharedDraft = sharedMaterialText(); state.sharedEditing = true; render(); document.getElementById('shared-editor').focus(); }
+  else if (action === 'save-shared') {
+    const text = workspaceState.sharedDraft.trim();
+    if (!text) { toast('正文不能为空；输入仍保留在编辑器。'); return true; }
+    state.sharedText = text; state.sharedRevision += 1; state.sharedEditing = false; state.changes[0] = 'rejected';
+    workspaceState.handoffNote = '你的页面草稿已保留，尚未保存到服务器。'; render();
+  }
+  else if (action === 'continue-shared') {
+    const addition = '实现来源关联与内容审阅，让用户可以查看依据、局部修改并继续整理成果。';
+    if (sharedMaterialText().includes(addition)) { toast('这条已有证据已经写入，未重复添加。'); return true; }
+    if (state.sharedText === null) { state.sharedText = sharedMaterialText(); state.changes[0] = 'rejected'; }
+    state.sharedProposal = {before:sharedMaterialText(),revision:state.sharedRevision,addition};
+    workspaceState.handoffNote = '我保留了你的修改，只提出一处有来源的补充。'; render();
+  }
+  else if (action === 'accept-shared') {
+    if (state.sharedProposal.revision !== state.sharedRevision) { toast('正文已变化，旧提议不能合入；请重新交还。'); state.sharedProposal = null; render(); return true; }
+    state.sharedText = `${state.sharedProposal.before}\n\n${state.sharedProposal.addition}`; state.sharedRevision += 1; state.sharedProposal = null; state.changes[0] = 'accepted';
+    workspaceState.handoffNote = '补充已进入同一份页面草稿，全文中可以继续找到。'; render();
+  }
+  else if (action === 'reject-shared') { state.sharedProposal = null; workspaceState.handoffNote = '保留你的版本，未应用补充。'; render(); }
+  else if (action === 'partner-memory') workspaceDialog('渡鸦依据哪些背景', '<p>记忆是有来源、可纠正的工作背景，不是完整聊天记录。</p><dl class="detail-list"><dt>已确认事实</dt><dd>Atlas 项目实现工具调用、任务恢复与结果核验。<button class="text-button" data-route="background">查看事实与证据</button></dd><dt>当前目标</dt><dd>Agent 与系统研发；上海 / 杭州。<button class="text-button" data-route="plan">调整目标</button></dd><dt>历史决定</dt><dd>实习与正职并行考虑；不覆盖历史申请版本。<button class="text-button" data-route="decisions">查看决定与理由</button></dd><dt>待确认</dt><dd>下周到岗时间尚未确认；不能写成对外承诺。</dd></dl><p>这些均为虚构资料。实际实现按当前任务选取来源与版本，私人内容不自动共享。</p>');
+  else if (action === 'capability-map') {
+    const groups = [['目标与长期积累',[['plan','规划与里程碑'],['background','职业事实与证据'],['portfolio','工程作品项目'],['growth','能力账本与入职成长']]],['机会与求职行动',[['opportunities','发现与判断机会'],['review','材料协作与版本'],['execution','网申与人工接管'],['applications','申请查询与状态历史'],['inbox','招聘沟通与通知'],['calendar','日程与提醒'],['decisions','Offer 与职业选择']]],['准备与职业 Agent',[['preparation','公司研究、面经与算法训练'],['practice','项目讲述'],['interviews','中英文 / 语音模拟面试'],['assistant','Agent 职责与委托'],['library','原件、资料与成果']]],['运行与边界',[['tasks','后台任务与异常'],['automations','持续托管与授权'],['reports','结果与敏感操作记录'],['settings','账户、模型与来源连接']]]];
+    workspaceDialog('完整职业工作区', `<p>所有能力保留入口；交互样例与后端待接能力分别标注。</p><div class="capability-grid">${groups.map(([title,items])=>`<section><h3>${title}</h3>${items.map(([route,label])=>`<button class="context-item" data-route="${route}">${icon('arrow')}${label}</button>`).join('')}</section>`).join('')}</div>`);
+  }
+  else return false;
   return true;
 }
