@@ -1,13 +1,15 @@
 "use client";
 
-import { useId, useState, type ReactNode } from "react";
+import { useCallback, useId, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { ArrowRight, Bird, Check, ChevronRight, LockKeyhole, PanelTop, Search } from "lucide-react";
 
 import { AgentAction } from "@/components/workspace-actions";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { navigationHref, workspaceSections, type WorkspaceSection } from "@/components/workspace-sections";
 import { WorkspaceProjects } from "@/components/workspace-projects";
+import { WorkspaceMemories as MemoryWorkspace } from "@/components/workspace-memories";
 import { cn } from "@/lib/utils";
 
 function SurfaceHeader({ title, description, action }: { title: string; description: string; action?: ReactNode }) {
@@ -155,8 +157,17 @@ function InterviewSurface() {
 
 function PartnerSurface() {
   const [view, setView] = useState("共同工作");
-  return <><SurfaceHeader title="渡鸦 · 职业伙伴" description="围绕同一份职业背景持续协作。记住什么、依据什么、完成什么、什么时候需要你，都应该能核对。" action={<AgentAction>打开伙伴对话</AgentAction>} /><Unavailable>当前仅接通用对话；长期规则、职业读取工具、工作记录与刷新恢复尚未接入。</Unavailable><ViewPicker options={["共同工作", "背景与规则", "持续职责"]} value={view} onChange={setView} label="伙伴工作视图" /><div className="mt-5 rounded-xl border"><div className="flex items-center gap-3 border-b px-5 py-4"><Bird className="size-5" /><div><h2 className="text-sm font-medium">协作从你的目标开始</h2><p className="mt-1 text-xs text-muted-foreground">待命不表示正在后台运行</p></div></div><EmptyWork title={view === "共同工作" ? "给出想法，审阅伙伴带回的成果" : view === "背景与规则" ? "可纠正、有来源的长期上下文" : "持续职责需要独立的范围与授权"} description={view === "共同工作" ? "创作、反馈、再修改和审阅围绕同一对象展开；对话只是协作入口。" : view === "背景与规则" ? "已确认事实、目标、约束、注意事项与个人决定分别维护。伙伴推断先作为提议，确认后才生效。" : "一次工作不会自动变成托管；频率、到期、允许动作和暂停状态始终可以查看。"} /></div><RelatedWork sections={view === "背景与规则" ? ["background", "projects", "growth"] : ["tasks", "automations", "reports"]} /></>;
+  const [pendingView, setPendingView] = useState<string | null>(null);
+  const memoryDirty = useRef(false);
+  const reportDirty = useCallback((dirty: boolean) => { memoryDirty.current = dirty; }, []);
+  function changeView(next: string) {
+    if (next === view) return;
+    if (memoryDirty.current) { setPendingView(next); return; }
+    setView(next);
+  }
+  return <><SurfaceHeader title="渡鸦 · 职业伙伴" description="围绕同一份职业背景持续协作。记住什么、依据什么、完成什么、什么时候需要你，都应该能核对。" action={<AgentAction>打开伙伴对话</AgentAction>} /><ViewPicker options={["共同工作", "背景与规则", "持续职责"]} value={view} onChange={changeView} label="伙伴工作视图" />{view === "背景与规则" ? <MemoryWorkspace onDirtyChange={reportDirty} /> : <><Unavailable>当前仅接通用对话；工作记录与持续职责尚未接入。</Unavailable><div className="mt-5 rounded-xl border"><div className="flex items-center gap-3 border-b px-5 py-4"><Bird className="size-5" /><div><h2 className="text-sm font-medium">协作从你的目标开始</h2><p className="mt-1 text-xs text-muted-foreground">待命不表示正在后台运行</p></div></div><EmptyWork title={view === "共同工作" ? "给出想法，审阅伙伴带回的成果" : "持续职责需要独立的范围与授权"} description={view === "共同工作" ? "创作、反馈、再修改和审阅围绕同一对象展开；对话只是协作入口。" : "一次工作不会自动变成托管；频率、到期、允许动作和暂停状态始终可以查看。"} /></div></>}<RelatedWork sections={view === "背景与规则" ? ["background", "projects", "growth"] : ["tasks", "automations", "reports"]} /><Dialog open={pendingView !== null} onOpenChange={open => { if (!open) setPendingView(null); }}><DialogContent><DialogHeader><DialogTitle>还有未保存的记录</DialogTitle><DialogDescription>切换视图会放弃本次输入。已保存的规则和笔记仍保留。</DialogDescription></DialogHeader><DialogFooter><Button variant="outline" onClick={() => setPendingView(null)}>继续编辑</Button><Button onClick={() => { if (pendingView) setView(pendingView); setPendingView(null); }}>放弃输入并切换</Button></DialogFooter></DialogContent></Dialog></>;
 }
+
 
 function AutomationSurface() {
   const [duty, setDuty] = useState("岗位关注");

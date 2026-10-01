@@ -5,6 +5,12 @@ from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from services.api.domain.memory import (
+    MemoryConflict,
+    MemoryInvalid,
+    MemoryNotFound,
+    MemoryUnavailable,
+)
 from services.api.domain.privacy import RestrictedContent
 from services.api.domain.profile import ProfileConflict, ProfileUnavailable
 from services.api.domain.project import (
@@ -27,6 +33,8 @@ async def profile_error(request: Request, error: Exception) -> JSONResponse:
             return await project_error(request, error)
         if request.url.path.startswith("/api/v1/agent"):
             return await work_session_error(request, error)
+        if request.url.path.startswith("/api/v1/memories"):
+            return await memory_error(request, error)
         if request.url.path.startswith(("/agui", "/api/v1/")):
             return JSONResponse(
                 {
@@ -122,6 +130,32 @@ async def work_session_error(request: Request, error: Exception) -> JSONResponse
             "agent_session_unavailable",
             "伙伴工作暂时无法保存，请稍后重试。",
         )
+    else:
+        raise error
+    return JSONResponse(
+        status_code=status,
+        content={
+            "error": {
+                "code": code,
+                "message": message,
+                "request_id": getattr(request.state, "request_id", str(uuid4())),
+            }
+        },
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+async def memory_error(request: Request, error: Exception) -> JSONResponse:
+    if isinstance(error, RequestValidationError):
+        status, code, message = 422, "invalid_memory", "请检查规则或笔记的标题、内容和版本。"
+    elif isinstance(error, MemoryInvalid):
+        status, code, message = 422, "invalid_memory", "规则或笔记内容无效，请检查后重试。"
+    elif isinstance(error, MemoryNotFound):
+        status, code, message = 404, "memory_not_found", "找不到该规则或笔记。"
+    elif isinstance(error, MemoryConflict):
+        status, code, message = 409, "memory_conflict", "内容已有更新，请读取最新版本后再操作。"
+    elif isinstance(error, MemoryUnavailable):
+        status, code, message = 503, "memory_unavailable", "规则与笔记服务暂不可用，请稍后重试。"
     else:
         raise error
     return JSONResponse(

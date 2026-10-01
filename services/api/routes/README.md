@@ -34,3 +34,15 @@ first checks that association, then returns only the current user's `user`/`assi
 text messages from the Agent runtime. Framework history, tool messages, and another
 user's session are not exposed; session history is treated as career data and responses
 are not cached.
+
+`/api/v1/memories` stores user-owned notes and rule candidates. A new item is always
+`candidate`; only an explicit `POST /api/v1/memories/{id}/confirm` with the current
+version can make a rule effective. `POST /api/v1/memories/{id}/retire` removes an item
+from default reads while retaining the soft-retired row. Updates are conditional on the
+opaque version; editing a confirmed rule returns it to `candidate` until it is explicitly
+confirmed again. All reads/writes are scoped to the verified user.
+Project associations are checked against that same user inside the write transaction.
+A client can supply a stable create ID; replay requires identical title, content, kind,
+source and project, and a retired or mismatched record returns 409. Notes stay unconfirmed
+and cannot use the rule-confirmation endpoint. Only the current text and soft-retired row
+are retained; this is not a revision audit log. Agent access is separate work.

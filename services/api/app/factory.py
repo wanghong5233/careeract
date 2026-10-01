@@ -6,9 +6,16 @@ from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 
 from services.api.app.settings import Settings
+from services.api.application.memories import MemoryService
 from services.api.application.profiles import ProfileService
 from services.api.application.projects import ProjectService
 from services.api.application.work_sessions import AgentWorkSessionService
+from services.api.domain.memory import (
+    MemoryConflict,
+    MemoryInvalid,
+    MemoryNotFound,
+    MemoryUnavailable,
+)
 from services.api.domain.privacy import RestrictedContent
 from services.api.domain.profile import ProfileConflict, ProfileUnavailable
 from services.api.domain.project import (
@@ -27,17 +34,20 @@ from services.api.infrastructure.agent_runtime import build_agent_os
 from services.api.infrastructure.agent_sessions import AgnoAgentHistoryReader
 from services.api.infrastructure.authentication import JwtAuthenticationMiddleware
 from services.api.infrastructure.database import create_engine
+from services.api.infrastructure.memories import PostgresMemoryRepository
 from services.api.infrastructure.privacy import PrivacyBoundaryMiddleware
 from services.api.infrastructure.profiles import PostgresProfileRepository
 from services.api.infrastructure.projects import PostgresProjectRepository
 from services.api.infrastructure.work_sessions import PostgresAgentWorkSessionRepository
 from services.api.routes.agent_sessions import router as agent_session_router
 from services.api.routes.errors import (
+    memory_error,
     privacy_error,
     profile_error,
     project_error,
     work_session_error,
 )
+from services.api.routes.memories import router as memories_router
 from services.api.routes.profiles import router as profile_router
 from services.api.routes.projects import router as project_router
 from services.api.routes.system import router as system_router
@@ -73,6 +83,7 @@ def create_app(
     app.router.lifespan_context = lifespan
     app.state.profile_service = ProfileService(PostgresProfileRepository(engine))
     app.state.project_service = ProjectService(PostgresProjectRepository(engine))
+    app.state.memory_service = MemoryService(PostgresMemoryRepository(engine))
     app.state.agent_work_session_service = AgentWorkSessionService(
         PostgresAgentWorkSessionRepository(engine)
     )
@@ -99,6 +110,7 @@ def create_app(
     app.include_router(profile_router)
     app.include_router(project_router)
     app.include_router(agent_session_router)
+    app.include_router(memories_router)
     app.add_exception_handler(ProfileConflict, profile_error)
     app.add_exception_handler(ProfileUnavailable, profile_error)
     app.add_exception_handler(ProjectConflict, project_error)
@@ -109,6 +121,10 @@ def create_app(
     app.add_exception_handler(WorkSessionNotFound, work_session_error)
     app.add_exception_handler(WorkSessionUnavailable, work_session_error)
     app.add_exception_handler(WorkSessionHistoryUnavailable, work_session_error)
+    app.add_exception_handler(MemoryConflict, memory_error)
+    app.add_exception_handler(MemoryInvalid, memory_error)
+    app.add_exception_handler(MemoryNotFound, memory_error)
+    app.add_exception_handler(MemoryUnavailable, memory_error)
     app.add_exception_handler(RequestValidationError, profile_error)
     app.add_exception_handler(RestrictedContent, privacy_error)
     return app

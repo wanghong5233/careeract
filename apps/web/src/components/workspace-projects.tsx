@@ -18,7 +18,7 @@ import { cn } from "@/lib/utils";
 
 const inputClass = "h-10 w-full rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
-function useDraftGuard(dirty: boolean) {
+export function useDraftGuard(dirty: boolean) {
   useEffect(() => {
     if (!dirty) return;
     const beforeUnload = (event: BeforeUnloadEvent) => event.preventDefault();
