@@ -7,13 +7,22 @@ from fastapi.exceptions import RequestValidationError
 
 from services.api.app.settings import Settings
 from services.api.application.profiles import ProfileService
+from services.api.application.projects import ProjectService
 from services.api.domain.profile import ProfileConflict, ProfileUnavailable
+from services.api.domain.project import (
+    ProjectConflict,
+    ProjectInvalid,
+    ProjectNotFound,
+    ProjectUnavailable,
+)
 from services.api.infrastructure.agent_runtime import build_agent_os
 from services.api.infrastructure.authentication import JwtAuthenticationMiddleware
 from services.api.infrastructure.database import create_engine
 from services.api.infrastructure.profiles import PostgresProfileRepository
-from services.api.routes.errors import profile_error
+from services.api.infrastructure.projects import PostgresProjectRepository
+from services.api.routes.errors import profile_error, project_error
 from services.api.routes.profiles import router as profile_router
+from services.api.routes.projects import router as project_router
 from services.api.routes.system import router as system_router
 
 PUBLIC_PATHS = frozenset({"/health", "/docs", "/openapi.json"})
@@ -46,6 +55,7 @@ def create_app(
 
     app.router.lifespan_context = lifespan
     app.state.profile_service = ProfileService(PostgresProfileRepository(engine))
+    app.state.project_service = ProjectService(PostgresProjectRepository(engine))
     app.state.settings = settings
     app.state.agent_os = agent_os
     app.add_middleware(
@@ -60,7 +70,12 @@ def create_app(
     )
     app.include_router(system_router)
     app.include_router(profile_router)
+    app.include_router(project_router)
     app.add_exception_handler(ProfileConflict, profile_error)
     app.add_exception_handler(ProfileUnavailable, profile_error)
+    app.add_exception_handler(ProjectConflict, project_error)
+    app.add_exception_handler(ProjectInvalid, project_error)
+    app.add_exception_handler(ProjectNotFound, project_error)
+    app.add_exception_handler(ProjectUnavailable, project_error)
     app.add_exception_handler(RequestValidationError, profile_error)
     return app

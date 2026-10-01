@@ -19,3 +19,10 @@ It performs a conditional replacement in one transaction, without external side 
 or automatic retries. A stale version or racing first creation returns 409. The owner
 cannot be supplied in JSON; no endpoint accepts another user's profile ID. Only the
 current version is retained. Version history and Agent access are separate work.
+
+`GET /api/v1/projects` lists the authenticated user's projects with an opaque cursor;
+`POST /api/v1/projects` creates a planned project; `GET /api/v1/projects/{id}` and
+`PATCH /api/v1/projects/{id}` read or conditionally update one project. The owner is
+always taken from the verified token, never from the request body. Updates require the
+current `version`; another user's ID is indistinguishable from not found, and stale
+writes return 409. Project milestones, tasks and Agent context are separate work.

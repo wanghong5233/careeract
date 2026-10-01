@@ -7,6 +7,7 @@ import { ArrowRight, Bird, Check, ChevronRight, LockKeyhole, PanelTop, Search } 
 import { AgentAction } from "@/components/workspace-actions";
 import { Button } from "@/components/ui/button";
 import { navigationHref, workspaceSections, type WorkspaceSection } from "@/components/workspace-sections";
+import { WorkspaceProjects } from "@/components/workspace-projects";
 import { cn } from "@/lib/utils";
 
 function SurfaceHeader({ title, description, action }: { title: string; description: string; action?: ReactNode }) {
@@ -109,12 +110,8 @@ function ContentSurface({ section }: { section: ContentSection }) {
 }
 
 function ProjectSurface() {
-  const [view, setView] = useState("当前项目");
   return <>
-    <SurfaceHeader title="职业项目" description="一个阶段目标，一组持续推进的工作，以及可以带到下一阶段的成果。" action={<AgentAction prompt="我想建立一个职业项目。请先问我阶段目标、时间范围、约束和成功标准，再讨论里程碑；目前先形成建议，不要声称已经保存项目。">讨论一个新目标</AgentAction>} />
-    <Unavailable>项目持久化尚未接入。目标讨论不会自动创建或保存项目。</Unavailable>
-    <ViewPicker options={["当前项目", "阶段路线", "已归档"]} value={view} onChange={setView} label="项目视图" />
-    <div className="mt-5 rounded-xl border"><div className="flex flex-wrap gap-5 border-b px-5 py-4">{["目标与约束", "共同工作", "成果与证据", "复盘与下一步"].map((label, index) => <span key={label} className="flex items-center gap-2 text-xs text-muted-foreground"><span className="grid size-5 place-items-center rounded-full bg-muted text-[10px]">{index + 1}</span>{label}</span>)}</div><EmptyWork title={view === "当前项目" ? "先确定一个要持续推进的目标" : view === "阶段路线" ? "每次行动都能回到更长的职业路线" : "保留一个阶段的成果与决定"} description="求职、代表作、能力提升和入职成长都可以成为项目；职业背景和长期资产在项目之间复用。" /></div>
+    <WorkspaceProjects />
     <RelatedWork sections={["background", "growth", "tasks", "decisions"]} />
   </>;
 }

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ArrowRight, FileText, FolderKanban, Layers3 } from "lucide-react";
 
 import { AgentAction, CapabilitiesAction } from "@/components/workspace-actions";
+import { WorkspaceHomeProject } from "@/components/workspace-home-project";
 import { WorkspaceSurface } from "@/components/workspace-surfaces";
 import { workspaceSections, type WorkspaceSection } from "@/components/workspace-sections";
 
@@ -11,10 +12,7 @@ export function WorkspaceHome() {
       <div><p className="mb-2 text-xs text-muted-foreground">个人职业工作区</p><h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">现在，一起推进什么？</h1></div>
       <AgentAction>和职业伙伴开始</AgentAction>
     </div>
-    <section aria-labelledby="current-project-heading" className="border-y py-7">
-      <div className="flex items-center justify-between gap-4"><h2 id="current-project-heading" className="text-sm font-medium">当前职业项目</h2><Link href="/workspace/projects" className="text-xs text-muted-foreground underline underline-offset-4">全部项目</Link></div>
-      <div className="mt-6 flex items-start gap-4"><FolderKanban className="mt-1 size-5 shrink-0 text-muted-foreground" /><div className="max-w-xl"><h3 className="text-lg font-medium">从一个值得持续推进的目标开始</h3><p className="mt-2 text-sm leading-6 text-muted-foreground">寻找下一份工作、打磨代表作，或积累一段新经历。先把想法告诉伙伴，再逐步形成计划和成果。</p><p className="mt-2 text-xs text-muted-foreground">项目保存与恢复尚未开放；现在可以先讨论目标。</p><div className="mt-5"><AgentAction variant="outline" prompt="我想一起梳理当前的职业目标。请先问我目前的阶段、目标和约束，再讨论下一步，不要假定已经读取我的档案。">讨论我的目标</AgentAction></div></div></div>
-    </section>
+    <WorkspaceHomeProject />
     <section aria-labelledby="work-heading"><div className="mb-4 flex items-center justify-between"><h2 id="work-heading" className="text-sm font-medium">共同工作</h2><CapabilitiesAction /></div>
       <div className="divide-y rounded-xl border">
         <StartWork title="把一段经历变成可复用的成果" text="整理事实、打磨表达，再带回材料审阅。" href="/workspace/library" icon={FileText} />

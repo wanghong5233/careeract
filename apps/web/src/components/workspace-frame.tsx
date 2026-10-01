@@ -89,7 +89,7 @@ function WorkspaceFrameContent({ children }: Readonly<{ children: ReactNode }>) 
   const [navigationOpen, setNavigationOpen] = useState(false);
   const [capabilitiesOpen, setCapabilitiesOpen] = useState(false);
   const [signOutError, setSignOutError] = useState("");
-  const activeKey = pathname === "/workspace" ? "overview" : pathname.split("/").filter(Boolean).at(-1) ?? "overview";
+  const activeKey = pathname.split("/").filter(Boolean)[1] ?? "overview";
   const current = workspaceSections.find(item => item.key === activeKey) ?? workspaceSections[0];
 
   useEffect(() => {
