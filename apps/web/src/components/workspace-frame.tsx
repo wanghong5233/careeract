@@ -27,7 +27,7 @@ function desktopSnapshot() {
 }
 
 function AgentWelcome() {
-  return <div className="space-y-3 px-1 text-left"><Bird className="mb-5 size-7" /><h2 className="text-lg font-medium tracking-tight">一起把下一步做清楚。</h2><p className="text-sm leading-6 text-muted-foreground">说说目标、贴一段内容，或告诉我哪里需要调整。你提供判断，我协助整理和创作。</p><p className="text-xs leading-5 text-muted-foreground">当前支持连续对话；刷新后会继续同一伙伴会话，但历史消息列表尚未恢复。工作区读取、成果保存和外部动作仍待接入。</p></div>;
+  return <div className="space-y-3 px-1 text-left"><Bird className="mb-5 size-7" /><h2 className="text-lg font-medium tracking-tight">一起把下一步做清楚。</h2><p className="text-sm leading-6 text-muted-foreground">说说目标、贴一段内容，或告诉我哪里需要调整。你提供判断，我协助整理和创作。</p><p className="text-xs leading-5 text-muted-foreground">刷新后会继续同一伙伴会话，已保存的文本历史按登录用户恢复。工作区读取、成果保存和外部动作仍待接入。</p></div>;
 }
 
 function AgentDock({ currentLabel, onClose }: { currentLabel: string; onClose: () => void }) {

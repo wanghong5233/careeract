@@ -13,12 +13,20 @@ from services.api.domain.project import (
     ProjectNotFound,
     ProjectUnavailable,
 )
+from services.api.domain.work_session import (
+    WorkSessionHistoryUnavailable,
+    WorkSessionInvalid,
+    WorkSessionNotFound,
+    WorkSessionUnavailable,
+)
 
 
 async def profile_error(request: Request, error: Exception) -> JSONResponse:
     if isinstance(error, RequestValidationError) and request.url.path != "/api/v1/profile":
         if request.url.path.startswith("/api/v1/projects"):
             return await project_error(request, error)
+        if request.url.path.startswith("/api/v1/agent"):
+            return await work_session_error(request, error)
         if request.url.path.startswith(("/agui", "/api/v1/")):
             return JSONResponse(
                 {
@@ -80,6 +88,40 @@ async def project_error(request: Request, error: Exception) -> JSONResponse:
         status, code, message = 409, "project_conflict", "项目已有更新，请读取最新版本后再保存。"
     elif isinstance(error, ProjectUnavailable):
         status, code, message = 503, "project_unavailable", "项目服务暂不可用，请稍后重试。"
+    else:
+        raise error
+    return JSONResponse(
+        status_code=status,
+        content={
+            "error": {
+                "code": code,
+                "message": message,
+                "request_id": getattr(request.state, "request_id", str(uuid4())),
+            }
+        },
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+async def work_session_error(request: Request, error: Exception) -> JSONResponse:
+    if isinstance(error, RequestValidationError):
+        status, code, message = 422, "invalid_agent_session", "请检查伙伴会话标识和项目关联。"
+    elif isinstance(error, WorkSessionInvalid):
+        status, code, message = 422, "invalid_agent_session", "伙伴会话标识无效。"
+    elif isinstance(error, WorkSessionNotFound):
+        status, code, message = 404, "agent_session_not_found", "找不到该伙伴工作。"
+    elif isinstance(error, WorkSessionHistoryUnavailable):
+        status, code, message = (
+            503,
+            "agent_history_unavailable",
+            "伙伴历史暂时无法读取，请稍后重试。",
+        )
+    elif isinstance(error, WorkSessionUnavailable):
+        status, code, message = (
+            503,
+            "agent_session_unavailable",
+            "伙伴工作暂时无法保存，请稍后重试。",
+        )
     else:
         raise error
     return JSONResponse(

@@ -26,3 +26,11 @@ current version is retained. Version history and Agent access are separate work.
 always taken from the verified token, never from the request body. Updates require the
 current `version`; another user's ID is indistinguishable from not found, and stale
 writes return 409. Project milestones, tasks and Agent context are separate work.
+
+`PUT /api/v1/agent/session` associates the authenticated user's opaque Agent session
+with an optional CareerAct project. The session ID is derived by the Web BFF and is
+never treated as a user-supplied owner. `GET /api/v1/agent/session/history?session_id=...`
+first checks that association, then returns only the current user's `user`/`assistant`
+text messages from the Agent runtime. Framework history, tool messages, and another
+user's session are not exposed; session history is treated as career data and responses
+are not cached.

@@ -13,6 +13,7 @@ import {
   readProject, readProjects, updateProject,
   type CareerProject, type ProjectContent, type ProjectStatus,
 } from "@/lib/projects";
+import { associateAgentSession } from "@/lib/agent-work-sessions";
 import { cn } from "@/lib/utils";
 
 const inputClass = "h-10 w-full rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring";
@@ -179,9 +180,18 @@ function ProjectWork({ initial }: { initial: CareerProject }) {
   const [needsCheck, setNeedsCheck] = useState(false);
   const [latest, setLatest] = useState<CareerProject | null>(null);
   const [notice, setNotice] = useState("");
+  const [sessionError, setSessionError] = useState("");
   const normalized = { ...draft, title: draft.title.trim(), purpose: draft.purpose.trim() };
   const dirty = editing && JSON.stringify(normalized) !== JSON.stringify(contentOf(saved));
   useDraftGuard(dirty || busy);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    associateAgentSession(saved.id, controller.signal).then(() => setSessionError("")).catch((error: unknown) => {
+      if (!controller.signal.aborted) setSessionError(error instanceof Error ? error.message : "伙伴工作关联暂时无法保存。");
+    });
+    return () => controller.abort();
+  }, [saved.id]);
 
   function accept(project: CareerProject) {
     setSaved(project); setDraft(contentOf(project)); setEditing(false);
@@ -230,5 +240,6 @@ function ProjectWork({ initial }: { initial: CareerProject }) {
       {notice && <p role="status" className="mt-4 text-sm">{notice}</p>}
     </section>
     <section><h2 className="text-sm font-medium">共同工作</h2><p className="mt-3 text-sm leading-6 text-muted-foreground">先围绕目标讨论。项目关联任务、材料与成果将在下一步接入，对话目前不会自动写入项目。</p><div className="mt-4 flex flex-wrap gap-4">{[["tasks", "任务工作面"], ["library", "资料与成果"], ["plan", "阶段计划"]].map(([path, label]) => <Link key={path} href={`/workspace/${path}`} className="text-xs underline underline-offset-4">{label}</Link>)}</div></section>
+    {sessionError && <p role="alert" className="text-sm text-destructive">{sessionError}</p>}
   </div>;
 }
