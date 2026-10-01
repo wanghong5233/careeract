@@ -43,6 +43,7 @@ docs/topics/workspace/prototype/*
 !docs/topics/workspace/prototype/index.html
 !docs/topics/workspace/prototype/styles.css
 !docs/topics/workspace/prototype/app.js
+!docs/topics/workspace/prototype/workspace.js
 !docs/topics/workspace/prototype/screens/
 docs/topics/workspace/prototype/screens/*
 !docs/topics/workspace/prototype/screens/01-project.jpg

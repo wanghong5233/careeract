@@ -27,7 +27,7 @@ const iconPaths = {
 };
 const icon = (name) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${iconPaths[name] || iconPaths.file}</svg>`;
 const escapeText = (value) => String(value).replace(/[&<>"']/g, (character) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[character]));
-const routes = new Set(['project', 'review', 'opportunities', 'execution', 'practice', 'background', 'portfolio']);
+const routes = new Set(['project', 'review', 'opportunities', 'execution', 'practice', 'background', 'portfolio', ...Object.keys(workspacePages)]);
 const startingRoute = location.hash.slice(1);
 const state = {
   route: routes.has(startingRoute) ? startingRoute : 'project',
@@ -63,27 +63,34 @@ const pendingCount = () => state.changes.filter((change) => change === 'pending'
 
 function sidebar() {
   return `<aside class="sidebar" aria-label="工作区导航">
-    <div class="brand row">${icon('raven')}CareerAct</div>
+    <div class="brand row">${icon('raven')}CareerAct<span class="spacer"></span><button class="icon-button mobile-menu" data-action="menu" aria-label="关闭项目导航">${icon('close')}</button></div>
     <button class="nav-button" data-action="new">${icon('plus')}<span>开始一项工作</span></button>
     <button class="nav-button" data-action="search">${icon('search')}<span>查找内容</span><span class="count">⌘ K</span></button>
     <div class="nav-group">
       <div class="nav-label">职业项目</div>
       ${navButton('project', '2027 秋招', 'folder', '<span class="count">2</span>')}
       <div class="nav-sub">
-        ${navButton('review', '星野 · 申请准备', 'file')}
-        ${navButton('opportunities', '本周机会调研', 'globe')}
-        ${navButton('practice', '项目讲述与面试准备', 'book')}
+        ${navButton('opportunities', '机会与岗位', 'globe')}
+        ${navButton('applications', '申请与进展', 'inbox')}
+        ${navButton('preparation', '准备与训练', 'book')}
       </div>
       ${navButton('portfolio', 'Agent 工程作品', 'folder')}
     </div>
     <div class="nav-group">
+      <div class="nav-label">待处理</div>
+      ${navButton('inbox', '沟通与通知', 'inbox')}
+      ${navButton('calendar', '日程与待办', 'clock')}
+      ${navButton('tasks', '任务与报告', 'check')}
+    </div>
+    <div class="nav-group">
       <div class="nav-label">跨项目复用</div>
       ${navButton('background', '我的职业背景', 'layers')}
-      <button class="nav-button" data-action="library">${icon('file')}<span>全部材料</span></button>
-      <button class="nav-button" data-action="automations">${icon('clock')}<span>托管与提醒</span></button>
+      ${navButton('library', '资料与成果', 'file')}
+      ${navButton('growth', '经历与成长', 'book')}
     </div>
     <div class="sidebar-bottom">
-      <button class="nav-button" data-action="settings">${icon('settings')}<span>偏好与连接</span></button>
+      ${navButton('automations', '托管服务', 'clock')}
+      ${navButton('settings', '偏好与连接', 'settings')}
       <div class="account row"><span class="avatar">予</span><span>林予的工作区</span><span class="spacer"></span><small class="muted">个人</small></div>
       <div class="preview-note">交互原型 · 虚构人物与岗位<br>操作仅用于演示，不连接外部服务</div>
     </div>
@@ -91,14 +98,14 @@ function sidebar() {
 }
 
 function topbar() {
-  const names = {project: '2027 秋招', review: '星野 · 申请准备', opportunities: '本周机会调研', execution: '星野 · 申请执行', practice: '项目讲述与面试准备', background: '我的职业背景', portfolio: 'Agent 工程作品'};
+  const names = {project: '2027 秋招', review: '星野 · 申请准备', opportunities: '本周机会调研', execution: '星野 · 申请执行', practice: '项目讲述与面试准备', background: '我的职业背景', portfolio: 'Agent 工程作品', ...workspaceRouteNames};
   const scenarios = [['normal','预览状态'],['empty','空项目'],['save-error','保存失败'],['conflict','版本冲突'],['uncertain','提交结果未知']];
   return `<header class="topbar">
     <button class="icon-button mobile-menu" data-action="menu" aria-label="打开项目导航">${icon('menu')}</button>
-    <div class="row breadcrumb"><span class="parent-crumb">${['background','portfolio'].includes(state.route) ? '职业工作区' : '2027 秋招'}</span><span class="parent-crumb">/</span><strong>${names[state.route]}</strong></div>
+    <div class="row breadcrumb"><span class="parent-crumb">${['background','portfolio','growth','library','tasks','inbox','calendar','automations','settings','reports','assistant'].includes(state.route) ? '职业工作区' : '2027 秋招'}</span><span class="parent-crumb">/</span><strong>${names[state.route]}</strong></div>
     <span class="spacer"></span><span class="prototype-label">设计预览</span>
     <select class="preview-select" aria-label="演示状态">${scenarios.map(([value,label])=>`<option value="${value}" ${state.scenario === value ? 'selected' : ''}>${label}</option>`).join('')}</select>
-    <button class="icon-button mobile-task-toggle" data-action="panel" aria-label="查看 Agent 工作进度">${icon('raven')}</button>
+    ${['review','execution','practice','background'].includes(state.route) ? `<button class="icon-button mobile-task-toggle" data-action="panel" aria-label="查看 Agent 工作进度">${icon('raven')}</button>` : ''}
   </header>`;
 }
 
@@ -114,7 +121,7 @@ function projectPage() {
   return `<div class="project-page">
     <div class="project-heading row between"><div><div class="eyebrow">职业项目</div><h1>2027 秋招</h1><p class="muted">找到能持续积累 Agent 与系统能力的第一份工作。</p></div><button class="button quiet" data-action="project-context">${icon('layers')}项目背景</button></div>
     <div class="project-meta row"><span>9 月 — 12 月</span><span>上海 · 杭州</span><span>校招正职 / 对口实习</span></div>
-    <div class="project-tabs row"><button class="selected" data-route="project">正在推进</button><button data-action="project-library">资料与成果</button><button data-action="milestones">阶段计划</button></div>
+    ${projectViews()}
     <section class="brief"><div class="agent-mark">${icon('raven')}</div><div><h2>${resolved() ? '材料已就绪，可以继续下一步。' : '申请材料准备好了，等你看两处修改。'}</h2><p>星野的岗位重视 Agent 执行可靠性。我调整了项目表达，并保留了推理与系统方向的经历。提交申请前，仍由你决定。</p></div></section>
     <section class="focus-task" aria-label="等待审阅的成果"><div class="focus-content"><div class="row"><span class="tag attention">${resolved() ? '材料已审阅' : '待你审阅'}</span><span class="muted" style="font-size:11px">申请准备 · 星野智能</span><span class="spacer"></span><small class="muted">12 分钟前</small></div><h2 class="task-title">为 Agent 研发岗位准备一份有依据的申请</h2><p>材料来自已确认背景与项目记录，没有添加新经历或虚构指标。</p><div class="artifact-line row"><div class="file-symbol">${icon('file')}</div><div><strong>简历 · Agent 工程方向</strong><small>基于 v3 · ${resolved() ? '审阅完成' : '2 处修改建议'} · 关联 3 份资料</small></div><span class="spacer"></span><span class="tag">可编辑</span></div></div><div class="focus-footer row between"><span>当前只准备材料，尚未对外提交</span><button class="button primary" data-route="review">${resolved() ? '打开材料' : '审阅并继续'}${icon('arrow')}</button></div></section>
     <div class="project-lower"><section><div class="row between"><h2 class="section-heading">继续推进</h2><span class="muted" style="font-size:10px">与当前目标相关</span></div>
@@ -144,7 +151,7 @@ function reviewPage() {
 function agentPanel(kind) {
   const configurations = {
     review: {title:'准备星野的申请材料',status:resolved()?'材料已审阅':'等待你的审阅',intro:'我将岗位要求和你的已确认经历放在一起核对，提出两处表达调整。你可以直接修改正文，也可以继续提出要求。',steps:['核对岗位与职业目标','读取已确认背景和项目证据','形成 2 处材料修改建议','等你审阅，再进入申请准备'],context:'这份材料 · 3 份来源',prompt:'例如：保留更多推理部署细节…'},
-    execution: {title:'完成星野的岗位申请',status:state.execution === 'completed'?'执行结果已核验':state.execution === 'uncertain'?'结果需要核实':state.execution === 'cancelled'?'已取消':state.humanControl?'你正在接管':'等待提交授权',intro:state.execution === 'completed'?'申请回执已关联材料版本。下一步准备会沿用这次实际提交的内容。':'当前申请表已经准备好。只对这一岗位、这一材料版本执行；确认前不会对外提交。',steps:['检查岗位与重复申请','锁定本次材料 v4','填写后重新读取申请预览','等待提交授权与结果核验'],context:'星野申请 · 材料 v4',prompt:'补充要求，或讨论下一步…'},
+    execution: {title:'完成星野的岗位申请',status:state.execution === 'completed'?'执行结果已核验':state.execution === 'uncertain'?'结果需要核实':state.execution === 'cancelled'?'已取消':state.humanControl?'你正在接管':'等待提交授权',intro:state.execution === 'uncertain'?'提交已尝试，尚无可靠结果。保留证据并先核对申请记录，不重新提交。':state.execution === 'cancelled'?'任务已取消，尚未提交；材料仍可继续使用。':state.execution === 'completed'?'申请回执已关联材料版本。下一步准备会沿用这次实际提交的内容。':'当前申请表已经准备好。只对这一岗位、这一材料版本执行；确认前不会对外提交。',steps:['检查岗位与重复申请','锁定本次材料 v4','填写后重新读取申请预览','等待提交授权与结果核验'],context:'星野申请 · 材料 v4',prompt:'补充要求，或讨论下一步…'},
     practice: {title:'准备一场有依据的技术面试',status:'准备中',intro:'从实际申请材料出发，把经历拆成问题、证据和可练习的表达。已有结论会沉淀回这个职业项目。',steps:['读取申请锁定版本','对应岗位的技术重点','整理讲述提纲和追问','把薄弱项加入准备任务'],context:'申请材料 v4 · 项目记录',prompt:'让我试着回答第一个追问…'},
     background: {title:'让经历持续成为可用的背景',status:'资料已连接',intro:'你可以贴入经历、导入资料，或直接编辑内容。新事实先作为待确认内容，不会直接进入正式申请。',steps:['保留原始资料与来源','区分事实和对外表达','由你确认新增事实','在相关项目中持续复用'],context:'职业背景 · 事实与来源',prompt:'补充一段经历，或贴入已有资料…'},
   };
@@ -170,7 +177,7 @@ function executionPage() {
   const completed = state.execution === 'completed';
   const cancelled = state.execution === 'cancelled';
   return `<div class="task-layout"><section class="task-main"><div class="execution-page"><div class="eyebrow">申请执行 / 星野智能</div><div class="row between"><h1>${completed?'申请已完成，结果已归档':uncertain?'提交结果还不能确定':cancelled?'这次申请已取消':'申请已准备好，提交由你决定'}</h1></div><p>Agent 研发工程师 · 上海 · 校招　/　材料版本 v4</p>
-    ${completed?`<section class="result-report"><div class="result-icon">${icon('check')}</div><h2>已读取申请回执</h2><p>本地原型模拟了提交后的读取与记录。真实产品必须从招聘网站取得以下证据，才能显示这个状态。</p><div class="submission-row"><span>申请编号</span><strong>示例回执 · XY-2027-0418</strong></div><div class="submission-row"><span>使用材料</span><strong>Agent 工程方向 · 锁定 v4</strong></div><div class="submission-row"><span>关联结果</span><strong>当次申请预览与回执记录</strong></div><div class="row" style="margin-top:23px"><button class="button primary" data-route="practice">根据这次申请准备面试${icon('arrow')}</button></div></section>`:`${uncertain?'<div class="callout error">提交后未取得可靠回执。保留本次尝试与材料版本，暂停自动提交；先核对官网记录。<button class="text-button" data-action="reconcile">查看对账说明</button></div>':cancelled?'<div class="callout">演示任务已取消，没有提交申请。已审阅的材料仍可继续使用。</div>':'<div class="callout">等待你的确认 · 已核对当次申请预览，尚未提交。</div>'}<div class="browser-frame"><div class="browser-chrome"><span></span><span></span><span></span><div class="browser-address row" style="justify-content:center">${icon('lock')}careers.xingye.example / application / preview</div><small>模拟页面</small></div><div class="website-preview"><div class="website-brand">XINGYE　<span class="muted" style="font-weight:400">星野智能 · 校园招聘</span></div><h2>Agent 研发工程师</h2><small>2027 届校园招聘 / 上海 / 研发</small><div class="submission-preview"><div class="submission-row"><span>申请人</span><strong>林予</strong></div><div class="submission-row"><span>教育背景</span><strong>南川大学 · 人工智能硕士</strong></div><div class="submission-row"><span>附件简历</span><strong>林予_Agent工程_星野_v4.pdf</strong></div><div class="submission-row"><span>当前申请状态</span><strong>${uncertain?'提交结果待核实':'已暂存 · 尚未提交'}</strong></div></div></div><div class="browser-footer"><span>${icon(state.humanControl?'pause':'lock')} ${state.humanControl?'你正在接管 · Agent 已暂停':'Agent 已停在提交前'}</span><button class="button" data-action="takeover" ${cancelled?'disabled':''}>${state.humanControl?'交还给 Agent':'接管浏览器'}</button></div></div><div class="execution-facts"><section><h3>本次授权范围</h3><p>星野智能 · 当前岗位 · 材料 v4<br>仅这一次申请，不开启自动投递。</p></section><section><h3>提交后验收</h3><p>重新读取回执与岗位状态<br>不确定时保留证据，交给你核实。</p></section></div><div class="row" style="margin-top:27px"><button class="button primary" data-action="submit-confirm" ${uncertain||cancelled||state.humanControl?'disabled':''}>确认这一次申请${icon('arrow')}</button><button class="button quiet" data-action="cancel" ${completed||cancelled?'disabled':''}>取消任务</button></div>`}
+    ${completed?`<section class="result-report"><div class="result-icon">${icon('check')}</div><h2>已读取申请回执</h2><p>本地原型模拟了提交后的读取与记录。真实产品必须从招聘网站取得以下证据，才能显示这个状态。</p><div class="submission-row"><span>申请编号</span><strong>示例回执 · XY-2027-0418</strong></div><div class="submission-row"><span>使用材料</span><strong>Agent 工程方向 · 锁定 v4</strong></div><div class="submission-row"><span>关联结果</span><strong>当次申请预览与回执记录</strong></div><div class="row" style="margin-top:23px"><button class="button primary" data-route="practice">根据这次申请准备面试${icon('arrow')}</button></div></section>`:`${uncertain?'<div class="callout error">提交后未取得可靠回执。保留本次尝试与材料版本，暂停自动提交；先核对官网记录。<button class="text-button" data-action="reconcile">查看对账说明</button></div>':cancelled?'<div class="callout">演示任务已取消，没有提交申请。已审阅的材料仍可继续使用。</div>':'<div class="callout">等待你的确认 · 已核对当次申请预览，尚未提交。</div>'}<div class="browser-frame"><div class="browser-chrome"><span></span><span></span><span></span><div class="browser-address row" style="justify-content:center">${icon('lock')}careers.xingye.example / application / preview</div><small>模拟页面</small></div><div class="website-preview"><div class="website-brand">XINGYE　<span class="muted" style="font-weight:400">星野智能 · 校园招聘</span></div><h2>Agent 研发工程师</h2><small>2027 届校园招聘 / 上海 / 研发</small><div class="submission-preview"><div class="submission-row"><span>申请人</span><strong>林予</strong></div><div class="submission-row"><span>教育背景</span><strong>南川大学 · 人工智能硕士</strong></div><div class="submission-row"><span>附件简历</span><strong>林予_Agent工程_星野_v4.pdf</strong></div><div class="submission-row"><span>当前申请状态</span><strong>${uncertain?'提交结果待核实':'已暂存 · 尚未提交'}</strong></div></div></div><div class="browser-footer"><span>${icon(state.humanControl?'pause':'lock')} ${state.humanControl?'你正在接管 · Agent 已暂停':uncertain?'已停止自动动作 · 等待核实提交结果':cancelled?'已取消 · 未提交':'Agent 已停在提交前'}</span><button class="button" data-action="takeover" ${cancelled?'disabled':''}>${state.humanControl?'交还给 Agent':'接管浏览器'}</button></div></div><div class="execution-facts"><section><h3>本次授权范围</h3><p>星野智能 · 当前岗位 · 材料 v4<br>仅这一次申请，不开启自动投递。</p></section><section><h3>提交后验收</h3><p>重新读取回执与岗位状态<br>不确定时保留证据，交给你核实。</p></section></div><div class="row" style="margin-top:27px"><button class="button primary" data-action="submit-confirm" ${uncertain||cancelled||state.humanControl?'disabled':''}>确认这一次申请${icon('arrow')}</button><button class="button quiet" data-action="cancel" ${completed||cancelled?'disabled':''}>${uncertain?'停止后续动作':'取消任务'}</button></div>`}
     </div></section>${agentPanel('execution')}</div>`;
 }
 
@@ -192,13 +199,14 @@ function emptyPage() {
 }
 
 function render() {
-  const pages = {project:projectPage,review:reviewPage,opportunities:opportunitiesPage,execution:executionPage,practice:practicePage,background:backgroundPage,portfolio:portfolioPage};
-  document.getElementById('app').innerHTML = `<div class="shell">${sidebar()}<main class="workspace">${topbar()}<div class="surface">${pages[state.route]()}</div></main></div>`;
+  const pages = {project:projectPage,review:reviewPage,opportunities:opportunitiesPage,execution:executionPage,practice:practicePage,background:backgroundPage,portfolio:portfolioPage,...workspacePages};
+  document.getElementById('app').innerHTML = `<div class="shell">${sidebar()}<main class="workspace">${topbar()}<div class="surface">${workspaceTools()}${pages[state.route]()}</div></main></div>`;
   document.title = `CareerAct · ${state.route === 'project' ? '2027 秋招' : '工作台设计预览'}`;
 }
 
 function navigate(route) {
   if (!routes.has(route)) return;
+  document.getElementById('context-dialog').close();
   state.route = route;
   state.draft = '';
   state.panelOpen = false;
@@ -227,18 +235,28 @@ function decideChange(index, decision) {
 }
 
 document.addEventListener('input', (event) => {
+  const inputKey = event.target.dataset.workInput;
+  if (inputKey) {
+    workspaceState[inputKey] = event.target.value;
+    if (inputKey === 'applicationQuery') document.getElementById('application-results').innerHTML = applicationRows();
+    if (inputKey === 'searchQuery') document.getElementById('workspace-search-results').innerHTML = searchWorkspaceRows();
+    return;
+  }
   if (event.target.matches('[data-composer] textarea')) state.draft = event.target.value;
   if (event.target.id === 'profile-text') state.profileDraft = event.target.textContent;
 });
 
 document.addEventListener('submit', (event) => {
+  if (handleWorkspaceForm(event)) return;
   if (!event.target.matches('[data-composer]')) return;
   event.preventDefault();
   if (!state.draft.trim()) { event.target.querySelector('textarea').focus(); return; }
-  showDialog('委托预览', `<p>${escapeText(state.draft)}</p><ul><li>当前项目：${state.route === 'portfolio'?'Agent 工程作品':'2027 秋招'}</li><li>背景、材料和授权范围会随任务保留。</li><li>这是交互原型，没有调用模型。可继续体验预设的申请准备路径。</li></ul>`, '<button class="button primary" data-action="demo-task">体验申请准备</button>');
+  previewDelegation(state.draft);
 });
 
 document.addEventListener('change', (event) => {
+  const selectKey = event.target.dataset.workSelect;
+  if (selectKey) { workspaceState[selectKey] = event.target.value; render(); return; }
   if (!event.target.matches('.preview-select')) return;
   state.scenario = event.target.value;
   if (state.scenario === 'empty') navigate('project');
@@ -250,8 +268,13 @@ document.addEventListener('change', (event) => {
 document.addEventListener('click', async (event) => {
   const target = event.target.closest('button');
   if (!target) return;
+  if (target.dataset.workAction) { handleWorkspaceAction(target.dataset.workAction, target); return; }
   if (target.dataset.route) { navigate(target.dataset.route); return; }
   const action = target.dataset.action;
+  const actionRoutes = {applications:'applications',library:'library','project-library':'library',automations:'automations',settings:'settings',milestones:'plan',practice:'interviews','portfolio-task':'plan'};
+  if (actionRoutes[action]) { navigate(actionRoutes[action]); return; }
+  if (action === 'search') { openWorkspaceSearch(); return; }
+  if (action === 'paste') { handleWorkspaceAction('intake', target); return; }
   const index = Number(target.dataset.index || 0);
   if (action === 'menu') document.querySelector('.sidebar').classList.toggle('open');
   else if (action === 'panel') { state.panelOpen = !state.panelOpen; document.querySelector('.task-panel')?.classList.toggle('open',state.panelOpen); }
@@ -262,13 +285,24 @@ document.addEventListener('click', async (event) => {
   else if (action === 'accept-all') { if (state.scenario !== 'normal') toast('请先处理保存或版本问题。'); else { state.changes = ['accepted','accepted']; render(); toast('已生成示例材料 v4；没有对外提交。'); } }
   else if (action === 'prepare-execution') { if (resolved() && state.scenario === 'normal') navigate('execution'); }
   else if (action === 'recover') { state.scenario = 'normal'; state.execution = 'ready'; render(); toast('已恢复正常演示状态。'); }
-  else if (action === 'takeover') { state.humanControl = !state.humanControl; render(); toast(state.humanControl?'模拟人工接管：Agent 暂停，当前页面没有真实外部会话。':'模拟交还控制：仍等待这一次申请的授权。'); }
+  else if (action === 'takeover') { document.getElementById('context-dialog').close(); state.humanControl = !state.humanControl; render(); toast(state.humanControl?'模拟人工接管：Agent 暂停，当前页面没有真实外部会话。':'模拟交还控制：仍等待这一次申请的授权。'); }
   else if (action === 'submit-confirm') showDialog('只授权这一次申请', '<p>星野智能 · Agent 研发工程师 · 材料 v4</p><ul><li>只提交当前岗位，不扩展到其他公司。</li><li>提交后读取结果；未知结果不自动重试。</li><li>本页是原型，点击只模拟成功回执，不访问招聘网站。</li></ul>', '<button class="button primary" data-action="simulate-submit">模拟授权并读取回执</button>');
-  else if (action === 'simulate-submit') { document.getElementById('context-dialog').close(); state.execution = 'completed'; render(); }
-  else if (action === 'cancel') { state.execution = 'cancelled'; state.humanControl = false; render(); }
+  else if (action === 'simulate-submit') {
+    document.getElementById('context-dialog').close(); state.execution = 'completed';
+    const application = workspaceState.applications.find(item => item.id === 'xy-18');
+    application.stage = '已投递'; application.raw = '已读取样例申请回执';
+    application.source = '模拟回执 · XY-2027-0418'; application.next = '等待筛选并准备面试';
+    application.history.push(['本次','已投递','模拟回执 XY-2027-0418 · Agent 方向 v4']);
+    const task = workspaceState.tasks.find(item => item.id === 'application');
+    task.status = 'completed'; task.result = '已读取模拟回执并关联申请记录'; render();
+  }
+  else if (action === 'cancel') {
+    if (state.execution === 'uncertain') { toast('后续自动动作已停止，已有提交结果仍待核实，不能标记为未提交。'); return; }
+    state.execution = 'cancelled'; state.humanControl = false; render();
+  }
   else if (action === 'close-dialog') document.getElementById('context-dialog').close();
   else if (action === 'demo-task') { document.getElementById('context-dialog').close(); navigate('review'); }
-  else if (action === 'new') { state.scenario = 'empty'; navigate('project'); }
+  else if (action === 'new') { navigate('assistant'); }
   else if (action === 'add-task') { state.taskAdded = true; render(); toast('已加入本地示例项目，可回到“2027 秋招”查看。'); }
   else if (action === 'edit-profile') { state.editing = !state.editing; render(); if (state.editing) document.getElementById('profile-text').focus(); else toast('本地草稿已保留；原型未连接数据库，也未确认新事实。'); }
   else if (action === 'copy') {
@@ -276,25 +310,16 @@ document.addEventListener('click', async (event) => {
     try { await navigator.clipboard.writeText(text); toast('已复制纯文本，不包含 Markdown 标记。'); }
     catch { showDialog('纯文本内容',`<textarea aria-label="可复制的纯文本" rows="12" style="width:100%;margin-top:16px">${escapeText(text)}</textarea>`); }
   }
-  else if (action === 'context' || action === 'project-context') showDialog('这项工作使用了什么', '<p>项目上下文与本次选用的资料一起呈现，用户可以知道 Agent 判断的依据。</p><ul><li>2027 秋招：目标、城市与阶段</li><li>职业背景：已确认事实 v3</li><li>Atlas 项目记录：经历与能力证据</li><li>星野岗位：JD 与待核实问题</li></ul><p>本原型只展示这组固定上下文；资料选择与版本更新需在正式实现中接入。</p>');
+  else if (action === 'context' || action === 'project-context') showWorkspaceContext();
   else if (action === 'evidence') showDialog('修改依据', `<p>${proposals[index].reason}</p><ul><li>原始记录：工具调用、任务恢复与结果核验。</li><li>允许：调整表达与内容顺序。</li><li>不允许：虚构用户数、性能数字、工作年限。</li></ul><p>这些均为虚构示例，用来评审来源如何呈现。</p>`);
-  else if (action === 'automations') showDialog('把一次调研变成持续关注', '<p>未来可选择指定来源、查询条件与检查频率，并设定到期和撤销。一次调研不会自动开启托管。</p><ul><li>只读关注与外部投递分别授权</li><li>仅监测已配置来源，不承诺覆盖全网</li><li>运行失败与“没有新机会”分别报告</li></ul><p>本原型未启动任何定时任务。</p>');
   else if (action === 'constraints') showDialog('当前项目的选择边界', '<ul><li>方向：Agent、模型推理与系统</li><li>城市：上海、杭州</li><li>机会：校招正职与有帮助的实习分开记录</li><li>判断依据：实际工作、成长空间与证据匹配</li></ul><p>示例约束，不代表项目所有者的私人投递设置。</p>');
   else if (action === 'job' || action === 'source') showDialog('岗位来源与未知信息', '<p>星野智能、序川科技与远山实验室均为虚构公司。本原型没有查询真实招聘信息。</p><ul><li>正式结果应记录原始岗位 URL 与核验时间。</li><li>招聘通道、届次、岗位编号分别核对。</li><li>缺失的截止时间或职责不应由模型补全。</li></ul>');
   else if (action === 'reconcile') showDialog('先核实结果，再决定下一步', '<p>正式产品应读取该岗位的申请记录，保留本次尝试、材料版本和最后观察到的证据。核实前禁止重新提交。</p><p>这里仅展示未知状态；没有发生真实申请或自动重试。</p>');
-  else if (action === 'project-library' || action === 'library') showDialog('资料与成果', '<p>原始文件、可编辑材料与任务成果在同一处查找；用途和版本不同，不要求重复录入。</p><ul><li>职业背景 → 已确认事实与来源</li><li>简历 · Agent 工程方向 → 可审阅的材料</li><li>本周机会调研 → 带依据的研究成果</li><li>项目讲述 → 可继续准备的内容</li></ul>', '<button class="button" data-action="demo-task">打开示例材料</button>');
-  else if (action === 'milestones') showDialog('阶段计划', '<ul><li>材料与证据准备</li><li>机会发现、申请与跟进</li><li>面试准备与选择</li></ul><p>这些是持续并行推进的目标，不是必须依次填完的流程步骤。阶段编辑暂未在原型实现。</p>');
-  else if (action === 'applications') showDialog('申请与锁定版本', '<p>一条申请关联具体岗位、当时使用的材料、授权与回执。之后修改基础简历，不会覆盖历史申请版本。</p><p>原型提供一条模拟申请路径，尚未实现申请总表。</p>');
-  else if (action === 'search') showDialog('跨项目查找', '<p>设计预留按内容、任务和材料查找的入口。本原型暂不实现全文搜索。</p>');
-  else if (action === 'paste') showDialog('从已有资料开始', '<p>正式产品支持粘贴、导入或讲述经历，提取结果先由用户确认。本轮不接收或上传真实简历。</p>');
-  else if (action === 'practice') showDialog('项目讲述练习', '<p>这份提纲可以进一步转成文字练习任务。实时语音模拟面试属于后续能力，本原型没有调用模型。</p>');
-  else if (action === 'portfolio-task') showDialog('一项可展示的工程工作', '<p>这是第二类职业项目：通过作品积累能力证据。可以承载实现任务、实验记录、演示材料与复盘，不依赖存在某次投递。</p>');
-  else if (action === 'settings') showDialog('偏好与连接', '<p>后续在这里管理模型、授权来源、数据导出与账户偏好。本原型不读取环境变量或真实凭据。</p>');
 });
 
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') { document.querySelector('.sidebar')?.classList.remove('open'); state.panelOpen = false; document.querySelector('.task-panel')?.classList.remove('open'); }
-  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); showDialog('跨项目查找','<p>设计预留搜索入口；当前可以从左侧项目与资料进入已制作的场景。</p>'); }
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); openWorkspaceSearch(); }
 });
 window.addEventListener('hashchange',()=>{
   const route = location.hash.slice(1);
