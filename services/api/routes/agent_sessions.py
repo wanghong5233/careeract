@@ -6,9 +6,9 @@ from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from services.api.application.context import ActorContext
+from services.api.application.ports.work_sessions import AgentHistoryReader
 from services.api.application.work_sessions import AgentWorkSessionService
 from services.api.domain.work_session import AgentWorkSession
-from services.api.infrastructure.agent_sessions import AgentHistoryReader
 
 router = APIRouter(prefix="/api/v1/agent", tags=["agent"])
 

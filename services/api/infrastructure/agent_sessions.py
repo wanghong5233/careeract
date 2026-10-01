@@ -1,25 +1,11 @@
-from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any
 
 from agno.exceptions import AgnoError
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 
+from services.api.application.ports.work_sessions import AgentHistoryMessage
 from services.api.domain.work_session import WorkSessionHistoryUnavailable
-
-
-@dataclass(frozen=True, slots=True)
-class AgentHistoryMessage:
-    id: str
-    role: str
-    content: str
-    created_at: int
-
-
-class AgentHistoryReader(Protocol):
-    async def read(
-        self, *, session_id: str, user_id: str, limit: int
-    ) -> tuple[AgentHistoryMessage, ...]: ...
 
 
 class AgnoAgentHistoryReader:
