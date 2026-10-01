@@ -28,6 +28,8 @@ def build_agent_os(settings: Settings) -> AgentOS:
             base_url=str(settings.litellm_base_url),
         ),
         db=db,
+        debug_mode=False,
+        store_media=False,
         instructions="Help the user plan their career and complete the next authorized action.",
         telemetry=False,
     )
@@ -38,4 +40,5 @@ def build_agent_os(settings: Settings) -> AgentOS:
         interfaces=[AGUI(agent=career_agent)],
         db=db,
         telemetry=False,
+        tracing=False,
     )

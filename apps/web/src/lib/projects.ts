@@ -1,3 +1,5 @@
+import { isRestrictedResponse, restrictedContentMessage } from "@/lib/privacy";
+
 export type ProjectStatus = "planned" | "active" | "paused" | "completed" | "archived";
 
 export type CareerProject = {
@@ -34,6 +36,9 @@ async function requestProject<T>(path: string, options: RequestInit): Promise<T>
       : "连接中断，暂时无法读取项目，请重试。");
   }
   if (!response.ok) {
+    if (response.status === 422 && await isRestrictedResponse(response)) {
+      throw new ProjectRequestError(response.status, restrictedContentMessage);
+    }
     const messages: Record<number, string> = {
       401: "登录已失效，请重新登录。",
       403: "无法验证请求，请从工作台重试。",

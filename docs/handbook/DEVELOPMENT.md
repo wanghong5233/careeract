@@ -201,6 +201,30 @@ uv run python scripts/smoke_profile.py --base-url http://localhost:3100
 
 ## 身份与权限边界
 
+### 隐私入口验证
+
+档案/项目写入用例与产品 JSON 入口检查明显的证件/账户长号码和凭据模式；AG-UI 在
+Runtime 前检查所有提交文本，暂拒绝附件、客户端工具、任意状态/上下文。限额为 Agent
+256 KiB、产品 JSON 1 MiB（项目 BFF 另限 64 KiB）。认证先于检查，认证密码/Cookie/JWT
+不经职业内容检测器；不得将它们放入职业资料或聊天。错误不回显原文，不自动修改事实。
+
+验证命令：uv run pytest tests/api/test_privacy.py tests/api/test_health.py -q。
+测试仅使用合成号码/凭据和 Runtime/Repository 替身，不发送给模型。另开启档案/项目
+PostgreSQL 测试验证普通内容仍能持久化。浏览器验收使用合成受限输入，检查拒绝提示及
+输入修正路径，不使用真实证件或密钥。
+
+模式检测有漏检/误报；尚不覆盖图片、任意健康/住址事实、混淆秘密或既有存量内容。关闭
+Agno telemetry/debug/Tracing、媒体存储不代表会话/事件已删除；AgentOS 会开启事件存储。
+不得通过启用请求正文日志或复制原始异常来诊断拒绝。材料/模型出口、浏览器观察隔离、
+供应商日志、加密和各副本删除的开放条件见 [工作台门槛](../topics/workspace/DESIGN.md#隐私与数据安全前置门槛)；
+未通过前不能将当前增量描述为生产隐私已闭环。
+
+浏览器敏感执行遵循 [OpenAI Computer Use 安全指南](https://developers.openai.com/api/docs/guides/tools-computer-use-integration#handle-user-confirmation-and-consent)
+的可验证原则：隔离运行环境与站点/动作白名单，页面内容不授予权限，敏感输入和对外提交在
+风险点确认，执行有步数/时间/资源上限并确定性核验结果。未来的专用工具只向 Agent 暴露字段
+语义、授权范围和“已填充/已核验”等非敏感状态；身份证、密码、验证码和 Cookie 明文留在
+执行器或用户手中。当前 P2 尚未通过，因此不要以普通 AG-UI 文本请求模拟这一能力。
+
 三类身份代表不同的权限边界，不要求现在建立三个账号系统或完整管理后台：
 
 | 身份 | 归属与权限 | 当前安排 |

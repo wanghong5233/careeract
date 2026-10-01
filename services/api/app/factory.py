@@ -8,6 +8,7 @@ from fastapi.exceptions import RequestValidationError
 from services.api.app.settings import Settings
 from services.api.application.profiles import ProfileService
 from services.api.application.projects import ProjectService
+from services.api.domain.privacy import RestrictedContent
 from services.api.domain.profile import ProfileConflict, ProfileUnavailable
 from services.api.domain.project import (
     ProjectConflict,
@@ -18,9 +19,10 @@ from services.api.domain.project import (
 from services.api.infrastructure.agent_runtime import build_agent_os
 from services.api.infrastructure.authentication import JwtAuthenticationMiddleware
 from services.api.infrastructure.database import create_engine
+from services.api.infrastructure.privacy import PrivacyBoundaryMiddleware
 from services.api.infrastructure.profiles import PostgresProfileRepository
 from services.api.infrastructure.projects import PostgresProjectRepository
-from services.api.routes.errors import profile_error, project_error
+from services.api.routes.errors import privacy_error, profile_error, project_error
 from services.api.routes.profiles import router as profile_router
 from services.api.routes.projects import router as project_router
 from services.api.routes.system import router as system_router
@@ -58,6 +60,7 @@ def create_app(
     app.state.project_service = ProjectService(PostgresProjectRepository(engine))
     app.state.settings = settings
     app.state.agent_os = agent_os
+    app.add_middleware(PrivacyBoundaryMiddleware)
     app.add_middleware(
         JwtAuthenticationMiddleware,
         jwks_url=str(settings.auth_jwks_url),
@@ -78,4 +81,5 @@ def create_app(
     app.add_exception_handler(ProjectNotFound, project_error)
     app.add_exception_handler(ProjectUnavailable, project_error)
     app.add_exception_handler(RequestValidationError, profile_error)
+    app.add_exception_handler(RestrictedContent, privacy_error)
     return app

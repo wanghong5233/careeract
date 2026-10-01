@@ -37,7 +37,7 @@ function AgentDock({ currentLabel, onClose }: { currentLabel: string; onClose: (
       <div className="flex items-center gap-2.5"><Bird className="size-5" /><div><p className="text-sm font-medium">渡鸦</p><p role="status" className="text-xs text-muted-foreground">{running ? "正在回应 · 可停止" : "职业伙伴 · 等待你的委托"}</p></div></div>
       <Button variant="ghost" size="icon" onClick={onClose} aria-label="收起职业伙伴"><X className="size-4" /></Button>
     </div>
-    <div className="border-b px-5 py-3 text-xs text-muted-foreground">正在查看：<span className="text-foreground">{currentLabel}</span><p className="mt-1">页面内容尚未自动带入对话</p></div>
+    <div className="border-b px-5 py-3 text-xs text-muted-foreground">正在查看：<span className="text-foreground">{currentLabel}</span><p className="mt-1">页面内容尚未自动带入对话</p><p className="mt-2 leading-5">保存的职业资料在服务端；发送的内容会交给已配置的模型服务。请勿提供证件号、密码或验证码。</p></div>
     <div className="min-h-0 flex-1"><Thread autoFocus={false} showSuggestions={false} showExecutionDetails={false} components={{ Welcome: AgentWelcome }} /></div>
   </div>;
 }

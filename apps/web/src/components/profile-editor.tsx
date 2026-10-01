@@ -1,5 +1,7 @@
 "use client";
 
+import { isRestrictedResponse, restrictedContentMessage } from "@/lib/privacy";
+
 import { useEffect, useState, type FormEvent } from "react";
 import { CheckCircle2, LoaderCircle, Pencil, Plus, RotateCcw, Save, Trash2 } from "lucide-react";
 
@@ -93,6 +95,8 @@ function ProfileForm({ initialProfile }: { initialProfile: CareerProfile }) {
           ? "档案已在其他页面更新。你的输入仍保留；请先核对服务器版本，避免覆盖新内容。"
           : response.status === 401 || response.status === 403
             ? "登录验证失败。输入仍保留，请在另一标签页重新登录后再保存。"
+            : response.status === 422 && await isRestrictedResponse(response)
+              ? restrictedContentMessage
             : response.status === 422
               ? "请检查必填项及字段长度，确认后重新保存。"
               : "保存结果尚未确认。输入仍保留，请重新读取服务器版本核对。");

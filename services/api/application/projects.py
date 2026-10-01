@@ -2,6 +2,7 @@ from uuid import UUID, uuid4
 
 from services.api.application.context import ActorContext
 from services.api.application.ports.projects import ProjectPage, ProjectRepository
+from services.api.domain.privacy import ensure_career_content
 from services.api.domain.project import (
     CareerProject,
     ProjectConflict,
@@ -80,3 +81,4 @@ class ProjectService:
             validate_project_content(title, purpose, status)
         except ValueError:
             raise ProjectInvalid("Invalid project content") from None
+        ensure_career_content((title, purpose))

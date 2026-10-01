@@ -5,6 +5,7 @@ from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from services.api.domain.privacy import RestrictedContent
 from services.api.domain.profile import ProfileConflict, ProfileUnavailable
 from services.api.domain.project import (
     ProjectConflict,
@@ -18,6 +19,18 @@ async def profile_error(request: Request, error: Exception) -> JSONResponse:
     if isinstance(error, RequestValidationError) and request.url.path != "/api/v1/profile":
         if request.url.path.startswith("/api/v1/projects"):
             return await project_error(request, error)
+        if request.url.path.startswith(("/agui", "/api/v1/")):
+            return JSONResponse(
+                {
+                    "error": {
+                        "code": "invalid_request",
+                        "message": "请检查请求格式和字段。",
+                        "request_id": str(uuid4()),
+                    }
+                },
+                status_code=422,
+                headers={"Cache-Control": "no-store"},
+            )
         return await request_validation_exception_handler(request, error)
     if isinstance(error, ProfileConflict):
         status, code, message = 409, "profile_conflict", "档案已有更新，请读取最新版本后再保存。"
@@ -36,6 +49,22 @@ async def profile_error(request: Request, error: Exception) -> JSONResponse:
                 "request_id": getattr(request.state, "request_id", str(uuid4())),
             }
         },
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+async def privacy_error(request: Request, error: Exception) -> JSONResponse:
+    if not isinstance(error, RestrictedContent):
+        raise error
+    return JSONResponse(
+        {
+            "error": {
+                "code": "restricted_content",
+                "message": str(error),
+                "request_id": getattr(request.state, "request_id", str(uuid4())),
+            }
+        },
+        status_code=422,
         headers={"Cache-Control": "no-store"},
     )
 
