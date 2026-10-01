@@ -9,8 +9,9 @@ import { isRestrictedResponse, restrictedContentMessage } from "@/lib/privacy";
 
 const AGENT_BFF_URL = "/api/agent";
 
-export function RuntimeProvider({ children }: Readonly<{ children: ReactNode }>) {
-  const [threadId] = useState(() => crypto.randomUUID());
+export function RuntimeProvider({ children, agentThreadId }: Readonly<{ children: ReactNode; agentThreadId?: string }>) {
+  const [fallbackThreadId] = useState(() => crypto.randomUUID());
+  const threadId = agentThreadId ?? fallbackThreadId;
   const agent = useMemo(
     () =>
       new HttpAgent({

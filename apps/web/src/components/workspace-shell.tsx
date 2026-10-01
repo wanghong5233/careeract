@@ -17,7 +17,7 @@ const upcoming = [
 ];
 
 function AgentWelcome() {
-  return <div className="space-y-2 px-4 text-center"><h2 className="font-semibold">一起想清楚下一步</h2><p className="text-sm text-muted-foreground">当前对话尚未接入职业档案，也不会自动修改档案。刷新后对话暂不恢复。</p></div>;
+  return <div className="space-y-2 px-4 text-center"><h2 className="font-semibold">一起想清楚下一步</h2><p className="text-sm text-muted-foreground">当前对话尚未接入职业档案，也不会自动修改档案。工作台会话可继续，历史消息展示仍待接入。</p></div>;
 }
 
 export function WorkspaceShell() {
