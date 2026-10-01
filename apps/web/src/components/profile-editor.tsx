@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { CheckCircle2, LoaderCircle, Plus, RotateCcw, Save, Trash2 } from "lucide-react";
+import { CheckCircle2, LoaderCircle, Pencil, Plus, RotateCcw, Save, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { AgentAction } from "@/components/workspace-actions";
 import { type CareerProfile, type ProfileContent, type ProfileEntry, profileSections } from "@/lib/profile";
 
 const inputClass = "h-10 w-full rounded-md border bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 disabled:opacity-60";
@@ -56,6 +57,7 @@ function ProfileForm({ initialProfile }: { initialProfile: CareerProfile }) {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [mustReload, setMustReload] = useState(false);
+  const [editing, setEditing] = useState(false);
   const dirty = JSON.stringify(draft) !== JSON.stringify(saved.content);
   const entryCount = draft.education.length + draft.experience.length + draft.projects.length;
 
@@ -101,6 +103,7 @@ function ProfileForm({ initialProfile }: { initialProfile: CareerProfile }) {
       setDraft(result.content);
       setConfirmed(false);
       setMessage("已保存并确认，刷新页面后仍可查看。");
+      setEditing(false);
     } catch {
       setMustReload(true);
       setError("连接中断，保存结果尚未确认。输入仍保留，请重新读取服务器版本核对。");
@@ -128,7 +131,19 @@ function ProfileForm({ initialProfile }: { initialProfile: CareerProfile }) {
   }
 
   return (
-    <form onSubmit={save} className="space-y-6">
+    <div className="space-y-7">
+      <header className="flex flex-wrap items-start justify-between gap-4">
+        <div className="max-w-xl"><h1 className="text-2xl font-semibold tracking-tight">职业背景</h1><p className="mt-2 text-sm leading-6 text-muted-foreground">事实、能力证据、目标与约束，作为不同职业阶段共享的背景。</p></div>
+        <div className="flex flex-wrap gap-2"><AgentAction variant="outline" prompt="我想整理我的职业背景。我会讲述经历，请先提取事实、证据、目标和约束；不要假定你已经读取工作区，也不要声称已保存档案。">向伙伴讲述</AgentAction><Button variant="ghost" className="h-9" disabled={busy} onClick={() => {
+          if (editing && dirty) {
+            if (!window.confirm("退出精确编辑会放弃未保存的修改，是否继续？")) return;
+            setDraft(saved.content);
+            setConfirmed(false);
+          }
+          setEditing(value => !value);
+        }}><Pencil className="size-3.5" />{editing ? "返回阅读" : "精确修正"}</Button></div>
+      </header>
+      {!editing ? <ProfileReading profile={saved} message={message} /> : <form onSubmit={save} className="space-y-6">
       <section className="grid gap-4 rounded-xl border bg-background p-5 sm:grid-cols-3" aria-label="档案概览">
         <div><p className="text-xs text-muted-foreground">档案状态</p><p className="mt-2 font-medium">{dirty ? "有未保存修改" : saved.version ? "已确认" : "尚未建立"}</p></div>
         <div><p className="text-xs text-muted-foreground">教育、经历与成果</p><p className="mt-2 font-medium">{entryCount} 条记录{dirty ? "（含未保存）" : ""}</p></div>
@@ -191,6 +206,19 @@ function ProfileForm({ initialProfile }: { initialProfile: CareerProfile }) {
           </div>
         </div>
       </div>
-    </form>
+    </form>}
+    </div>
   );
+}
+
+function ProfileReading({ profile, message }: { profile: CareerProfile; message: string }) {
+  const content = profile.content;
+  return <div className="space-y-8">
+    <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-y py-3 text-xs text-muted-foreground"><span>{profile.version ? "已确认档案" : "尚未建立档案"}</span><span>{profile.confirmed_at ? "最近确认 · " + new Date(profile.confirmed_at).toLocaleString("zh-CN") : "先讲述，再核对事实"}</span></div>
+    {message && <p role="status" className="flex items-center gap-2 text-sm"><CheckCircle2 className="size-4" />{message}</p>}
+    {!profile.version && <div className="rounded-xl border px-6 py-7"><h2 className="text-lg font-medium">从你已经拥有的经历开始</h2><p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">不必一次填完所有字段。先向伙伴讲述或提供内容，再审阅整理结果。Agent 更新与导入尚未接入；当前可通过“精确修正”保存已确认事实。</p></div>}
+    {content.display_name && <h2 className="text-xl font-medium">{content.display_name}</h2>}
+    {profileSections.map(section => <section key={section.key} className="border-b pb-7"><h2 className="mb-4 text-sm font-medium">{section.label}</h2>{content[section.key].length ? <div className="space-y-6">{content[section.key].map((entry, index) => <article key={index} className="min-w-0"><div className="flex flex-wrap justify-between gap-2"><h3 className="text-base font-medium break-words">{entry.title}</h3><span className="text-xs text-muted-foreground">{entry.period}</span></div>{entry.organization && <p className="mt-1 text-sm text-muted-foreground">{entry.organization}</p>}{entry.details && <p className="mt-3 whitespace-pre-wrap break-words text-sm leading-7">{entry.details}</p>}{entry.evidence && <details className="mt-3 text-xs leading-6 text-muted-foreground"><summary className="w-fit cursor-pointer rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring">查看证据与来源</summary><p className="mt-2 whitespace-pre-wrap break-words">{entry.evidence}</p></details>}</article>)}</div> : <p className="text-sm text-muted-foreground">尚未记录</p>}</section>)}
+    {([["skills", "技能与能力"], ["goals", "当前目标"], ["constraints", "选择边界与约束"]] as const).map(([key, label]) => <section key={key}><h2 className="mb-3 text-sm font-medium">{label}</h2><p className="whitespace-pre-wrap break-words text-sm leading-7 text-muted-foreground">{content[key] || "尚未记录"}</p></section>)}
+  </div>;
 }

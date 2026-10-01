@@ -1,26 +1,40 @@
 import Link from "next/link";
-import { ArrowRight, CheckCircle2, ChevronRight, FileText, FolderKanban, Sparkles } from "lucide-react";
+import { ArrowRight, FileText, FolderKanban, Layers3 } from "lucide-react";
 
+import { AgentAction, CapabilitiesAction } from "@/components/workspace-actions";
+import { WorkspaceSurface } from "@/components/workspace-surfaces";
 import { workspaceSections, type WorkspaceSection } from "@/components/workspace-sections";
 
-const primaryLinkClass = "inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/80";
-const outlineLinkClass = "inline-flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-sm font-medium hover:bg-muted";
-
-function SectionIntro({ eyebrow, title, description, children }: Readonly<{ eyebrow: string; title: string; description: string; children?: React.ReactNode }>) {
-  return <section className="max-w-3xl space-y-4"><p className="text-xs font-medium tracking-[0.2em] text-muted-foreground">{eyebrow}</p><h1 className="text-4xl font-semibold tracking-tight sm:text-5xl">{title}</h1><p className="max-w-2xl text-base leading-7 text-muted-foreground">{description}</p>{children}</section>;
-}
-
 export function WorkspaceHome() {
-  return <div className="space-y-10"><SectionIntro eyebrow="CAREER WORKSPACE" title="从现在要推进的事开始。" description="CareerAct 把你的职业背景、机会、材料和行动放在同一个持续工作的空间里。你负责目标、反馈和决定，Agent 负责整理、创作与推进。"><div className="flex flex-wrap gap-2 pt-2"><Link className={primaryLinkClass} href="/workspace/assistant"><Sparkles className="size-4" />告诉 Agent 现在要做什么</Link><Link className={outlineLinkClass} href="/workspace/background">先查看职业背景<ChevronRight className="size-4" /></Link></div></SectionIntro><section className="grid gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(18rem,0.65fr)]"><article className="rounded-2xl border bg-background p-6 sm:p-8"><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-medium text-muted-foreground">当前职业项目</p><h2 className="mt-2 text-2xl font-semibold tracking-tight">还没有选择项目</h2></div><span className="rounded-full bg-muted px-2.5 py-1 text-xs text-muted-foreground">基座已就位</span></div><div className="mt-8 rounded-xl border border-dashed p-5"><div className="flex items-start gap-3"><span className="grid size-9 place-items-center rounded-lg bg-muted"><FolderKanban className="size-4" /></span><div><h3 className="font-medium">从一个职业目标开始</h3><p className="mt-1 text-sm leading-6 text-muted-foreground">项目将承载目标、正在推进的工作、Agent 交付和阶段证据。接入真实领域数据后，这里会恢复你上次的工作。</p><Link href="/workspace/projects" className="mt-3 inline-flex items-center gap-1 text-sm font-medium underline underline-offset-4">打开职业项目<ArrowRight className="size-3.5" /></Link></div></div></div></article><aside className="rounded-2xl border bg-background p-6"><p className="text-xs font-medium text-muted-foreground">需要你决定</p><h2 className="mt-2 text-lg font-semibold">暂无待处理事项</h2><p className="mt-2 text-sm leading-6 text-muted-foreground">当 Agent 需要确认事实、接受修改或授权外部动作时，事项会出现在这里。</p><Link href="/workspace/tasks" className="mt-5 inline-flex items-center gap-1 text-sm font-medium underline underline-offset-4">打开任务中心<ChevronRight className="size-3.5" /></Link></aside></section><section className="grid gap-4 sm:grid-cols-3"><QuickLink href="/workspace/opportunities" title="发现机会" text="从授权来源整理值得核验的岗位。" /><QuickLink href="/workspace/library" title="管理资料与成果" text="材料、来源和版本共享同一工作面。" /><QuickLink href="/workspace/preparation" title="准备下一次行动" text="把申请、面试和能力积累关联起来。" /></section></div>;
+  return <div className="space-y-9">
+    <div className="flex flex-wrap items-end justify-between gap-4">
+      <div><p className="mb-2 text-xs text-muted-foreground">个人职业工作区</p><h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">现在，一起推进什么？</h1></div>
+      <AgentAction>和职业伙伴开始</AgentAction>
+    </div>
+    <section aria-labelledby="current-project-heading" className="border-y py-7">
+      <div className="flex items-center justify-between gap-4"><h2 id="current-project-heading" className="text-sm font-medium">当前职业项目</h2><Link href="/workspace/projects" className="text-xs text-muted-foreground underline underline-offset-4">全部项目</Link></div>
+      <div className="mt-6 flex items-start gap-4"><FolderKanban className="mt-1 size-5 shrink-0 text-muted-foreground" /><div className="max-w-xl"><h3 className="text-lg font-medium">从一个值得持续推进的目标开始</h3><p className="mt-2 text-sm leading-6 text-muted-foreground">寻找下一份工作、打磨代表作，或积累一段新经历。先把想法告诉伙伴，再逐步形成计划和成果。</p><p className="mt-2 text-xs text-muted-foreground">项目保存与恢复尚未开放；现在可以先讨论目标。</p><div className="mt-5"><AgentAction variant="outline" prompt="我想一起梳理当前的职业目标。请先问我目前的阶段、目标和约束，再讨论下一步，不要假定已经读取我的档案。">讨论我的目标</AgentAction></div></div></div>
+    </section>
+    <section aria-labelledby="work-heading"><div className="mb-4 flex items-center justify-between"><h2 id="work-heading" className="text-sm font-medium">共同工作</h2><CapabilitiesAction /></div>
+      <div className="divide-y rounded-xl border">
+        <StartWork title="把一段经历变成可复用的成果" text="整理事实、打磨表达，再带回材料审阅。" href="/workspace/library" icon={FileText} />
+        <StartWork title="理清申请进展与下一步" text="以公司、岗位和实投版本组织状态与历史。" href="/workspace/applications" icon={Layers3} />
+        <StartWork title="为下一场面试做好准备" text="把岗位、经历、面经和薄弱项联系起来。" href="/workspace/preparation" icon={FolderKanban} />
+      </div>
+    </section>
+    <section className="grid gap-7 sm:grid-cols-2">
+      <div><h2 className="text-sm font-medium">正在推进</h2><p className="mt-3 text-sm leading-6 text-muted-foreground">工作记录尚未接入，暂不能恢复后台任务。</p><Link href="/workspace/tasks" className="mt-3 inline-flex items-center gap-1 text-xs underline underline-offset-4">查看任务工作面<ArrowRight className="size-3" /></Link></div>
+      <div><h2 className="text-sm font-medium">需要你决定</h2><p className="mt-3 text-sm leading-6 text-muted-foreground">事实确认、材料修改和外部授权会在各自工作面审阅；当前没有已接入的审批队列。</p><Link href="/workspace/review" className="mt-3 inline-flex items-center gap-1 text-xs underline underline-offset-4">打开材料审阅<ArrowRight className="size-3" /></Link></div>
+    </section>
+  </div>;
 }
 
-function QuickLink({ href, title, text }: { href: string; title: string; text: string }) {
-  return <Link href={href} className="group rounded-xl border bg-background p-5 transition-colors hover:bg-muted/40"><FileText className="size-5 text-muted-foreground" /><h2 className="mt-5 font-medium">{title}</h2><p className="mt-1 text-sm leading-6 text-muted-foreground">{text}</p><ChevronRight className="mt-4 size-4 text-muted-foreground transition-transform group-hover:translate-x-1" /></Link>;
+function StartWork({ title, text, href, icon: Icon }: { title: string; text: string; href: string; icon: typeof FileText }) {
+  return <Link href={href} className="group flex items-center gap-4 px-5 py-5 outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring"><Icon className="size-5 shrink-0 text-muted-foreground" /><div className="min-w-0 flex-1"><h3 className="text-sm font-medium">{title}</h3><p className="mt-1 text-xs leading-5 text-muted-foreground">{text}</p></div><ArrowRight className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-1" /></Link>;
 }
 
 export function WorkspaceSectionPage({ section }: { section: WorkspaceSection }) {
   const item = workspaceSections.find(candidate => candidate.key === section);
   if (!item) return null;
-  const Icon = item.icon;
-  return <div className="space-y-10"><SectionIntro eyebrow={item.group.toUpperCase()} title={item.label} description={item.description}><div className="flex flex-wrap gap-2 pt-2"><Link className={primaryLinkClass} href="/workspace/assistant"><Sparkles className="size-4" />让 Agent 从这里开始</Link><span className="inline-flex h-8 items-center gap-2 rounded-lg border px-2.5 text-sm text-muted-foreground"><CheckCircle2 className="size-4" />入口已就位</span></div></SectionIntro><section className="max-w-3xl rounded-2xl border bg-background p-6 sm:p-8"><div className="flex items-start gap-4"><span className="grid size-10 shrink-0 place-items-center rounded-xl bg-muted"><Icon className="size-5 text-muted-foreground" /></span><div className="space-y-3"><h2 className="text-xl font-semibold">这个工作面已纳入产品基座</h2><p className="text-sm leading-6 text-muted-foreground">当前没有伪造的职业数据或模拟完成状态。后续会在这里接入领域对象、Agent 工作成果和需要你决定的事项，并沿用同一套来源、版本、授权与结果边界。</p><div className="rounded-lg bg-muted/60 p-4 text-sm leading-6"><strong className="font-medium">当前阶段：</strong>页面结构已准备，业务接口尚未接入。接口接入后，刷新、对象切换和错误恢复都以服务端领域状态为准。</div></div></div></section><Link href="/workspace" className="inline-flex items-center gap-1 text-sm font-medium underline underline-offset-4">回到工作台<ChevronRight className="size-3.5" /></Link></div>;
+  return <WorkspaceSurface section={section} />;
 }
