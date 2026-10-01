@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ArrowRight, CheckCircle2, ChevronRight, FileText, FolderKanban, Sparkles } from "lucide-react";
 
-import { workspaceSections, type WorkspaceSection } from "@/components/workspace-frame";
+import { workspaceSections, type WorkspaceSection } from "@/components/workspace-sections";
 
 const primaryLinkClass = "inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/80";
 const outlineLinkClass = "inline-flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-sm font-medium hover:bg-muted";
