@@ -34,6 +34,16 @@ export function RuntimeProvider({ children, agentThreadId }: Readonly<{ children
           if (response.status === 422 && await isRestrictedResponse(response)) {
             throw new Error(restrictedContentMessage);
           }
+          if (!response.ok) {
+            const messages: Record<number, string> = {
+              401: "登录已失效，请重新登录后继续。",
+              403: "无法验证请求，请从工作台重试。",
+              413: "委托内容过大，请精简后重试。",
+              415: "伙伴当前仅接收文本，请调整输入后重试。",
+              422: "伙伴当前仅接收文本；附件和自定义上下文尚未开放。",
+            };
+            throw new Error(messages[response.status] ?? "伙伴暂时无法回应，未能确认本次工作结果。请核对已保存内容后重试。");
+          }
           return response;
         },
       }),
