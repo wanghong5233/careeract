@@ -39,6 +39,12 @@ class HistoryResponse(BaseModel):
     messages: list[HistoryMessageResponse]
 
 
+class ContextBasisResponse(BaseModel):
+    run_id: str | None
+    references: list[dict[str, str]]
+    proposals: list[dict[str, str]]
+
+
 def get_service(request: Request) -> AgentWorkSessionService:
     return cast(AgentWorkSessionService, request.app.state.agent_work_session_service)
 
@@ -96,3 +102,17 @@ async def read_session_history(
         session=serialize_session(session),
         messages=[HistoryMessageResponse(**asdict(message)) for message in messages],
     )
+
+
+@router.get("/session/basis", response_model=ContextBasisResponse)
+async def read_context_basis(
+    session_id: Annotated[str, Query(min_length=1, max_length=128)],
+    response: Response,
+    service: Annotated[AgentWorkSessionService, Depends(get_service)],
+    reader: Annotated[AgentHistoryReader, Depends(get_history_reader)],
+    actor: Annotated[ActorContext, Depends(get_actor)],
+) -> ContextBasisResponse:
+    response.headers["Cache-Control"] = "no-store"
+    session = await service.read(actor, session_id=session_id)
+    basis = await reader.basis(session_id=session.session_id, user_id=actor.user_id)
+    return ContextBasisResponse(**asdict(basis))

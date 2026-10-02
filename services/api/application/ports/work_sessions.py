@@ -14,7 +14,16 @@ class AgentHistoryMessage:
     created_at: int
 
 
+@dataclass(frozen=True, slots=True)
+class AgentContextBasis:
+    run_id: str | None
+    references: tuple[dict[str, str], ...] = ()
+    proposals: tuple[dict[str, str], ...] = ()
+
+
 class AgentHistoryReader(Protocol):
+    async def basis(self, *, session_id: str, user_id: str) -> AgentContextBasis: ...
+
     async def read(
         self, *, session_id: str, user_id: str, limit: int
     ) -> tuple[AgentHistoryMessage, ...]: ...

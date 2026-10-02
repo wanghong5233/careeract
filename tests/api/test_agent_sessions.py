@@ -1,6 +1,7 @@
 import os
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
@@ -45,6 +46,18 @@ class SyntheticMessage:
 
 
 class SyntheticSession:
+    runs = [
+        SimpleNamespace(
+            run_id="synthetic-run",
+            metadata={
+                "career_basis": [
+                    {"type": "rule", "id": "synthetic-rule", "title": "合成规则", "version": "v1"}
+                ],
+                "career_proposals": [],
+            },
+        )
+    ]
+
     def get_messages(self, **_: Any) -> list[SyntheticMessage]:
         return [
             SyntheticMessage("user-message", "user", "合成目标", 1),
@@ -114,6 +127,21 @@ async def test_agent_session_history_is_user_scoped(
                 "合成目标",
                 "合成建议",
             ]
+            basis = await client.get(
+                "/api/v1/agent/session/basis",
+                headers=first_headers,
+                params={"session_id": "opaque-test-session"},
+            )
+            assert basis.status_code == 200
+            assert basis.json()["run_id"] == "synthetic-run"
+            assert basis.json()["references"][0]["title"] == "合成规则"
+            assert basis.headers["cache-control"] == "no-store"
+            denied_basis = await client.get(
+                "/api/v1/agent/session/basis",
+                headers=second_headers,
+                params={"session_id": "opaque-test-session"},
+            )
+            assert denied_basis.status_code == 404
             forbidden = await client.get(
                 "/api/v1/agent/session/history",
                 headers=second_headers,

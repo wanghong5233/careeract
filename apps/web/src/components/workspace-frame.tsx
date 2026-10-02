@@ -7,6 +7,7 @@ import { useAui, useAuiState } from "@assistant-ui/react";
 import { Bird, ChevronDown, ChevronRight, FolderKanban, LogOut, Menu, PanelRight, Search, X } from "lucide-react";
 
 import { RuntimeProvider } from "@/app/runtime-provider";
+import { AgentContextBasis } from "@/components/agent-context-basis";
 import { Thread } from "@/components/thread.aui";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -38,6 +39,7 @@ function AgentDock({ currentLabel, onClose }: { currentLabel: string; onClose: (
       <Button variant="ghost" size="icon" onClick={onClose} aria-label="收起职业伙伴"><X className="size-4" /></Button>
     </div>
     <div className="border-b px-5 py-3 text-xs text-muted-foreground">正在查看：<span className="text-foreground">{currentLabel}</span><p className="mt-1">页面内容尚未自动带入对话</p><p className="mt-2 leading-5">保存的职业资料在服务端；发送的内容会交给已配置的模型服务。请勿提供证件号、密码或验证码。</p></div>
+    <AgentContextBasis />
     <div className="min-h-0 flex-1"><Thread autoFocus={false} showSuggestions={false} showExecutionDetails={false} components={{ Welcome: AgentWelcome }} /></div>
   </div>;
 }

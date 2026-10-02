@@ -18,6 +18,14 @@ class MemoryService:
     def __init__(self, repository: MemoryRepository) -> None:
         self.repository = repository
 
+    async def effective_rules(
+        self, actor: ActorContext, *, project_id: UUID | None
+    ) -> tuple[WorkspaceMemory, ...]:
+        rules = await self.repository.effective_rules(actor, project_id=project_id, limit=101)
+        if len(rules) > 100:
+            raise MemoryInvalid("Effective rules exceed the run context limit")
+        return rules
+
     async def list(
         self,
         actor: ActorContext,

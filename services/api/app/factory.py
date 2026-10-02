@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 
 from services.api.app.settings import Settings
+from services.api.application.agent_context import AgentContextService
 from services.api.application.memories import MemoryService
 from services.api.application.profiles import ProfileService
 from services.api.application.projects import ProjectService
@@ -32,6 +33,12 @@ from services.api.domain.work_session import (
 )
 from services.api.infrastructure.agent_runtime import build_agent_os
 from services.api.infrastructure.agent_sessions import AgnoAgentHistoryReader
+from services.api.infrastructure.agent_tools import (
+    build_agent_tools,
+    build_career_instructions,
+    initialize_run_manifest,
+    persist_run_manifest,
+)
 from services.api.infrastructure.authentication import JwtAuthenticationMiddleware
 from services.api.infrastructure.database import create_engine
 from services.api.infrastructure.memories import PostgresMemoryRepository
@@ -93,18 +100,19 @@ def create_app(
     )
     if career_agent is not None:
         app.state.agent_history_reader = AgnoAgentHistoryReader(career_agent)
-        from services.api.infrastructure.agent_tools import build_agent_tools
-
         set_tools = getattr(career_agent, "set_tools", None)
         if callable(set_tools):
-            set_tools(
-                build_agent_tools(
-                    app.state.profile_service,
-                    app.state.project_service,
-                    app.state.memory_service,
-                    app.state.agent_work_session_service,
-                )
+            context_service = AgentContextService(
+                app.state.profile_service,
+                app.state.project_service,
+                app.state.memory_service,
+                app.state.agent_work_session_service,
             )
+            set_tools(build_agent_tools(context_service))
+            career_agent.cache_callables = False
+            career_agent.instructions = build_career_instructions(context_service)
+            career_agent.pre_hooks = [initialize_run_manifest]
+            career_agent.post_hooks = [persist_run_manifest]
     app.state.settings = settings
     app.state.agent_os = agent_os
     app.add_middleware(PrivacyBoundaryMiddleware)

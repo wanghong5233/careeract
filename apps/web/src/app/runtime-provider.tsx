@@ -20,7 +20,17 @@ export function RuntimeProvider({ children, agentThreadId }: Readonly<{ children
         threadId,
         headers: { Accept: "text/event-stream" },
         fetch: async (url, init) => {
-          const response = await fetch(url, init);
+          let requestInit = init;
+          if (typeof init?.body === "string") {
+            const body = JSON.parse(init.body) as { messages?: Array<{ id: string; role: string; content?: string }> };
+            if (body.messages) {
+              body.messages = body.messages
+                .filter(message => ["user", "assistant"].includes(message.role) && typeof message.content === "string" && message.content.length > 0)
+                .map(message => ({ id: message.id, role: message.role, content: message.content! }));
+            }
+            requestInit = { ...init, body: JSON.stringify(body) };
+          }
+          const response = await fetch(url, requestInit);
           if (response.status === 422 && await isRestrictedResponse(response)) {
             throw new Error(restrictedContentMessage);
           }

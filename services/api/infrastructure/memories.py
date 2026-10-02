@@ -83,6 +83,30 @@ class PostgresMemoryRepository:
     def __init__(self, engine: AsyncEngine) -> None:
         self.engine = engine
 
+    async def effective_rules(
+        self, actor: ActorContext, *, project_id: UUID | None, limit: int
+    ) -> tuple[WorkspaceMemory, ...]:
+        try:
+            async with self.engine.connect() as connection:
+                rows = (
+                    (
+                        await connection.execute(
+                            text(
+                                "SELECT * FROM career.workspace_memories "
+                                "WHERE user_id=:user_id AND kind='rule' AND state='confirmed' "
+                                "AND (project_id IS NULL OR project_id=:project_id) "
+                                "ORDER BY updated_at DESC, id DESC LIMIT :limit"
+                            ),
+                            {"user_id": actor.user_id, "project_id": project_id, "limit": limit},
+                        )
+                    )
+                    .mappings()
+                    .all()
+                )
+                return tuple(memory_from_row(row) for row in rows)
+        except (DBAPIError, PoolTimeoutError):
+            raise MemoryUnavailable("Effective rules are unavailable") from None
+
     async def list(
         self,
         actor: ActorContext,

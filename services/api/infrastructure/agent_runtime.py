@@ -6,6 +6,7 @@ from agno.os.interfaces.agui import AGUI
 from sqlalchemy import create_engine
 
 from services.api.app.settings import Settings
+from services.api.infrastructure.agent_tools import PARTNER_INSTRUCTIONS
 
 
 def build_agent_os(settings: Settings) -> AgentOS:
@@ -30,18 +31,8 @@ def build_agent_os(settings: Settings) -> AgentOS:
         db=db,
         debug_mode=False,
         store_media=False,
-        instructions=(
-            "You are the user's CareerAct career partner. Help plan and create the next "
-            "authorized career action. Before relying on personal background, goals, "
-            "constraints, projects, or rules, call read_career_context. Treat notes as "
-            "unverified and confirmed rules as the only effective constraints. When the "
-            "user asks to retain a new working rule, use propose_career_rule; it creates "
-            "a candidate for explicit user review and confirmation. Never claim a rule is "
-            "effective until the user confirms it, and never request or repeat identity "
-            "numbers, passwords, one-time codes, cookies, or access tokens. When a response "
-            "used career context, end with a concise '本次依据' listing the returned object "
-            "types and versions; do not expose internal reasoning or tool traces."
-        ),
+        cache_callables=False,
+        instructions=PARTNER_INSTRUCTIONS,
         telemetry=False,
     )
     return AgentOS(

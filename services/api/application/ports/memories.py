@@ -6,6 +6,10 @@ from services.api.domain.memory import MemoryKind, MemoryPage, WorkspaceMemory
 
 
 class MemoryRepository(Protocol):
+    async def effective_rules(
+        self, actor: ActorContext, *, project_id: UUID | None, limit: int
+    ) -> tuple[WorkspaceMemory, ...]: ...
+
     async def list(
         self,
         actor: ActorContext,

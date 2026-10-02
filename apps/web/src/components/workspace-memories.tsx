@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
+import { useAuiState } from "@assistant-ui/react";
 import { LoaderCircle } from "lucide-react";
 
 import { AgentAction } from "@/components/workspace-actions";
@@ -21,6 +22,7 @@ function stateLabel(memory: WorkspaceMemory) {
 }
 
 export function WorkspaceMemories({ onDirtyChange }: { onDirtyChange?: (dirty: boolean) => void }) {
+  const agentRunning = useAuiState(state => state.thread.isRunning);
   const [kind, setKind] = useState<MemoryKind>();
   const [includeRetired, setIncludeRetired] = useState(false);
   const [memories, setMemories] = useState<WorkspaceMemory[]>([]);
@@ -49,6 +51,7 @@ export function WorkspaceMemories({ onDirtyChange }: { onDirtyChange?: (dirty: b
   }, [dirty, busyId, onDirtyChange]);
 
   useEffect(() => {
+    if (agentRunning) return;
     const controller = new AbortController();
     readMemories({ kind, includeRetired, cursor }, AbortSignal.any([controller.signal, AbortSignal.timeout(20_000)]))
       .then(page => {
@@ -62,7 +65,7 @@ export function WorkspaceMemories({ onDirtyChange }: { onDirtyChange?: (dirty: b
       })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [kind, includeRetired, cursor, attempt]);
+  }, [kind, includeRetired, cursor, attempt, agentRunning]);
 
   function reload() {
     setCursor(undefined); setLoading(true); setLoadError(""); setAttempt(value => value + 1);
