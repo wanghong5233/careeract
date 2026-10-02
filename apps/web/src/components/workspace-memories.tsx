@@ -83,7 +83,7 @@ export function WorkspaceMemories({ onDirtyChange }: { onDirtyChange?: (dirty: b
         ? await updateMemory(editing, { title: title.trim(), content: content.trim() }, AbortSignal.timeout(20_000))
         : await createMemory({ id: draftId!, kind: draftKind, title: title.trim(), content: content.trim() }, AbortSignal.timeout(20_000));
       closeEditor();
-      setNotice(saved.kind === "rule" ? "已保存为待确认规则。确认后可供后续工作读取；伙伴读取工具尚未接入。" : "笔记已保存，不会自动成为规则。");
+      setNotice(saved.kind === "rule" ? "已保存为待确认规则。确认后可供伙伴读取；确认前不会影响后续工作。" : "笔记已保存，不会自动成为规则。");
       reload();
     } catch (failure: unknown) {
       setError(failure instanceof Error ? failure.message : "未能确认保存结果，请读取核对。");
@@ -107,7 +107,7 @@ export function WorkspaceMemories({ onDirtyChange }: { onDirtyChange?: (dirty: b
     try {
       const saved = action === "confirm" ? await confirmMemory(memory, AbortSignal.timeout(20_000)) : await retireMemory(memory, AbortSignal.timeout(20_000));
       setMemories(current => current.flatMap(item => item.id !== saved.id ? [item] : saved.state === "retired" && !includeRetired ? [] : [saved]));
-      setNotice(action === "confirm" ? "规则已确认；伙伴读取工具尚未接入。" : "记录已撤销，查看撤销记录可以核对正文。");
+      setNotice(action === "confirm" ? "规则已确认；后续伙伴工作会按当前版本读取。" : "记录已撤销，查看撤销记录可以核对正文。");
     } catch (failure: unknown) { setError(failure instanceof Error ? failure.message : "操作结果尚未确认，请重新读取核对。"); }
     finally { setBusyId(""); }
   }
@@ -115,9 +115,9 @@ export function WorkspaceMemories({ onDirtyChange }: { onDirtyChange?: (dirty: b
   const editorOpen = Boolean(draftId || editing);
   return <section className="mt-5 space-y-5">
     <div className="flex flex-wrap items-start justify-between gap-3">
-      <div><h2 className="text-sm font-medium">长期上下文</h2><p className="mt-2 max-w-2xl text-xs leading-5 text-muted-foreground">保存有来源的经验，核对、纠正或撤销它。笔记不自动成为规则；伙伴读取与提议工具将在下一阶段接入。</p></div>
+      <div><h2 className="text-sm font-medium">长期上下文</h2><p className="mt-2 max-w-2xl text-xs leading-5 text-muted-foreground">保存有来源的经验，核对、纠正或撤销它。笔记不自动成为规则；已确认规则会在后续伙伴工作中按版本读取。</p></div>
       <div className="flex flex-wrap gap-2">
-        <AgentAction prompt="我想沉淀一条职业经验。请和我澄清内容、来源和适用范围，先给出笔记或规则提议。当前没有规则写入工具，不要声称已经保存或生效。">和伙伴整理</AgentAction>
+        <AgentAction prompt="我想沉淀一条职业经验。请和我澄清内容、来源和适用范围，再提出一条待我确认的笔记或规则。不要把提议说成已经生效。">和伙伴整理</AgentAction>
         <Button variant="outline" size="sm" disabled={editorOpen || Boolean(busyId)} onClick={() => { setDraftId(crypto.randomUUID()); setTitle(""); setContent(""); setError(""); }}>记录一条</Button>
       </div>
     </div>

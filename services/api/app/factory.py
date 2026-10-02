@@ -93,6 +93,18 @@ def create_app(
     )
     if career_agent is not None:
         app.state.agent_history_reader = AgnoAgentHistoryReader(career_agent)
+        from services.api.infrastructure.agent_tools import build_agent_tools
+
+        set_tools = getattr(career_agent, "set_tools", None)
+        if callable(set_tools):
+            set_tools(
+                build_agent_tools(
+                    app.state.profile_service,
+                    app.state.project_service,
+                    app.state.memory_service,
+                    app.state.agent_work_session_service,
+                )
+            )
     app.state.settings = settings
     app.state.agent_os = agent_os
     app.add_middleware(PrivacyBoundaryMiddleware)
