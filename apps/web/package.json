@@ -9,7 +9,8 @@
     "generate:api": "openapi-typescript http://localhost:8000/openapi.json -o src/lib/api-schema.d.ts",
     "start": "next start",
     "lint": "eslint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --test tests/*.test.mjs"
   },
   "dependencies": {
     "@ag-ui/client": "^0.0.59",

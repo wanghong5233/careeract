@@ -1,6 +1,7 @@
 # CareerAct Agent Instructions
 
-产品是职业 Agent Workspace，不是聊天应用、通用 Computer Use 平台或 RAG 项目。
+产品主体是职业 Agent；职业工作面是 Agent 组织上下文、推进任务和交付成果的承载层。
+它不是传统工作台、聊天应用、通用 Computer Use 平台或 RAG 项目。
 
 ## Start here
 
@@ -19,6 +20,7 @@
 ## Working agreements
 
 - 先看工作区已有改动；不覆盖他人修改。默认不 commit、push 或创建 PR，除非用户要求。
+- “继续”只推进 STATUS 当前阶段；产品方向认可、原型冻结或技术通过不等于进入业务开发，切换阶段须有用户明确授权。
 - 小改动直接处理；跨服务、行为不明确或有外部副作用的任务，先明确范围、验收和风险。
   重要专题在 `docs/topics/<name>/` 集中维护；工作组织与文档治理按需读 `careeract-engineering`。
 - 按[单人开发流程](docs/handbook/DEVELOPMENT.md#单人开发流程)一次推进一个可验收目标；
@@ -42,7 +44,7 @@
 
 ## Architecture boundaries
 
-- `apps/web`：Next.js 工作台、Better Auth、同源 BFF 和 Agent 交互组件。
+- `apps/web`：Next.js Agent 产品壳、工作面、Better Auth、同源 BFF 和 Agent 交互组件。
 - `services/api/domain`：无框架依赖的职业领域对象与规则。
 - `services/api/application`：用例、事务边界和外部能力端口。
 - `services/api/infrastructure`：数据库、AgentOS、模型、认证和对象存储实现。
@@ -83,13 +85,16 @@ PostgreSQL 中的 CareerAct 领域数据是业务真相。Agent Run、聊天线�
 
 ```powershell
 uv sync --frozen --all-packages --group dev
-uv run ruff format --check services tests
-uv run ruff check services tests
-uv run mypy services tests
+uv run ruff format --check services tests scripts/check_changes.py scripts/check_secrets.py
+uv run ruff check services tests scripts/check_changes.py scripts/check_secrets.py
+uv run mypy services tests scripts/check_changes.py scripts/check_secrets.py
 uv run pytest
+uv run python scripts/check_changes.py --worktree
+uv run python scripts/check_secrets.py --worktree
 Set-Location apps/web
 npm run lint
 npm run typecheck
+npm run test
 npm run build
 ```
 
@@ -97,3 +102,6 @@ npm run build
 上述命令是代码提交检查；执行完返回仓库根目录。CI 的版本与环境以 `.github/workflows/ci.yml` 为准。
 报告实际执行的检查和结果；未运行、被环境阻塞、使用 mock 与真实集成通过必须分别说明。
 区分文档/源码支持、本地验证与目标部署环境验证，不将前者表述为后者。
+
+提交主题与受保护路径由 `scripts/check_changes.py`、`.githooks/commit-msg` 和 CI 检查；
+使用 `<type>(<scope>): <具体结果>`，按开发指南拆分自有代码、vendor 与生成类型变更，不绕过 hook。

@@ -37,12 +37,12 @@ export function RuntimeProvider({ children, agentThreadId }: Readonly<{ children
           if (!response.ok) {
             const messages: Record<number, string> = {
               401: "登录已失效，请重新登录后继续。",
-              403: "无法验证请求，请从工作台重试。",
+              403: "无法验证请求，请从 CareerAct Agent 重试。",
               413: "委托内容过大，请精简后重试。",
-              415: "伙伴当前仅接收文本，请调整输入后重试。",
-              422: "伙伴当前仅接收文本；附件和自定义上下文尚未开放。",
+              415: "Agent 当前仅接收文本，请调整输入后重试。",
+              422: "Agent 当前仅接收文本；附件和自定义上下文尚未开放。",
             };
-            throw new Error(messages[response.status] ?? "伙伴暂时无法回应，未能确认本次工作结果。请核对已保存内容后重试。");
+            throw new Error(messages[response.status] ?? "Agent 暂时无法回应，未能确认本次工作结果。请核对已保存内容后重试。");
           }
           return response;
         },
@@ -51,9 +51,9 @@ export function RuntimeProvider({ children, agentThreadId }: Readonly<{ children
   );
   const history = useMemo<ThreadHistoryAdapter>(() => ({
     async load() {
-      const response = await fetch("/api/agent/history", { cache: "no-store" });
+      const response = await fetch("/api/agent/history", { cache: "no-store", signal: AbortSignal.timeout(20_000) });
       if (response.status === 404) return { messages: [] };
-      if (!response.ok) throw new Error("伙伴历史暂时无法读取，请稍后重试。");
+      if (!response.ok) throw new Error("Agent 历史暂时无法读取，请稍后重试。");
       const body = await response.json() as { messages: Array<{ id: string; role: "user" | "assistant"; content: string; created_at: number }> };
       const messages = body.messages.map(message => ({
         id: message.id,

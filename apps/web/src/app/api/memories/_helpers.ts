@@ -59,7 +59,7 @@ export async function forwardMemoryRequest(
 ): Promise<Response> {
   const requestId = crypto.randomUUID();
   if (method !== "GET" && !hasTrustedOrigin(request)) {
-    return failure(403, "forbidden", "请求来源无效，请从工作台保存。", requestId);
+    return failure(403, "forbidden", "请求来源无效，请从 CareerAct Agent 保存。", requestId);
   }
   const auth = await authenticate(request, requestId);
   if ("response" in auth) return auth.response;

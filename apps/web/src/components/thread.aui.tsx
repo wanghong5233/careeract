@@ -267,7 +267,7 @@ const Composer: FC<{ autoFocus: boolean }> = ({ autoFocus }) => {
                       rows={1}
                       autoFocus={autoFocus}
                       enterKeyHint="send"
-                      aria-label="给职业伙伴的输入"
+                      aria-label="给职业 Agent 的输入"
                     /><ComposerAction /></div>
     </ComposerPrimitive.Root>
   );

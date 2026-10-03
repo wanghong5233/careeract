@@ -2,6 +2,7 @@
 
 import { type FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Eye, EyeOff } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { authClient } from "@/lib/auth-client";
@@ -11,6 +12,7 @@ export default function SignInPage() {
   const [isSignUp, setIsSignUp] = useState(false);
   const [error, setError] = useState<string>();
   const [isPending, setIsPending] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -21,17 +23,20 @@ export default function SignInPage() {
     const email = String(form.get("email"));
     const password = String(form.get("password"));
     const name = String(form.get("name") ?? email);
-    const result = isSignUp
-      ? await authClient.signUp.email({ email, password, name })
-      : await authClient.signIn.email({ email, password });
-
-    setIsPending(false);
-    if (result.error) {
-      setError(result.error.message ?? "Authentication failed");
-      return;
-    }
-    router.push("/");
-    router.refresh();
+    try {
+      const result = isSignUp
+        ? await authClient.signUp.email({ email: email.trim(), password, name: name.trim() })
+        : await authClient.signIn.email({ email: email.trim(), password });
+      if (result.error) {
+        setError(result.error.status === 429 ? "操作过于频繁，请稍后再试。" : isSignUp ? "注册失败，请检查填写内容；已有账户请直接登录。" : "登录失败，请核对邮箱和密码后重试。");
+        return;
+      }
+      const returnTo = new URLSearchParams(window.location.search).get("returnTo") ?? "/workspace";
+      const destination = !returnTo.includes("\\") && (returnTo === "/workspace" || returnTo.startsWith("/workspace/") || returnTo.startsWith("/workspace?")) ? returnTo : "/workspace";
+      router.replace(destination);
+      router.refresh();
+    } catch { setError("无法连接服务，请检查网络后重试。"); }
+    finally { setIsPending(false); }
   }
 
   return (
@@ -43,45 +48,55 @@ export default function SignInPage() {
         <div>
           <h1 className="text-2xl font-semibold">CareerAct</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            {isSignUp ? "Create your account" : "Sign in to your career workspace"}
+            {isSignUp ? "创建账户，开始你的职业计划" : "登录，继续你的职业计划"}
           </p>
         </div>
-        {isSignUp && (
+        <fieldset disabled={isPending} className="space-y-4">
+        {isSignUp && <div className="space-y-2"><label htmlFor="sign-in-name" className="text-sm">显示名称</label>
           <input
+            id="sign-in-name"
             name="name"
             autoComplete="name"
-            placeholder="Name"
+            placeholder="你的名字"
             required
             className="h-10 w-full rounded-md border bg-background px-3 text-sm"
           />
-        )}
+        </div>}
+        <div className="space-y-2"><label htmlFor="sign-in-email" className="text-sm">邮箱</label>
         <input
+          id="sign-in-email"
           name="email"
           type="email"
           autoComplete="email"
-          placeholder="Email"
+          placeholder="name@example.com"
           required
           className="h-10 w-full rounded-md border bg-background px-3 text-sm"
         />
+        </div>
+        <div className="space-y-2"><label htmlFor="sign-in-password" className="text-sm">密码</label><div className="relative">
         <input
+          id="sign-in-password"
           name="password"
-          type="password"
+          type={showPassword ? "text" : "password"}
           autoComplete={isSignUp ? "new-password" : "current-password"}
-          placeholder="Password"
-          minLength={8}
+          placeholder={isSignUp ? "至少 8 个字符" : "输入密码"}
+          minLength={isSignUp ? 8 : undefined}
           required
-          className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+          className="h-10 w-full rounded-md border bg-background pl-3 pr-11 text-sm"
         />
-        {error && <p className="text-sm text-destructive">{error}</p>}
+        <button type="button" aria-label={showPassword ? "隐藏密码" : "显示密码"} aria-pressed={showPassword} onClick={() => setShowPassword(value => !value)} className="absolute right-0 top-0 flex size-10 items-center justify-center text-muted-foreground">{showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}</button></div></div>
+        </fieldset>
+        {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
         <Button type="submit" className="w-full" disabled={isPending}>
-          {isPending ? "Please wait…" : isSignUp ? "Create account" : "Sign in"}
+          {isPending ? "正在处理…" : isSignUp ? "创建账户" : "登录"}
         </Button>
         <button
           type="button"
-          onClick={() => setIsSignUp((value) => !value)}
+          disabled={isPending}
+          onClick={() => { setIsSignUp(value => !value); setError(undefined); setShowPassword(false); }}
           className="w-full text-sm text-muted-foreground hover:text-foreground"
         >
-          {isSignUp ? "Already have an account? Sign in" : "New to CareerAct? Sign up"}
+          {isSignUp ? "已有账户？登录" : "还没有账户？创建账户"}
         </button>
       </form>
     </main>

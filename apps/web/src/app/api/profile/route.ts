@@ -15,7 +15,7 @@ function failure(status: number, code: string, message: string, requestId: strin
 async function forward(request: NextRequest): Promise<Response> {
   const requestId = crypto.randomUUID();
   if (request.method === "PUT" && request.headers.get("origin") !== new URL(serverEnv.betterAuthUrl).origin) {
-    return failure(403, "forbidden", "请求来源无效，请从工作台保存。", requestId);
+    return failure(403, "forbidden", "请求来源无效，请从 CareerAct Agent 保存。", requestId);
   }
   const auth = getAuth();
   const session = await auth.api.getSession({ headers: request.headers });

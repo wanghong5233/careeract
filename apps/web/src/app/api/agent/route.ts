@@ -42,7 +42,7 @@ async function readBody(request: NextRequest, requestId: string): Promise<Uint8A
 export async function POST(request: NextRequest): Promise<Response> {
   const requestId = crypto.randomUUID();
   if (request.headers.get("origin") !== new URL(serverEnv.betterAuthUrl).origin) {
-    return failure(403, "forbidden", "请求来源无效，请从工作台发送。", requestId);
+    return failure(403, "forbidden", "请求来源无效，请从 CareerAct Agent 发送。", requestId);
   }
 
   const auth = getAuth();
@@ -75,7 +75,7 @@ export async function POST(request: NextRequest): Promise<Response> {
       return new Response(null, { status: 499 });
     }
     console.error("Agent upstream request failed", { requestId });
-    return failure(502, "agent_unavailable", "伙伴暂时无法回应，请稍后重试。", requestId);
+    return failure(502, "agent_unavailable", "Agent 暂时无法回应，请稍后重试。", requestId);
   }
 
   const responseHeaders = new Headers();

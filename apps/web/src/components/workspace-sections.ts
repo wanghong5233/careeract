@@ -1,8 +1,7 @@
 import {
   Archive,
-  Bird,
+  Command,
   BookOpen,
-  BriefcaseBusiness,
   CalendarDays,
   CheckSquare,
   FileText,
@@ -36,16 +35,16 @@ export type WorkspaceNavItem = {
   keywords?: string;
 };
 
-export const workspaceGroups = ["当前工作", "职业积累", "求职行动", "准备与决策", "Agent 工作", "系统"];
+export const workspaceGroups = ["Agent", "职业积累", "求职行动", "准备与决策", "系统"];
 
 export function navigationHref(key: WorkspaceSection) {
   return key === "overview" ? "/workspace" : `/workspace/${key}`;
 }
 
 export const workspaceSections: WorkspaceNavItem[] = [
-  { key: "overview", label: "工作台", description: "当前项目与下一步", icon: BriefcaseBusiness, group: "当前工作" },
-  { key: "review", label: "材料审阅", description: "Diff、来源与版本", icon: FileText, group: "当前工作" },
-  { key: "execution", label: "申请执行", description: "核对、授权与接管", icon: Workflow, group: "当前工作" },
+  { key: "overview", label: "Agent 委托", description: "表达目标与继续工作", icon: Command, group: "Agent" },
+  { key: "review", label: "材料审阅", description: "Diff、来源与版本", icon: FileText, group: "Agent" },
+  { key: "execution", label: "申请执行", description: "核对、授权与接管", icon: Workflow, group: "Agent" },
   { key: "projects", label: "职业项目", description: "目标、里程碑与复盘", icon: FolderKanban, group: "职业积累" },
   { key: "background", label: "职业背景", description: "事实、来源与证据", icon: Layers3, group: "职业积累" },
   { key: "library", label: "资料与成果", description: "原件、材料与版本", icon: FileText, group: "职业积累", keywords: "简历 实习 经历 文档 导出" },
@@ -58,9 +57,9 @@ export const workspaceSections: WorkspaceNavItem[] = [
   { key: "decisions", label: "职业决策", description: "选择与理由", icon: Target, group: "准备与决策" },
   { key: "practice", label: "项目讲述", description: "经历表达与反馈", icon: Sparkles, group: "准备与决策" },
   { key: "interviews", label: "模拟面试", description: "文字、语音与复盘", icon: MessageSquare, group: "准备与决策" },
-  { key: "assistant", label: "职业伙伴", description: "委托、记忆与职责", icon: Bird, group: "Agent 工作", keywords: "规则 注意事项 长期上下文 约束" },
-  { key: "tasks", label: "任务中心", description: "进度、等待与异常", icon: CheckSquare, group: "Agent 工作" },
-  { key: "automations", label: "托管服务", description: "范围、授权与运行", icon: Timer, group: "Agent 工作" },
-  { key: "reports", label: "结果报告", description: "结果、证据与记录", icon: Archive, group: "Agent 工作" },
+  { key: "assistant", label: "Agent 上下文", description: "记忆、规则与职责", icon: Command, group: "Agent", keywords: "规则 注意事项 长期上下文 约束" },
+  { key: "tasks", label: "Agent 工作", description: "进度、等待与异常", icon: CheckSquare, group: "Agent" },
+  { key: "automations", label: "持续委托", description: "范围、授权与运行", icon: Timer, group: "Agent" },
+  { key: "reports", label: "工作结果", description: "结果、证据与记录", icon: Archive, group: "Agent" },
   { key: "settings", label: "设置与连接", description: "账户、模型与来源", icon: Settings2, group: "系统" },
 ];

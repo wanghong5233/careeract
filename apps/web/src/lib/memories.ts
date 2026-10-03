@@ -40,7 +40,7 @@ async function requestMemory<T>(path: string, options: RequestInit = {}): Promis
     }
     const messages: Record<number, string> = {
       401: "登录已失效，请重新登录。",
-      403: "无法验证请求，请从工作台重试。",
+      403: "无法验证请求，请从 CareerAct Agent 重试。",
       404: "找不到该规则或笔记。",
       409: "内容已有更新，请重新读取后再操作。",
       422: "请检查标题、内容和确认状态。",

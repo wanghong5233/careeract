@@ -10,5 +10,6 @@ export const dynamic = "force-dynamic";
 export default async function WorkspaceLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   const session = await getAuth().api.getSession({ headers: await headers() });
   if (!session) redirect("/sign-in");
-  return <WorkspaceFrame agentThreadId={agentThreadId(session.user.id)}>{children}</WorkspaceFrame>;
+  const threadId = agentThreadId(session.user.id);
+  return <WorkspaceFrame key={threadId} agentThreadId={threadId}>{children}</WorkspaceFrame>;
 }

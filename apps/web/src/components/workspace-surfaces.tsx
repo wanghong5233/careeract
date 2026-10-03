@@ -2,7 +2,7 @@
 
 import { useCallback, useId, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { ArrowRight, Bird, Check, ChevronRight, LockKeyhole, PanelTop, Search } from "lucide-react";
+import { ArrowRight, ChevronRight, Layers, LockKeyhole, PanelTop, Search } from "lucide-react";
 
 import { AgentAction } from "@/components/workspace-actions";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { navigationHref, workspaceSections, type WorkspaceSection } from "@/components/workspace-sections";
 import { WorkspaceProjects } from "@/components/workspace-projects";
 import { WorkspaceMemories as MemoryWorkspace } from "@/components/workspace-memories";
+import { WorkspaceMaterials } from "@/components/workspace-materials";
 import { cn } from "@/lib/utils";
 
 function SurfaceHeader({ title, description, action }: { title: string; description: string; action?: ReactNode }) {
@@ -77,7 +78,7 @@ function RecordSurface({ section }: { section: RecordSection }) {
   const [filter, setFilter] = useState(definition.filters[0]);
   const [query, setQuery] = useState("");
   return <>
-    <SurfaceHeader title={workspaceSections.find(item => item.key === section)!.label} description={definition.description} action={<AgentAction prompt={definition.prompt}>与伙伴讨论</AgentAction>} />
+    <SurfaceHeader title={workspaceSections.find(item => item.key === section)!.label} description={definition.description} action={<AgentAction prompt={definition.prompt}>交给 Agent</AgentAction>} />
     <Unavailable>{definition.boundary}</Unavailable>
     <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><ViewPicker options={definition.filters} value={filter} onChange={setFilter} label="记录视图" /><label className="flex h-9 max-w-full items-center gap-2 rounded-md border px-3"><Search className="size-3.5 shrink-0 text-muted-foreground" /><input aria-label={definition.placeholder} placeholder={definition.placeholder} value={query} onChange={event => setQuery(event.target.value)} className="min-w-0 w-48 bg-transparent text-xs outline-none" /></label></div>
     <div className="grid min-w-0 gap-6 2xl:grid-cols-[minmax(0,1fr)_16rem]">
@@ -90,10 +91,10 @@ function RecordSurface({ section }: { section: RecordSection }) {
 
 type ContentSection = "library" | "growth" | "preparation" | "practice";
 const contentSurfaces: Record<ContentSection, { description: string; folders: string[]; empty: string; outcome: string; prompt: string; related: WorkspaceSection[] }> = {
-  library: { description: "原件、事实和对外表达各有位置；让伙伴创作，你审阅同一份成果。", folders: ["全部资料", "申请材料", "经历素材", "研究与笔记", "原始来源"], empty: "选择一份共同打磨的内容", outcome: "正文、来源、修改提议与历史版本会在同一工作面切换。", prompt: "我想打磨一份职业材料。我会提供正文、真实事实和用途，请先确认边界，再提出修改，不编造经历。", related: ["background", "review", "applications"] },
+  library: { description: "原件、事实和对外表达各有位置；让 Agent 创作，你审阅同一份成果。", folders: ["全部资料", "申请材料", "经历素材", "研究与笔记", "原始来源"], empty: "选择一份共同打磨的内容", outcome: "正文、来源、修改提议与历史版本会在同一工作面切换。", prompt: "我想打磨一份职业材料。我会提供正文、真实事实和用途，请先确认边界，再提出修改，不编造经历。", related: ["background", "review", "applications"] },
   growth: { description: "把工作和学习中的证据积累下来，再复用于下一次申请、面试与职业选择。", folders: ["经历与成果", "能力账本", "待补能力", "阶段复盘"], empty: "把一段新经历留成长期资产", outcome: "原始职责、难题、证据与可迁移能力关联保存，不只剩下一条简历表达。", prompt: "我想复盘一段实习或工作经历。我会讲述职责、难题和结果，请帮我提取已确认事实、能力证据与待核实内容。", related: ["background", "library", "projects"] },
   preparation: { description: "围绕具体岗位和实投版本准备，把公司研究、面经与训练连成下一步。", folders: ["准备计划", "公司研究", "面经整理", "算法与知识", "练习与复测"], empty: "从下一场真实挑战开始", outcome: "准备材料关联公司、岗位、轮次和实投版本；原始回答与事后补强分别保留。", prompt: "我想准备一场笔试或面试。请先问我公司、岗位、轮次、已投材料和准备时间，再一起制定计划。", related: ["applications", "practice", "interviews", "calendar"] },
-  practice: { description: "围绕真实项目讲清职责、判断和结果，让反馈回到经历证据与下一次练习。", folders: ["项目讲述", "实习讲述", "追问与攻防", "练习反馈"], empty: "和伙伴练习一段经历", outcome: "讲述稿、事实依据、追问和反馈一起维护；不能用表达包装替代真实能力。", prompt: "我想练习讲述一个真实项目。请先让我介绍事实和职责，再围绕技术选择、难题与结果追问并反馈。", related: ["growth", "library", "preparation", "interviews"] },
+  practice: { description: "围绕真实项目讲清职责、判断和结果，让反馈回到经历证据与下一次练习。", folders: ["项目讲述", "实习讲述", "追问与攻防", "练习反馈"], empty: "和 Agent 练习一段经历", outcome: "讲述稿、事实依据、追问和反馈一起维护；不能用表达包装替代真实能力。", prompt: "我想练习讲述一个真实项目。请先让我介绍事实和职责，再围绕技术选择、难题与结果追问并反馈。", related: ["growth", "library", "preparation", "interviews"] },
 };
 
 function ContentSurface({ section }: { section: ContentSection }) {
@@ -101,7 +102,7 @@ function ContentSurface({ section }: { section: ContentSection }) {
   const [folder, setFolder] = useState(definition.folders[0]);
   const [mode, setMode] = useState("正文");
   return <>
-    <SurfaceHeader title={workspaceSections.find(item => item.key === section)!.label} description={definition.description} action={<AgentAction prompt={definition.prompt}>告诉伙伴你的想法</AgentAction>} />
+    <SurfaceHeader title={workspaceSections.find(item => item.key === section)!.label} description={definition.description} action={<AgentAction prompt={definition.prompt}>交给 Agent</AgentAction>} />
     <Unavailable>内容、来源和版本尚未接入。当前可以讨论，不能上传、保存、导出或接受修改。</Unavailable>
     <div className="grid min-h-96 overflow-hidden rounded-xl border md:grid-cols-[10.5rem_minmax(0,1fr)]">
       <nav aria-label="内容分类" className="flex flex-wrap gap-1 border-b bg-muted/20 p-3 md:flex-col md:justify-start md:border-b-0 md:border-r">{definition.folders.map(item => <button key={item} onClick={() => setFolder(item)} aria-pressed={folder === item} className={cn("min-h-9 rounded-md px-3 text-left text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring", folder === item ? "bg-muted font-medium" : "text-muted-foreground hover:bg-muted/60")}>{item}</button>)}</nav>
@@ -119,16 +120,7 @@ function ProjectSurface() {
 }
 
 function ReviewSurface() {
-  const [view, setView] = useState("改动");
-  return <>
-    <SurfaceHeader title="材料审阅" description="伙伴负责改写，你用反馈继续打磨，再决定是否接受这一版。接受修改不等于授权投递。" />
-    <Unavailable>材料修改提议尚未接入。当前没有可接受或拒绝的真实 Diff。</Unavailable>
-    <div className="overflow-hidden rounded-xl border"><div className="flex flex-wrap items-center justify-between gap-2 border-b p-3"><ViewPicker options={["改动", "全文", "版本"]} value={view} onChange={setView} label="材料审阅模式" /><span className="text-xs text-muted-foreground">尚未选择材料</span></div>
-      {view === "改动" ? <div className="grid sm:grid-cols-2"><div className="border-b p-5 sm:border-b-0 sm:border-r"><h2 className="text-xs text-muted-foreground">当前确认版本</h2><EmptyWork title="原文" description="选择材料后查看修改前的正文。" /></div><div className="p-5"><h2 className="text-xs text-muted-foreground">伙伴修改提议</h2><EmptyWork title="待审阅改动" description="新增、删除、理由和事实依据在这里核对。" /></div></div> : <EmptyWork title={view === "全文" ? "在完整正文中审阅" : "核对修改来源与历史版本"} description="先在资料与成果中选择材料，再带着同一版本进入审阅。" />}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-t px-5 py-4"><p className="text-xs text-muted-foreground">没有提议，暂不能接受或保存</p><div className="flex gap-2"><Button variant="outline" disabled>拒绝修改</Button><Button disabled><Check className="size-4" />接受这一版</Button></div></div>
-    </div>
-    <RelatedWork sections={["library", "background", "execution"]} />
-  </>;
+  return <WorkspaceMaterials review />;
 }
 
 function ExecutionSurface() {
@@ -146,7 +138,7 @@ function CalendarSurface() {
 }
 
 function DecisionSurface() {
-  return <><SurfaceHeader title="职业决策" description="伙伴整理依据与取舍，最后的选择属于你。保留当时的目标、约束和理由。" action={<AgentAction prompt="我想比较几个职业机会。请先问我长期目标、硬约束、可确认的信息和不确定性，整理取舍；最终由我决定。">讨论一次选择</AgentAction>} /><Unavailable>机会比较与决定记录尚未接入，当前讨论不会保存或对外接受、拒绝 Offer。</Unavailable><div className="rounded-xl border"><div className="flex flex-wrap gap-5 border-b px-5 py-4 text-xs text-muted-foreground">{["发展方向", "职责与能力", "城市与约束", "待遇与时间", "未知与风险"].map(label => <span key={label}>{label}</span>)}</div><EmptyWork title="比较之前，先明确什么对你重要" description="把岗位判断、Offer 与长期目标放在一起；区分事实、分析、伙伴建议和你的决定。" /></div><RelatedWork sections={["projects", "opportunities", "growth"]} /></>;
+  return <><SurfaceHeader title="职业决策" description="Agent 整理依据与取舍，最后的选择属于你。保留当时的目标、约束和理由。" action={<AgentAction prompt="我想比较几个职业机会。请先问我长期目标、硬约束、可确认的信息和不确定性，整理取舍；最终由我决定。">讨论一次选择</AgentAction>} /><Unavailable>机会比较与决定记录尚未接入，当前讨论不会保存或对外接受、拒绝 Offer。</Unavailable><div className="rounded-xl border"><div className="flex flex-wrap gap-5 border-b px-5 py-4 text-xs text-muted-foreground">{["发展方向", "职责与能力", "城市与约束", "待遇与时间", "未知与风险"].map(label => <span key={label}>{label}</span>)}</div><EmptyWork title="比较之前，先明确什么对你重要" description="把岗位判断、Offer 与长期目标放在一起；区分事实、分析、Agent 建议和你的决定。" /></div><RelatedWork sections={["projects", "opportunities", "growth"]} /></>;
 }
 
 function InterviewSurface() {
@@ -155,8 +147,8 @@ function InterviewSurface() {
   return <><SurfaceHeader title="模拟面试" description="围绕实投版本和真实岗位连续追问，结束后将反馈与薄弱项带回准备计划。" /><Unavailable>正式模拟面试、评测与实时语音尚未接入。选择模式不会开启麦克风或创建训练任务。</Unavailable><div className="grid gap-6 xl:grid-cols-[15rem_minmax(0,1fr)]"><aside className="rounded-xl border p-5"><h2 className="text-sm font-medium">本次准备</h2><p className="mb-2 mt-5 text-xs text-muted-foreground">语言</p><ViewPicker options={["中文", "English"]} value={language} onChange={setLanguage} label="面试语言" /><p className="mb-2 mt-5 text-xs text-muted-foreground">方式</p><ViewPicker options={["文字", "实时语音"]} value={mode} onChange={setMode} label="面试方式" /><p className="mt-5 text-xs leading-6 text-muted-foreground">尚未选择岗位、实投版本与面试轮次</p><Button disabled className="mt-5 w-full">开始模拟面试</Button></aside><section className="rounded-xl border"><EmptyWork title="一场有上下文的练习" description={"当前选择：" + language + " · " + mode + "。问题、追问与反馈基于同一组材料，原始回答与事后补强分别保存。"} /><div className="border-t p-5 text-xs text-muted-foreground">结束后：反馈 → 薄弱项 → 下一次准备与复测</div></section></div><RelatedWork sections={["applications", "preparation", "practice"]} /></>;
 }
 
-function PartnerSurface() {
-  const [view, setView] = useState("共同工作");
+function AgentContextSurface() {
+  const [view, setView] = useState("当前工作");
   const [pendingView, setPendingView] = useState<string | null>(null);
   const memoryDirty = useRef(false);
   const reportDirty = useCallback((dirty: boolean) => { memoryDirty.current = dirty; }, []);
@@ -165,13 +157,13 @@ function PartnerSurface() {
     if (memoryDirty.current) { setPendingView(next); return; }
     setView(next);
   }
-  return <><SurfaceHeader title="渡鸦 · 职业伙伴" description="围绕同一份职业背景持续协作。记住什么、依据什么、完成什么、什么时候需要你，都应该能核对。" action={<AgentAction>打开伙伴对话</AgentAction>} /><ViewPicker options={["共同工作", "背景与规则", "持续职责"]} value={view} onChange={changeView} label="伙伴工作视图" />{view === "背景与规则" ? <MemoryWorkspace onDirtyChange={reportDirty} /> : <><Unavailable>当前仅接通用对话；工作记录与持续职责尚未接入。</Unavailable><div className="mt-5 rounded-xl border"><div className="flex items-center gap-3 border-b px-5 py-4"><Bird className="size-5" /><div><h2 className="text-sm font-medium">协作从你的目标开始</h2><p className="mt-1 text-xs text-muted-foreground">待命不表示正在后台运行</p></div></div><EmptyWork title={view === "共同工作" ? "给出想法，审阅伙伴带回的成果" : "持续职责需要独立的范围与授权"} description={view === "共同工作" ? "创作、反馈、再修改和审阅围绕同一对象展开；对话只是协作入口。" : "一次工作不会自动变成托管；频率、到期、允许动作和暂停状态始终可以查看。"} /></div></>}<RelatedWork sections={view === "背景与规则" ? ["background", "projects", "growth"] : ["tasks", "automations", "reports"]} /><Dialog open={pendingView !== null} onOpenChange={open => { if (!open) setPendingView(null); }}><DialogContent><DialogHeader><DialogTitle>还有未保存的记录</DialogTitle><DialogDescription>切换视图会放弃本次输入。已保存的规则和笔记仍保留。</DialogDescription></DialogHeader><DialogFooter><Button variant="outline" onClick={() => setPendingView(null)}>继续编辑</Button><Button onClick={() => { if (pendingView) setView(pendingView); setPendingView(null); }}>放弃输入并切换</Button></DialogFooter></DialogContent></Dialog></>;
+  return <><SurfaceHeader title="Agent 上下文" description="核对 Agent 使用的职业背景、规则和持续委托。记住什么、依据什么、完成什么、什么时候需要你，都应该能核对。" action={<AgentAction>打开 Agent</AgentAction>} /><ViewPicker options={["当前工作", "背景与规则", "持续委托"]} value={view} onChange={changeView} label="Agent 上下文视图" />{view === "背景与规则" ? <MemoryWorkspace onDirtyChange={reportDirty} /> : <><Unavailable>工作记录与持续委托尚未接入；在对话中整理目标不会启动后台执行。</Unavailable><div className="mt-5 rounded-xl border"><div className="flex items-center gap-3 border-b px-5 py-4"><Layers className="size-5" /><div><h2 className="text-sm font-medium">从你的目标开始</h2><p className="mt-1 text-xs text-muted-foreground">待命不表示正在后台运行</p></div></div><EmptyWork title={view === "当前工作" ? "给出目标，审阅 Agent 带回的成果" : "持续委托需要独立的范围与授权"} description={view === "当前工作" ? "创作、反馈、再修改和审阅围绕同一对象展开；对话是表达意图的入口。" : "一次工作不会自动变成持续委托；频率、到期、允许动作和暂停状态始终可以查看。"} /></div></>}<RelatedWork sections={view === "背景与规则" ? ["background", "projects", "growth"] : ["tasks", "automations", "reports"]} /><Dialog open={pendingView !== null} onOpenChange={open => { if (!open) setPendingView(null); }}><DialogContent><DialogHeader><DialogTitle>还有未保存的记录</DialogTitle><DialogDescription>切换视图会放弃本次输入。已保存的规则和笔记仍保留。</DialogDescription></DialogHeader><DialogFooter><Button variant="outline" onClick={() => setPendingView(null)}>继续编辑</Button><Button onClick={() => { if (pendingView) setView(pendingView); setPendingView(null); }}>放弃输入并切换</Button></DialogFooter></DialogContent></Dialog></>;
 }
 
 
 function AutomationSurface() {
   const [duty, setDuty] = useState("岗位关注");
-  return <><SurfaceHeader title="托管服务" description="把一项持续职责交给伙伴，随时查看范围、暂停或撤销；一次委托不等于长期授权。" /><Unavailable>调度和托管策略尚未接入。当前没有运行中的服务，所有对外写动作关闭。</Unavailable><ViewPicker options={["岗位关注", "消息值班", "通知整理"]} value={duty} onChange={setDuty} label="持续职责类型" /><div className="mt-5 grid gap-6 xl:grid-cols-[minmax(0,1fr)_18rem]"><section className="rounded-xl border"><EmptyWork title={"为“" + duty + "”先划定职责"} description="指定公司、平台或授权信息源，确认筛选规则、巡检频率、数量上限与到期时间，再开启持续服务。" /><div className="border-t px-5 py-4 text-xs leading-6 text-muted-foreground">验证码、风控、事实不足和时间承诺会暂停相应动作并带回用户处理；未知发送结果不能重发。</div></section><aside className="rounded-xl border p-5"><h2 className="text-sm font-medium">授权摘要</h2><dl className="mt-5 space-y-4 text-xs">{["来源与岗位范围", "规则与材料版本", "频率、数量与有效期"].map(label => <div key={label}><dt className="text-muted-foreground">{label}</dt><dd className="mt-1">尚未设定</dd></div>)}</dl><div className="mt-5 border-t pt-4 text-xs leading-6"><p>对外提交 · 关闭</p><p>发送材料 · 关闭</p><p>对外回复 · 关闭</p></div><Button disabled className="mt-5 w-full">审阅并开启服务</Button></aside></div><RelatedWork sections={["assistant", "opportunities", "inbox", "reports"]} /></>;
+  return <><SurfaceHeader title="持续委托" description="把一项持续职责交给 Agent，随时查看范围、暂停或撤销；一次委托不等于长期授权。" /><Unavailable>调度和持续委托策略尚未接入。当前没有运行中的服务，所有对外写动作关闭。</Unavailable><ViewPicker options={["岗位关注", "消息值班", "通知整理"]} value={duty} onChange={setDuty} label="持续职责类型" /><div className="mt-5 grid gap-6 xl:grid-cols-[minmax(0,1fr)_18rem]"><section className="rounded-xl border"><EmptyWork title={"为“" + duty + "”先划定职责"} description="指定公司、平台或授权信息源，确认筛选规则、巡检频率、数量上限与到期时间，再开启持续服务。" /><div className="border-t px-5 py-4 text-xs leading-6 text-muted-foreground">验证码、风控、事实不足和时间承诺会暂停相应动作并带回用户处理；未知发送结果不能重发。</div></section><aside className="rounded-xl border p-5"><h2 className="text-sm font-medium">授权摘要</h2><dl className="mt-5 space-y-4 text-xs">{["来源与岗位范围", "规则与材料版本", "频率、数量与有效期"].map(label => <div key={label}><dt className="text-muted-foreground">{label}</dt><dd className="mt-1">尚未设定</dd></div>)}</dl><div className="mt-5 border-t pt-4 text-xs leading-6"><p>对外提交 · 关闭</p><p>发送材料 · 关闭</p><p>对外回复 · 关闭</p></div><Button disabled className="mt-5 w-full">审阅并开启服务</Button></aside></div><RelatedWork sections={["assistant", "opportunities", "inbox", "reports"]} /></>;
 }
 
 function SettingsSurface() {
@@ -181,6 +173,7 @@ function SettingsSurface() {
 }
 
 export function WorkspaceSurface({ section }: { section: WorkspaceSection }) {
+  if (section === "library") return <WorkspaceMaterials />;
   if (section in recordSurfaces) return <RecordSurface key={section} section={section as RecordSection} />;
   if (section in contentSurfaces) return <ContentSurface key={section} section={section as ContentSection} />;
   switch (section) {
@@ -190,7 +183,7 @@ export function WorkspaceSurface({ section }: { section: WorkspaceSection }) {
     case "calendar": return <CalendarSurface />;
     case "decisions": return <DecisionSurface />;
     case "interviews": return <InterviewSurface />;
-    case "assistant": return <PartnerSurface />;
+    case "assistant": return <AgentContextSurface />;
     case "automations": return <AutomationSurface />;
     case "settings": return <SettingsSurface />;
     default: return null;

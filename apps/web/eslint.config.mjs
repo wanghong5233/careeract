@@ -6,10 +6,26 @@ const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
   {
-    files: ["src/components/**/*.tsx"],
+    files: ["src/components/markdown-text.tsx"],
     rules: {
       "react-hooks/refs": "off",
+    },
+  },
+  {
+    files: ["src/components/file.tsx"],
+    rules: {
       "react-hooks/static-components": "off",
+    },
+  },
+  {
+    files: ["src/components/thread.aui.tsx"],
+    rules: {
+      "jsx-a11y/alt-text": "off",
+    },
+  },
+  {
+    files: ["src/components/image.tsx", "src/components/attachment.aui.tsx"],
+    rules: {
       "@next/next/no-img-element": "off",
       "jsx-a11y/alt-text": "off",
     },

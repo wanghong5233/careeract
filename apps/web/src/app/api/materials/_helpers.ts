@@ -12,28 +12,20 @@ export function failure(status: number, code: string, message: string, requestId
   );
 }
 
-export async function authenticate(request: NextRequest, requestId: string): Promise<AuthResult> {
+async function authenticate(request: NextRequest, requestId: string): Promise<AuthResult> {
   const session = await getAuth().api.getSession({ headers: request.headers });
-  if (!session) {
-    return { response: failure(401, "unauthorized", "登录已失效，请重新登录。", requestId) };
-  }
+  if (!session) return { response: failure(401, "unauthorized", "登录已失效，请重新登录。", requestId) };
   const { token } = await getAuth().api.getToken({ headers: request.headers });
-  if (!token) {
-    return { response: failure(401, "unauthorized", "登录验证失败，请重新登录。", requestId) };
-  }
+  if (!token) return { response: failure(401, "unauthorized", "登录验证失败，请重新登录。", requestId) };
   return { token };
 }
 
-export function hasTrustedOrigin(request: NextRequest): boolean {
-  return request.headers.get("origin") === new URL(serverEnv.betterAuthUrl).origin;
-}
-
-export async function readJsonBody(request: NextRequest, requestId: string): Promise<string | Response> {
+async function readBody(request: NextRequest, requestId: string): Promise<string | Response> {
   if (!request.headers.get("content-type")?.startsWith("application/json")) {
-    return failure(415, "invalid_content_type", "请使用 JSON 保存项目。", requestId);
+    return failure(415, "invalid_content_type", "请使用 JSON 保存材料。", requestId);
   }
   const reader = request.body?.getReader();
-  if (!reader) return failure(400, "missing_body", "缺少项目内容。", requestId);
+  if (!reader) return failure(400, "missing_body", "缺少材料内容。", requestId);
   const chunks: Uint8Array[] = [];
   let size = 0;
   try {
@@ -41,35 +33,35 @@ export async function readJsonBody(request: NextRequest, requestId: string): Pro
       const { done, value } = await reader.read();
       if (done) break;
       size += value.byteLength;
-      if (size > 65_536) {
+      if (size > 262_144) {
         await reader.cancel();
-        return failure(413, "project_too_large", "项目内容过大，请精简内容。", requestId);
+        return failure(413, "material_too_large", "材料过大，请先精简内容。", requestId);
       }
       chunks.push(value);
     }
   } catch (error) {
     if (!(error instanceof TypeError || error instanceof DOMException)) throw error;
-    return failure(400, "invalid_body", "未能读取项目内容，请检查连接。", requestId);
+    return failure(400, "invalid_body", "未能读取材料内容，请检查连接。", requestId);
   } finally {
     reader.releaseLock();
   }
   return Buffer.concat(chunks).toString("utf8");
 }
 
-export async function forwardProjectRequest(
+export async function forwardMaterialRequest(
   request: NextRequest,
   path: string,
-  method: "GET" | "POST" | "PATCH" | "DELETE",
+  method: "GET" | "POST",
 ): Promise<Response> {
   const requestId = crypto.randomUUID();
-  if (method !== "GET" && !hasTrustedOrigin(request)) {
+  if (method !== "GET" && request.headers.get("origin") !== new URL(serverEnv.betterAuthUrl).origin) {
     return failure(403, "forbidden", "请求来源无效，请从 CareerAct Agent 保存。", requestId);
   }
   const auth = await authenticate(request, requestId);
   if ("response" in auth) return auth.response;
   let body: string | undefined;
   if (method !== "GET") {
-    const content = await readJsonBody(request, requestId);
+    const content = await readBody(request, requestId);
     if (content instanceof Response) return content;
     body = content;
   }
@@ -89,26 +81,19 @@ export async function forwardProjectRequest(
     if (upstream.status === 401 || upstream.status === 403) {
       return failure(upstream.status, "unauthorized", "登录验证失败，请重新登录。", requestId);
     }
-    if (upstream.status === 204 && method === "DELETE") {
-      return new Response(null, { status: 204, headers: { "Cache-Control": "no-store", "X-Request-ID": requestId } });
-    }
     if (![200, 201, 404, 409, 422, 503].includes(upstream.status)) {
-      return failure(502, "project_unavailable", "项目服务暂不可用，请稍后读取并核对。", requestId);
+      return failure(502, "material_unavailable", "材料服务暂不可用，请稍后读取并核对。", requestId);
     }
     return new Response(upstream.body, {
       status: upstream.status,
-      headers: {
-        "Content-Type": "application/json",
-        "Cache-Control": "no-store",
-        "X-Request-ID": requestId,
-      },
+      headers: { "Content-Type": "application/json", "Cache-Control": "no-store", "X-Request-ID": requestId },
     });
   } catch (error) {
     if (!(error instanceof TypeError || error instanceof DOMException)) throw error;
-    return failure(502, "project_unavailable", "未能确认请求结果，请重新读取项目核对。", requestId);
+    return failure(502, "material_unavailable", "未能确认请求结果，请重新读取材料核对。", requestId);
   }
 }
 
-export function validProjectId(projectId: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(projectId);
+export function validMaterialId(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 }

@@ -173,12 +173,12 @@ uv run --package careeract-api uvicorn services.api.app.main:app --host 127.0.0.
 
 打开 `http://localhost:3100`，未登录时进入注册/登录页面。变更端口必须同步认证地址，
 不要只改 Next.js 监听端口。`http://127.0.0.1:3001/v1/health` 是 Steel 健康接口，
-不是 CareerAct 工作台，不能拿它代替产品页面展示。
+不是 CareerAct Agent 页面，不能拿它代替产品页面展示。
 停止本项目容器可用 `docker compose stop`；不要把删卷、全局 prune 或清空 Profile 当常规修复。
 
 ## 职业档案验收
 
-应用 Alembic 最新迁移后，登录工作台即可手动维护并确认档案。产品接口是
+应用 Alembic 最新迁移后，登录 CareerAct Agent 即可手动维护并确认档案。产品接口是
 `GET/PUT /api/v1/profile`，浏览器只调用同源 `/api/profile`。保存携带读取时的版本，
 首次创建为 null；每次成功保存生成新版本，旧版本返回 409，未确认或非法内容返回 422。
 同一用例仅写一份档案，仓储在单个事务内原子执行归属过滤和版本条件更新。
@@ -201,6 +201,21 @@ uv run python scripts/smoke_profile.py --base-url http://localhost:3100
 
 ## 身份与权限边界
 
+### 材料合成实验
+
+应用 0008 迁移后，材料 API、版本和提议可用，但默认由服务端开关关闭。
+仅在本地合成验收的 API 启动进程设置 `$env:SYNTHETIC_MATERIALS_ENABLED='true'`；
+正常部署保持 false。该开关不是自动脱敏或真实资料授权，P1 门槛尚未通过。
+正式页面从“请伙伴创作”开始，提供合成事实后生成待审阅草稿，接受后生成 v1；
+后续反馈生成绑定基准的提议，刷新恢复正文/提议/历史，旧提议不可覆盖新版本。
+来源记录表示实际读取的对象版本，不能将模型表达直接当作已验证事实。
+
+专项：设置 `$env:RUN_MATERIAL_POSTGRES_TESTS='1'` 后运行
+`uv run pytest tests/api/test_materials.py -q`，结束移除该测试环境变量。
+复用隔离 Docker PostgreSQL，覆盖迁移升级/回退、用户/项目隔离、重放、并发接受、
+旧版本冲突和历史 Diff；不发送真实资料或进行外部投递。可见浏览器另验真实模型、
+接受/拒绝/反馈、刷新恢复、保存失败保留输入与窄屏；不能以单元测试代替页面验收。
+
 ### 隐私入口验证
 
 档案/项目写入用例与产品 JSON 入口检查明显的证件/账户长号码和凭据模式；AG-UI 在
@@ -216,7 +231,7 @@ PostgreSQL 测试验证普通内容仍能持久化。浏览器验收使用合成
 模式检测有漏检/误报；尚不覆盖图片、任意健康/住址事实、混淆秘密或既有存量内容。关闭
 Agno telemetry/debug/Tracing、媒体存储不代表会话/事件已删除；AgentOS 会开启事件存储。
 不得通过启用请求正文日志或复制原始异常来诊断拒绝。材料/模型出口、浏览器观察隔离、
-供应商日志、加密和各副本删除的开放条件见 [工作台门槛](../topics/workspace/DESIGN.md#隐私与数据安全前置门槛)；
+供应商日志、加密和各副本删除的开放条件见 [Agent 工作面门槛](../topics/workspace/DESIGN.md#隐私与数据安全前置门槛)；
 未通过前不能将当前增量描述为生产隐私已闭环。
 
 浏览器敏感执行遵循 [OpenAI Computer Use 安全指南](https://developers.openai.com/api/docs/guides/tools-computer-use-integration#handle-user-confirmation-and-consent)
@@ -530,6 +545,8 @@ try { uv run pytest tests/browser/test_steel_executor.py -q -s } finally {
 每次 commit 都扫描暂存区；真实 `.env` 文件即使被强制暂存也会被阻止，`.env.example`
 允许提交但仍扫描内容。Gitleaks 缺失或扫描失败会阻止提交，输出启用完整脱敏。
 手动检查：`uv run --no-sync python scripts/check_secrets.py`；历史检查加 `--history`。
+尚未暂存的收尾检查加 `--worktree`，扫描相对 HEAD 的修改与非忽略新文件的完整内容，
+在临时快照中扫描后自动清理；不扫描被忽略的私人资料，也不改变真实暂存区。
 CI 的 Secrets 工作流扫描全部 Git 历史，不需要供应商密钥，也不读取本地环境文件。
 本地 hook 可以被绕过；远程需将 `secrets` 检查设为分支保护必需项才会阻止合并。
 检测有覆盖边界，不能代替审查；发现误报须精确核实，不整体跳过 vendor 或测试文件。
@@ -545,6 +562,44 @@ CI 的 Secrets 工作流扫描全部 Git 历史，不需要供应商密钥，也
 | API、认证、迁移 | 相关测试；真实数据库或会话集成；用户隔离、无效凭据、旧 Schema 升级 |
 | Worker、浏览器 | 相关测试与可控集成；重复执行、等待/取消、恢复、结果不明时的处理 |
 | UI 行为 | lint/typecheck，必要时 build；运行页面检查加载、空态、错误和关键交互 |
+
+### 提交与变更门槛
+
+`pre-commit` 先执行 `check_changes.py` 的暂存区空白检查，再运行 Gitleaks；
+`commit-msg` 与 CI 使用同一脚本核对提交主题和保护路径。首次克隆沿用 `.githooks` 设置；
+新 hook 作为可执行脚本提交（Git mode 100755），不安装 Husky 或 commitlint。
+
+本地 commit 自动执行的只有上述空白、秘密、提交主题和保护路径检查；不会自动运行
+Ruff、mypy、pytest 或 Web lint/typecheck/test/build。Agent 须在提交前按根 AGENTS 主动完成
+适用的完整检查；CI 是另外一次执行。拆分提交须核对每批新增文件和导入依赖，不能依赖
+后续未提交文件才通过；必要时从暂存树导出隔离快照验证。
+
+依据：[Git hooks](https://git-scm.com/docs/githooks) 规定 hooksPath 与可执行位；
+[React Effect 数据读取](https://react.dev/reference/react/useEffect#fetching-data-with-effects)
+说明响应乱序与清理保护；Next 客户端边界以已安装版本的 `use-client` 指南为准。
+提交主题和按职责拆分属于本项目约定，不声称是框架强制要求。
+
+主题使用 `<type>(<scope>): <具体结果>`，type 为 feat/fix/refactor/perf/test/docs/chore/build/ci/revert，
+scope 为小写领域名；禁止仅写 update、修复问题、继续推进。历史主题只诊断，不改写。
+CI 检查本次新增的非 merge 提交，不追溯强制整改全部旧历史。
+
+`vendor/` 与生成类型不能混入产品提交；确认需改时单独使用 `chore(vendor): ...`、
+`chore(generated): ...` 或 `build(generated): ...`，且该提交只包含对应保护组。
+自动检查只能识别路径和提交隔离；vendor 上游缺陷证据、生成命令/来源仍需人工审查。
+`node_modules/` 与 `.next/` 始终拒绝。普通依赖版本升级继续通过清单和锁文件管理。
+
+```powershell
+uv run python scripts/check_changes.py --worktree
+uv run python scripts/check_changes.py --range "<base>..HEAD"
+uv run ruff format --check services tests scripts/check_changes.py scripts/check_secrets.py
+uv run ruff check services tests scripts/check_changes.py scripts/check_secrets.py
+uv run mypy services tests scripts/check_changes.py scripts/check_secrets.py
+npm --prefix apps/web run test
+```
+
+前端回归使用 Node 内置 test 和已安装 TypeScript 编译实际源码；BFF 认证/上游使用显式替身，
+不验证 Next 路由运行时或完整 React DOM。真实页面、认证与数据库验证分别报告。
+CI 运行这些检查及已有 Web lint/typecheck/build、pytest、Secrets；本地执行通过不代表远程 CI 已运行。
 
 代码提交前的完整命令在根 AGENTS 中维护，不在此复制。涉及跨层依赖时运行架构边界测试。
 纯文案/样式无需新增形式化测试；模型和站点行为不能只靠 mock 或页面截图推导业务正确性。
