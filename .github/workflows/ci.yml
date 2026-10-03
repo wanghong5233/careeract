@@ -6,6 +6,31 @@ on:
   pull_request:
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Check commit subjects and changed paths
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PUSH_BASE: ${{ github.event.before }}
+          PUSH_HEAD: ${{ github.sha }}
+        run: |
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            python scripts/check_changes.py --range "$PR_BASE..$PR_HEAD"
+          elif [ "$PUSH_BASE" != "0000000000000000000000000000000000000000" ]; then
+            python scripts/check_changes.py --range "$PUSH_BASE..$PUSH_HEAD"
+          else
+            python scripts/check_changes.py --range "$PUSH_HEAD^!"
+          fi
+
   python:
     runs-on: ubuntu-latest
     steps:
@@ -17,9 +42,9 @@ jobs:
         with:
           version: "0.11.2"
       - run: uv sync --frozen --all-packages --group dev
-      - run: uv run ruff format --check services tests
-      - run: uv run ruff check services tests
-      - run: uv run mypy services tests
+      - run: uv run ruff format --check services tests scripts/check_changes.py scripts/check_secrets.py
+      - run: uv run ruff check services tests scripts/check_changes.py scripts/check_secrets.py
+      - run: uv run mypy services tests scripts/check_changes.py scripts/check_secrets.py
       - run: uv run pytest
 
   web:

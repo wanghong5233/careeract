@@ -3,11 +3,14 @@ import pathlib
 import shutil
 import subprocess
 import sys
+import tempfile
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--history", action="store_true")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--history", action="store_true")
+    mode.add_argument("--worktree", action="store_true")
     args = parser.parse_args()
     scanner = shutil.which("gitleaks")
     if scanner is None:
@@ -16,14 +19,51 @@ def main() -> int:
     command = (
         ["git", "ls-files", "-z"]
         if args.history
+        else ["git", "diff", "HEAD", "--name-only", "--diff-filter=ACMR", "-z"]
+        if args.worktree
         else ["git", "diff", "--cached", "--name-only", "--diff-filter=ACMR", "-z"]
     )
     result = subprocess.run(command, capture_output=True, check=True)
-    for raw_path in result.stdout.split(b"\0"):
+    paths = result.stdout
+    if args.worktree:
+        untracked = subprocess.run(
+            ["git", "ls-files", "--others", "--exclude-standard", "-z"],
+            capture_output=True,
+            check=True,
+        )
+        paths += untracked.stdout
+    for raw_path in paths.split(b"\0"):
         name = pathlib.PurePosixPath(raw_path.decode("utf-8", errors="replace")).name
         if (name == ".env" or name.startswith(".env.")) and name != ".env.example":
             print("Commit blocked: a real environment file is staged/tracked. Unstage it.")
             return 1
+    if args.worktree:
+        root = pathlib.Path.cwd().resolve()
+        with tempfile.TemporaryDirectory(prefix="careeract-secret-check-") as temporary:
+            snapshot = pathlib.Path(temporary)
+            for raw_path in set(paths.split(b"\0")) - {b""}:
+                relative = pathlib.Path(raw_path.decode("utf-8"))
+                source = root / relative
+                if not source.resolve().is_relative_to(root) or source.is_symlink():
+                    print("Scan blocked: changed path is outside the repository or is a symlink.")
+                    return 1
+                if not source.is_file():
+                    continue
+                target = snapshot / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(source, target)
+            return subprocess.run(
+                [
+                    scanner,
+                    "dir",
+                    str(snapshot),
+                    f"--config={root / '.gitleaks.toml'}",
+                    "--redact=100",
+                    "--no-banner",
+                    "--ignore-gitleaks-allow",
+                ],
+                check=False,
+            ).returncode
     flags = ["--log-opts=--all"] if args.history else ["--pre-commit", "--staged"]
     return subprocess.run(
         [

@@ -1,3 +1,4 @@
 #!/bin/sh
 set -eu
+uv run --no-sync python scripts/check_changes.py
 exec uv run --no-sync python scripts/check_secrets.py

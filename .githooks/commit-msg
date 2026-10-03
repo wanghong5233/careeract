@@ -1,0 +1,3 @@
+#!/bin/sh
+set -eu
+exec uv run --no-sync python scripts/check_changes.py --commit-msg "$1"
