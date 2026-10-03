@@ -7,10 +7,17 @@ from fastapi.exceptions import RequestValidationError
 
 from services.api.app.settings import Settings
 from services.api.application.agent_context import AgentContextService
+from services.api.application.materials import MaterialService
 from services.api.application.memories import MemoryService
 from services.api.application.profiles import ProfileService
 from services.api.application.projects import ProjectService
 from services.api.application.work_sessions import AgentWorkSessionService
+from services.api.domain.material import (
+    MaterialConflict,
+    MaterialInvalid,
+    MaterialNotFound,
+    MaterialUnavailable,
+)
 from services.api.domain.memory import (
     MemoryConflict,
     MemoryInvalid,
@@ -41,6 +48,7 @@ from services.api.infrastructure.agent_tools import (
 )
 from services.api.infrastructure.authentication import JwtAuthenticationMiddleware
 from services.api.infrastructure.database import create_engine
+from services.api.infrastructure.materials import PostgresMaterialRepository
 from services.api.infrastructure.memories import PostgresMemoryRepository
 from services.api.infrastructure.privacy import PrivacyBoundaryMiddleware
 from services.api.infrastructure.profiles import PostgresProfileRepository
@@ -48,12 +56,14 @@ from services.api.infrastructure.projects import PostgresProjectRepository
 from services.api.infrastructure.work_sessions import PostgresAgentWorkSessionRepository
 from services.api.routes.agent_sessions import router as agent_session_router
 from services.api.routes.errors import (
+    material_error,
     memory_error,
     privacy_error,
     profile_error,
     project_error,
     work_session_error,
 )
+from services.api.routes.materials import router as materials_router
 from services.api.routes.memories import router as memories_router
 from services.api.routes.profiles import router as profile_router
 from services.api.routes.projects import router as project_router
@@ -91,6 +101,9 @@ def create_app(
     app.state.profile_service = ProfileService(PostgresProfileRepository(engine))
     app.state.project_service = ProjectService(PostgresProjectRepository(engine))
     app.state.memory_service = MemoryService(PostgresMemoryRepository(engine))
+    app.state.material_service = MaterialService(
+        PostgresMaterialRepository(engine), enabled=settings.synthetic_materials_enabled
+    )
     app.state.agent_work_session_service = AgentWorkSessionService(
         PostgresAgentWorkSessionRepository(engine)
     )
@@ -107,6 +120,7 @@ def create_app(
                 app.state.project_service,
                 app.state.memory_service,
                 app.state.agent_work_session_service,
+                app.state.material_service,
             )
             set_tools(build_agent_tools(context_service))
             career_agent.cache_callables = False
@@ -131,6 +145,7 @@ def create_app(
     app.include_router(project_router)
     app.include_router(agent_session_router)
     app.include_router(memories_router)
+    app.include_router(materials_router)
     app.add_exception_handler(ProfileConflict, profile_error)
     app.add_exception_handler(ProfileUnavailable, profile_error)
     app.add_exception_handler(ProjectConflict, project_error)
@@ -145,6 +160,10 @@ def create_app(
     app.add_exception_handler(MemoryInvalid, memory_error)
     app.add_exception_handler(MemoryNotFound, memory_error)
     app.add_exception_handler(MemoryUnavailable, memory_error)
+    app.add_exception_handler(MaterialConflict, material_error)
+    app.add_exception_handler(MaterialInvalid, material_error)
+    app.add_exception_handler(MaterialNotFound, material_error)
+    app.add_exception_handler(MaterialUnavailable, material_error)
     app.add_exception_handler(RequestValidationError, profile_error)
     app.add_exception_handler(RestrictedContent, privacy_error)
     return app

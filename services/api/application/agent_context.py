@@ -3,10 +3,12 @@ from dataclasses import asdict
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from services.api.application.context import ActorContext
+from services.api.application.materials import MaterialService
 from services.api.application.memories import MemoryService
 from services.api.application.profiles import ProfileService
 from services.api.application.projects import ProjectService
 from services.api.application.work_sessions import AgentWorkSessionService
+from services.api.domain.material import MaterialDraft, MaterialInvalid, MaterialNotFound
 from services.api.domain.memory import MemoryInvalid, MemoryNotFound, WorkspaceMemory
 from services.api.domain.privacy import ensure_career_content
 
@@ -41,8 +43,9 @@ class AgentContextService:
         projects: ProjectService,
         memories: MemoryService,
         sessions: AgentWorkSessionService,
+        materials: MaterialService | None = None,
     ) -> None:
-        self.profiles, self.projects = profiles, projects
+        self.profiles, self.projects, self.materials = profiles, projects, materials
         self.memories, self.sessions = memories, sessions
 
     async def read(
@@ -131,3 +134,139 @@ class AgentContextService:
             content=content,
             source="职业伙伴提议",
         )
+
+    async def read_material(
+        self, actor: ActorContext, *, session_id: str, material_id: UUID
+    ) -> dict[str, object]:
+        if self.materials is None:
+            raise MaterialNotFound("Materials are not available")
+        session = await self.sessions.read(actor, session_id=session_id)
+        detail = await self.materials.read(actor, material_id)
+        if (
+            detail.material.project_id is not None
+            and detail.material.project_id != session.project_id
+        ):
+            raise MaterialNotFound("Material does not belong to the current work scope")
+        payload: dict[str, object] = {
+            "status": "ok",
+            "material": {
+                "id": str(detail.material.id),
+                "title": detail.material.title,
+                "project_id": str(detail.material.project_id)
+                if detail.material.project_id
+                else None,
+                "current_version": str(detail.current_version.id),
+                "version_number": detail.current_version.number,
+                "body": detail.current_version.body,
+                "pending_draft": next(
+                    (
+                        {
+                            "id": str(item.id),
+                            "base_version_id": str(item.base_version_id),
+                            "body": item.proposed_body,
+                            "rationale": item.rationale,
+                            "status": "unconfirmed_expression",
+                        }
+                        for item in detail.proposals
+                        if item.state == "pending"
+                        and item.base_version_id == detail.current_version.id
+                    ),
+                    None,
+                ),
+            },
+        }
+        encode_context(payload)
+        return payload
+
+    async def propose_material_edit(
+        self,
+        actor: ActorContext,
+        *,
+        session_id: str,
+        material_id: UUID,
+        base_version_id: UUID,
+        proposed_body: str,
+        rationale: str,
+        references: tuple[dict[str, str], ...] = (),
+    ) -> dict[str, object]:
+        if self.materials is None:
+            raise MaterialInvalid("Materials are not available")
+        session = await self.sessions.read(actor, session_id=session_id)
+        detail = await self.materials.read(actor, material_id)
+        if (
+            detail.material.project_id is not None
+            and detail.material.project_id != session.project_id
+        ):
+            raise MaterialNotFound("Material does not belong to the current work scope")
+        proposal = await self.materials.propose(
+            actor,
+            material_id,
+            base_version_id=base_version_id,
+            proposed_body=proposed_body,
+            rationale=rationale,
+            references=references,
+        )
+        payload: dict[str, object] = {
+            "status": proposal.state,
+            "message": "材料修改提议已保存，请在材料审阅中核对 Diff 后接受或拒绝。",
+            "proposal": {
+                "id": str(proposal.id),
+                "material_id": str(proposal.material_id),
+                "base_version_id": str(proposal.base_version_id),
+                "rationale": proposal.rationale,
+            },
+        }
+        encode_context(payload)
+        return payload
+
+    async def list_materials(
+        self, actor: ActorContext, *, session_id: str, cursor: str | None = None
+    ) -> dict[str, object]:
+        if self.materials is None:
+            raise MaterialNotFound("Materials are not available")
+        session = await self.sessions.read(actor, session_id=session_id)
+        page = await self.materials.list(
+            actor, project_id=session.project_id, limit=20, cursor=cursor, scoped=True
+        )
+        payload: dict[str, object] = {
+            "status": "ok",
+            "next_cursor": page.next_cursor,
+            "items": [
+                {"id": str(item.id), "title": item.title, "version": str(item.current_version_id)}
+                for item in page.items
+            ],
+        }
+        encode_context(payload)
+        return payload
+
+    async def propose_new_material(
+        self,
+        actor: ActorContext,
+        *,
+        session_id: str,
+        title: str,
+        proposed_body: str,
+        rationale: str,
+        references: tuple[dict[str, str], ...],
+    ) -> dict[str, object]:
+        if self.materials is None:
+            raise MaterialInvalid("Materials are not available")
+        session = await self.sessions.read(actor, session_id=session_id)
+        key = json.dumps(
+            [actor.user_id, actor.request_id, title.strip(), proposed_body.strip()],
+            ensure_ascii=False,
+        )
+        detail = await self.materials.create(
+            actor,
+            material_id=uuid5(NAMESPACE_URL, key),
+            project_id=session.project_id,
+            title=title,
+            body="",
+            draft=MaterialDraft(proposed_body.strip(), rationale.strip(), references),
+        )
+        return {
+            "status": "pending",
+            "material_id": str(detail.material.id),
+            "title": detail.material.title,
+            "message": "草稿已保存为待审阅提议。接受前没有已确认正文，请在资料与成果审阅。",
+        }

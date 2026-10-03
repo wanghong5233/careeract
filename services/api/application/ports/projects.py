@@ -19,6 +19,10 @@ class ProjectRepository(Protocol):
 
     async def get(self, actor: ActorContext, project_id: UUID) -> CareerProject | None: ...
 
+    async def delete(
+        self, actor: ActorContext, project_id: UUID, *, expected_version: UUID
+    ) -> bool: ...
+
     async def create(
         self,
         actor: ActorContext,

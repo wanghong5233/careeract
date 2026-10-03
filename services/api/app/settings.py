@@ -33,6 +33,7 @@ class Settings(DatabaseSettings):
     litellm_base_url: AnyHttpUrl = AnyHttpUrl("http://localhost:4000")
     litellm_api_key: SecretStr
     litellm_model: str = "careeract-default"
+    synthetic_materials_enabled: bool = False
 
     @field_validator("litellm_api_key")
     @classmethod

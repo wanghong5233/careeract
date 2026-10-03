@@ -124,6 +124,37 @@ class PostgresProjectRepository:
         except (DBAPIError, PoolTimeoutError):
             raise ProjectUnavailable("Project storage is unavailable") from None
 
+    async def delete(
+        self, actor: ActorContext, project_id: UUID, *, expected_version: UUID
+    ) -> bool:
+        try:
+            async with self.engine.begin() as connection:
+                parameters = {"id": project_id, "user_id": actor.user_id}
+                version = await connection.scalar(
+                    text(
+                        "SELECT version FROM career.career_projects "
+                        "WHERE id=:id AND user_id=:user_id FOR UPDATE"
+                    ),
+                    parameters,
+                )
+                if version != expected_version:
+                    return False
+                await connection.execute(
+                    text(
+                        "UPDATE career.workspace_memories SET state='retired', "
+                        "version=:version, updated_at=clock_timestamp() "
+                        "WHERE project_id=:id AND user_id=:user_id"
+                    ),
+                    {**parameters, "version": uuid4()},
+                )
+                await connection.execute(
+                    text("DELETE FROM career.career_projects WHERE id=:id AND user_id=:user_id"),
+                    parameters,
+                )
+                return True
+        except (DBAPIError, PoolTimeoutError):
+            raise ProjectUnavailable("Project could not be deleted") from None
+
     async def create(
         self,
         actor: ActorContext,

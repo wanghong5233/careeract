@@ -75,6 +75,15 @@ class ProjectService:
             raise ProjectConflict("Project changed; reload before saving")
         return project
 
+    async def delete(
+        self, actor: ActorContext, project_id: UUID, *, expected_version: UUID
+    ) -> None:
+        if await self.repository.delete(actor, project_id, expected_version=expected_version):
+            return
+        if await self.repository.get(actor, project_id) is None:
+            raise ProjectNotFound("Project does not exist")
+        raise ProjectConflict("Project changed; reload before deleting")
+
     @staticmethod
     def validate(title: str | None, purpose: str | None, status: ProjectStatus | None) -> None:
         try:

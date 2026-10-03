@@ -37,6 +37,12 @@ class UpdateProjectBody(BaseModel):
         return self
 
 
+class DeleteProjectBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    version: UUID
+
+
 class ProjectResponse(BaseModel):
     id: UUID
     title: str
@@ -138,3 +144,14 @@ async def update_project(
             expected_version=body.version,
         )
     )
+
+
+@router.delete("/{project_id}", status_code=204)
+async def delete_project(
+    project_id: UUID,
+    body: DeleteProjectBody,
+    service: Annotated[ProjectService, Depends(get_project_service)],
+    actor: Annotated[ActorContext, Depends(get_actor)],
+) -> Response:
+    await service.delete(actor, project_id, expected_version=body.version)
+    return Response(status_code=204, headers={"Cache-Control": "no-store"})

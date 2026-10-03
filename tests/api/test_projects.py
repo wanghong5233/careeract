@@ -23,7 +23,7 @@ from services.api.app.factory import create_app
 from services.api.application.context import ActorContext
 from services.api.application.ports.projects import ProjectRepository
 from services.api.application.projects import ProjectService
-from services.api.domain.project import ProjectConflict, ProjectInvalid
+from services.api.domain.project import ProjectConflict, ProjectInvalid, ProjectNotFound
 from services.api.infrastructure.projects import PostgresProjectRepository
 from tests.api.test_health import FakeAgentRuntime, build_settings, use_signing_key
 from tests.browser.test_postgres_leases import database_url as database_url
@@ -76,6 +76,35 @@ def test_projects_require_identity_and_reject_invalid_payload(
         assert response.status_code == 422
         assert marker not in response.text
         assert response.headers["cache-control"] == "no-store"
+        project_id = uuid4()
+        assert (
+            client.request("DELETE", f"/api/v1/projects/{project_id}", json={}).status_code == 401
+        )
+        for payload in ({}, {"version": "invalid"}, {"version": str(uuid4()), "user_id": "other"}):
+            assert (
+                client.request(
+                    "DELETE", f"/api/v1/projects/{project_id}", headers=headers, json=payload
+                ).status_code
+                == 422
+            )
+
+
+async def test_project_delete_distinguishes_missing_and_stale() -> None:
+    repository = AsyncMock()
+    service = ProjectService(cast(ProjectRepository, repository))
+    actor = ActorContext("synthetic-user", str(uuid4()))
+    project_id, version = uuid4(), uuid4()
+    repository.delete.return_value = True
+    await service.delete(actor, project_id, expected_version=version)
+    repository.delete.assert_awaited_once_with(actor, project_id, expected_version=version)
+    repository.get.assert_not_awaited()
+    repository.delete.return_value = False
+    repository.get.return_value = None
+    with pytest.raises(ProjectNotFound):
+        await service.delete(actor, project_id, expected_version=version)
+    repository.get.return_value = object()
+    with pytest.raises(ProjectConflict):
+        await service.delete(actor, project_id, expected_version=version)
 
 
 @pytest.mark.parametrize(
@@ -313,3 +342,160 @@ async def test_legacy_project_migration_preserves_existing_rows(database_url: st
             await connection.run_sync(upgrade)
     finally:
         await engine.dispose()
+
+
+@pytest.mark.skipif(
+    os.environ.get("RUN_PROJECT_POSTGRES_TESTS") != "1",
+    reason="Opt-in isolated PostgreSQL project deletion",
+)
+async def test_project_delete_preserves_data_and_retires_project_rules(
+    database_url: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    private_key = Ed25519PrivateKey.generate()
+    use_signing_key(monkeypatch, private_key)
+    app = create_app(
+        build_settings().model_copy(update={"database_url": PostgresDsn(database_url)}),
+        lambda _settings: FakeAgentRuntime(),
+    )
+    repository = app.state.project_service.repository
+    owner, other = uuid4().hex, uuid4().hex
+    memory_id, global_id, material_id, material_version, memory_version = (
+        uuid4() for _ in range(5)
+    )
+    try:
+        async with repository.engine.begin() as connection:
+            for user_id in (owner, other):
+                await connection.execute(
+                    text(
+                        'INSERT INTO auth."user" (id, name, email, "emailVerified") '
+                        "VALUES (:id, 'Synthetic', :email, false)"
+                    ),
+                    {"id": user_id, "email": user_id + "@example.invalid"},
+                )
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            headers = {"Authorization": "Bearer " + token_for(private_key, owner)}
+            created = await client.post(
+                "/api/v1/projects", headers=headers, json={"title": "Delete test"}
+            )
+            assert created.status_code == 201
+            project = created.json()
+            project_id = UUID(project["id"])
+            async with repository.engine.begin() as connection:
+                for record_id, scope in ((memory_id, project_id), (global_id, None)):
+                    await connection.execute(
+                        text(
+                            "INSERT INTO career.workspace_memories "
+                            "(id,user_id,project_id,kind,state,title,content,version) "
+                            "VALUES (:id,:owner,:project,'rule','confirmed',"
+                            "'Rule','Synthetic',:version)"
+                        ),
+                        {
+                            "id": record_id,
+                            "owner": owner,
+                            "project": scope,
+                            "version": memory_version,
+                        },
+                    )
+                await connection.execute(
+                    text(
+                        "INSERT INTO career.agent_work_sessions (session_id,user_id,project_id) "
+                        "VALUES (:session,:owner,:project)"
+                    ),
+                    {"session": owner, "owner": owner, "project": project_id},
+                )
+                await connection.execute(
+                    text(
+                        "INSERT INTO career.materials "
+                        "(id,user_id,project_id,title,current_version_id,version) "
+                        "VALUES (:id,:owner,:project,'Synthetic',:version,:version)"
+                    ),
+                    {
+                        "id": material_id,
+                        "owner": owner,
+                        "project": project_id,
+                        "version": material_version,
+                    },
+                )
+                await connection.execute(
+                    text(
+                        "INSERT INTO career.material_versions (id,material_id,number,body,source) "
+                        "VALUES (:id,:material,1,'Synthetic body','user')"
+                    ),
+                    {"id": material_version, "material": material_id},
+                )
+            path = f"/api/v1/projects/{project_id}"
+            foreign = await client.request(
+                "DELETE",
+                path,
+                headers={"Authorization": "Bearer " + token_for(private_key, other)},
+                json={"version": project["version"]},
+            )
+            assert foreign.status_code == 404
+            stale = await client.request(
+                "DELETE", path, headers=headers, json={"version": str(uuid4())}
+            )
+            assert stale.status_code == 409
+            async with repository.engine.connect() as connection:
+                assert (
+                    await connection.scalar(
+                        text("SELECT state FROM career.workspace_memories WHERE id=:id"),
+                        {"id": memory_id},
+                    )
+                    == "confirmed"
+                )
+            removed = await client.request(
+                "DELETE", path, headers=headers, json={"version": project["version"]}
+            )
+            assert removed.status_code == 204
+            assert removed.content == b""
+            assert removed.headers["cache-control"] == "no-store"
+            assert (await client.get(path, headers=headers)).status_code == 404
+            assert (
+                await client.request(
+                    "DELETE", path, headers=headers, json={"version": project["version"]}
+                )
+            ).status_code == 404
+            async with repository.engine.connect() as connection:
+                memory = (
+                    await connection.execute(
+                        text(
+                            "SELECT project_id,state,version FROM career.workspace_memories "
+                            "WHERE id=:id"
+                        ),
+                        {"id": memory_id},
+                    )
+                ).one()
+                assert memory.project_id is None and memory.state == "retired"
+                assert memory.version != memory_version
+                assert (
+                    await connection.scalar(
+                        text("SELECT state FROM career.workspace_memories WHERE id=:id"),
+                        {"id": global_id},
+                    )
+                    == "confirmed"
+                )
+                assert (
+                    await connection.execute(
+                        text(
+                            "SELECT project_id FROM career.agent_work_sessions WHERE session_id=:id"
+                        ),
+                        {"id": owner},
+                    )
+                ).one().project_id is None
+                assert (
+                    await connection.execute(
+                        text("SELECT project_id FROM career.materials WHERE id=:id"),
+                        {"id": material_id},
+                    )
+                ).one().project_id is None
+                assert (
+                    await connection.scalar(
+                        text("SELECT body FROM career.material_versions WHERE id=:id"),
+                        {"id": material_version},
+                    )
+                    == "Synthetic body"
+                )
+    finally:
+        await repository.engine.dispose()
