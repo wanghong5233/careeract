@@ -34,6 +34,9 @@ docs/handbook/*
 !docs/handbook/SKILLS.md
 !docs/topics/
 docs/topics/*
+!docs/topics/agent-runtime/
+docs/topics/agent-runtime/*
+!docs/topics/agent-runtime/README.md
 !docs/topics/workspace/
 docs/topics/workspace/*
 !docs/topics/workspace/README.md
