@@ -1,11 +1,14 @@
 import json
 from collections.abc import Callable
+from copy import copy
 from typing import Any, cast
 from uuid import UUID
 
 from agno.exceptions import InputCheckError
+from agno.models.message import Message
 from agno.run.agent import RunOutput
 from agno.run.base import RunContext
+from agno.session.agent import AgentSession
 
 from services.api.application.agent_context import (
     AgentContextService,
@@ -13,6 +16,7 @@ from services.api.application.agent_context import (
     serialize_memory,
 )
 from services.api.application.context import ActorContext
+from services.api.application.work_sessions import AgentWorkSessionService
 from services.api.domain.material import (
     MaterialConflict,
     MaterialInvalid,
@@ -92,6 +96,30 @@ def initialize_run_manifest(run_context: RunContext) -> None:
 
 def persist_run_manifest(run_context: RunContext, run_output: RunOutput) -> None:
     run_output.metadata = run_context.metadata
+
+
+def build_scope_hook(service: AgentWorkSessionService) -> Callable[..., Any]:
+    async def scope(run_context: RunContext, session: AgentSession) -> None:
+        try:
+            current = await service.read(actor_for(run_context), session_id=run_context.session_id)
+        except CONTEXT_FAILURES:
+            raise InputCheckError("当前对话范围无法安全读取，本次工作未继续。") from None
+        scope_version = str(current.context_version)
+        run_context.metadata = {**(run_context.metadata or {}), "career_scope": scope_version}
+
+        def scoped_messages(**kwargs: Any) -> list[Message]:
+            scoped_session = copy(session)
+            scoped_session.runs = [
+                run
+                for run in session.runs or []
+                if (run.metadata or {}).get("career_scope") == scope_version
+            ]
+            return cast(list[Message], AgentSession.get_messages(scoped_session, **kwargs))
+
+        session.get_messages = scoped_messages
+        session.summary = None
+
+    return scope
 
 
 def build_career_instructions(service: AgentContextService) -> Callable[..., Any]:

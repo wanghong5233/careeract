@@ -1,11 +1,13 @@
+from typing import Any, cast
+
 from agno.agent import Agent
 from agno.db.postgres import PostgresDb
 from agno.models.openai import OpenAIChat
 from agno.os import AgentOS
-from agno.os.interfaces.agui import AGUI
 from sqlalchemy import create_engine
 
 from services.api.app.settings import Settings
+from services.api.infrastructure.agent_stream import CareerAGUI
 from services.api.infrastructure.agent_tools import PARTNER_INSTRUCTIONS
 
 
@@ -41,7 +43,7 @@ def build_agent_os(settings: Settings) -> AgentOS:
         id="careeract",
         description="CareerAct domain backend and agent runtime",
         agents=[career_agent],
-        interfaces=[AGUI(agent=career_agent)],
+        interfaces=[cast(Any, CareerAGUI(agent=career_agent))],
         db=db,
         telemetry=False,
         tracing=False,

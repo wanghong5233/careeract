@@ -35,6 +35,7 @@ from services.api.domain.work_session import WorkSessionNotFound
 from services.api.infrastructure.agent_tools import (
     build_agent_tools,
     build_career_instructions,
+    build_scope_hook,
     initialize_run_manifest,
     persist_run_manifest,
 )
@@ -98,6 +99,32 @@ async def test_agno_hook_injection_persists_only_current_run_manifest() -> None:
     async for _ in aexecute_post_hooks(agent, [persist_run_manifest], output, session, run):
         pass
     assert output.metadata == run.metadata
+
+
+@pytest.mark.asyncio
+async def test_scope_hook_filters_history_after_project_change() -> None:
+    service, _, _, _, sessions = services()
+    scope_version = uuid4()
+    sessions.read.return_value = SimpleNamespace(context_version=scope_version)
+    session = AgentSession(session_id="session", user_id="synthetic-user")
+    session.runs = [
+        SimpleNamespace(metadata={"career_scope": str(uuid4())}, parent_run_id=None, messages=[]),
+        SimpleNamespace(
+            metadata={"career_scope": str(scope_version)}, parent_run_id=None, messages=[]
+        ),
+        SimpleNamespace(metadata={}, parent_run_id=None, messages=[]),
+    ]
+    run = RunContext("run", "session", "synthetic-user", metadata={"career_basis": []})
+
+    await build_scope_hook(sessions)(run, session)
+
+    assert run.metadata == {"career_basis": [], "career_scope": str(scope_version)}
+    assert len(session.runs) == 3
+    messages = session.get_messages()
+    assert session.runs[0].metadata["career_scope"] != str(scope_version)
+    assert session.runs[1].metadata["career_scope"] == str(scope_version)
+    assert messages == []
+    assert session.summary is None
 
 
 @pytest.mark.asyncio

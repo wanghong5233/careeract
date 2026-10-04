@@ -7,7 +7,7 @@ import { useAgUiRuntime } from "@assistant-ui/react-ag-ui";
 import { type ReactNode, useMemo, useState } from "react";
 
 import { isRestrictedResponse, restrictedContentMessage } from "@/lib/privacy";
-import { conversationHistoryUrl, historyMessageStatus } from "@/lib/agent-runtime";
+import { conversationHistoryUrl, historyMessageStatus, registerConversationRun, requireFinishedStream } from "@/lib/agent-runtime";
 
 const AGENT_BFF_URL = "/api/agent";
 
@@ -23,7 +23,8 @@ export function RuntimeProvider({ children, agentThreadId }: Readonly<{ children
         fetch: async (url, init) => {
           let requestInit = init;
           if (typeof init?.body === "string") {
-            const body = JSON.parse(init.body) as { messages?: Array<{ id: string; role: string; content?: string }> };
+            const body = JSON.parse(init.body) as { runId: string; messages?: Array<{ id: string; role: string; content?: string }> };
+            registerConversationRun(threadId, body.runId);
             if (body.messages) {
               body.messages = body.messages
                 .filter(message => ["user", "assistant"].includes(message.role) && typeof message.content === "string" && message.content.length > 0)
@@ -39,21 +40,23 @@ export function RuntimeProvider({ children, agentThreadId }: Readonly<{ children
             const messages: Record<number, string> = {
               401: "登录已失效，请重新登录后继续。",
               403: "无法验证请求，请从 CareerAct Agent 重试。",
+              404: "找不到当前对话，请重新读取目录。",
+              409: "本次请求已受理或当前对话仍有运行。请核对历史，勿重复发送。",
               413: "委托内容过大，请精简后重试。",
               415: "Agent 当前仅接收文本，请调整输入后重试。",
               422: "Agent 当前仅接收文本；附件和自定义上下文尚未开放。",
             };
             throw new Error(messages[response.status] ?? "Agent 暂时无法回应，未能确认本次工作结果。请核对已保存内容后重试。");
           }
-          return response;
+          return requireFinishedStream(response);
         },
       }),
     [threadId],
   );
   const history = useMemo<ThreadHistoryAdapter>(() => ({
     async load() {
+      if (!agentThreadId) return { messages: [] };
       const response = await fetch(conversationHistoryUrl(threadId), { cache: "no-store", signal: AbortSignal.timeout(20_000) });
-      if (response.status === 404) return { messages: [] };
       if (!response.ok) throw new Error("Agent 历史暂时无法读取，请稍后重试。");
       const body = await response.json() as { messages: Array<{ id: string; role: "user" | "assistant"; content: string; created_at: number; run_status: string }> };
       const messages = body.messages.map(message => ({
@@ -69,7 +72,7 @@ export function RuntimeProvider({ children, agentThreadId }: Readonly<{ children
     },
     async append() {},
     async update() {},
-  }), [threadId]);
+  }), [threadId, agentThreadId]);
   const runtime = useAgUiRuntime({ agent, adapters: { history } });
 
   return (

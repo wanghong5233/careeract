@@ -10,7 +10,7 @@ from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from services.api.application.context import ActorContext
-from services.api.application.ports.work_sessions import WorkSessionPage
+from services.api.application.ports.work_sessions import AgentHistoryReader, WorkSessionPage
 from services.api.domain.work_session import (
     AgentWorkSession,
     WorkSessionConflict,
@@ -30,6 +30,7 @@ def work_session_from_row(row: RowMapping) -> AgentWorkSession:
         title=row["title"],
         archived=row["archived"],
         version=row["version"],
+        context_version=row["context_version"],
     )
 
 
@@ -62,6 +63,7 @@ def decode_cursor(cursor: str) -> tuple[datetime, str]:
 class PostgresAgentWorkSessionRepository:
     def __init__(self, engine: AsyncEngine) -> None:
         self.engine = engine
+        self.history: AgentHistoryReader | None = None
 
     async def list(
         self, actor: ActorContext, *, cursor: str | None, limit: int, archived: bool | None
@@ -169,6 +171,14 @@ class PostgresAgentWorkSessionRepository:
     ) -> AgentWorkSession | None:
         try:
             async with self.engine.begin() as connection:
+                if change_project or archived is not None:
+                    from services.api.infrastructure.agent_execution import lock_conversation
+
+                    await lock_conversation(connection, session_id)
+                    if self.history is not None and await self.history.has_active_run(
+                        session_id=session_id, user_id=actor.user_id
+                    ):
+                        raise WorkSessionConflict("Wait for the active run to end")
                 if change_project and project_id is not None:
                     project = await connection.scalar(
                         text(
@@ -188,6 +198,9 @@ class PostgresAgentWorkSessionRepository:
                                 "archived=COALESCE(:archived, archived), "
                                 "project_id=CASE WHEN :change_project THEN :project_id "
                                 "ELSE project_id END, "
+                                "context_version=CASE WHEN :change_project "
+                                "AND project_id IS DISTINCT FROM :project_id "
+                                "THEN gen_random_uuid() ELSE context_version END, "
                                 "version=:version, updated_at=clock_timestamp() "
                                 "WHERE session_id=:session_id AND user_id=:user_id "
                                 "AND version=:expected_version RETURNING *"
@@ -236,6 +249,13 @@ class PostgresAgentWorkSessionRepository:
     ) -> AgentWorkSession | None:
         try:
             async with self.engine.begin() as connection:
+                from services.api.infrastructure.agent_execution import lock_conversation
+
+                await lock_conversation(connection, session_id)
+                if self.history is not None and await self.history.has_active_run(
+                    session_id=session_id, user_id=actor.user_id
+                ):
+                    raise WorkSessionConflict("Wait for the active run to end")
                 if project_id is not None:
                     project_exists = await connection.scalar(
                         text(
@@ -255,6 +275,10 @@ class PostgresAgentWorkSessionRepository:
                                 "VALUES (:session_id, :user_id, :project_id) "
                                 "ON CONFLICT (session_id) DO UPDATE SET "
                                 "project_id=:project_id, version=gen_random_uuid(), "
+                                "context_version=CASE WHEN career.agent_work_sessions.project_id "
+                                "IS DISTINCT FROM :project_id "
+                                "THEN gen_random_uuid() ELSE "
+                                "career.agent_work_sessions.context_version END, "
                                 "updated_at=clock_timestamp() "
                                 "WHERE career.agent_work_sessions.user_id=:user_id "
                                 "RETURNING *"

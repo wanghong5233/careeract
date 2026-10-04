@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from services.api.application.context import ActorContext
 from services.api.application.ports.projects import ProjectPage
+from services.api.application.ports.work_sessions import AgentHistoryReader
 from services.api.domain.project import (
     CareerProject,
     ProjectConflict,
@@ -63,6 +64,7 @@ def project_from_row(row: RowMapping) -> CareerProject:
 class PostgresProjectRepository:
     def __init__(self, engine: AsyncEngine) -> None:
         self.engine = engine
+        self.history: AgentHistoryReader | None = None
 
     async def list(
         self, actor: ActorContext, *, cursor: str | None, limit: int, archived: bool | None
@@ -139,6 +141,22 @@ class PostgresProjectRepository:
                 )
                 if version != expected_version:
                     return False
+                from services.api.infrastructure.agent_execution import lock_conversation
+
+                session_ids = await connection.scalars(
+                    text(
+                        "SELECT session_id FROM career.agent_work_sessions "
+                        "WHERE project_id=:id AND user_id=:user_id "
+                        "ORDER BY session_id"
+                    ),
+                    parameters,
+                )
+                for session_id in session_ids:
+                    await lock_conversation(connection, session_id)
+                    if self.history is not None and await self.history.has_active_run(
+                        session_id=session_id, user_id=actor.user_id
+                    ):
+                        raise ProjectConflict("Wait for the active run to end")
                 await connection.execute(
                     text(
                         "UPDATE career.workspace_memories SET state='retired', "
@@ -150,6 +168,7 @@ class PostgresProjectRepository:
                 await connection.execute(
                     text(
                         "UPDATE career.agent_work_sessions SET project_id=NULL, "
+                        "context_version=gen_random_uuid(), "
                         "version=gen_random_uuid(), "
                         "updated_at=clock_timestamp() WHERE project_id=:id AND user_id=:user_id"
                     ),

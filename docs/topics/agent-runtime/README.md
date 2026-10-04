@@ -100,7 +100,7 @@ CareerAct 管理产品历史；随后确认低风险经验自动记录、独立�
 - 页面关闭后已受理任务继续的 PRD 需求保留；必须验证实际选用的后台运行/重连路径，不能把框架支持
   当成当前 AG-UI 路径已接通。服务进程重启与浏览器刷新分别验收；后台 asyncio 任务不等于持久任务重放。
 - 历史恢复保留已持久化的部分内容及真实状态，缺失片段明确显示，不能承诺每个已经显示的 token 都已落库。
-  第一条真实运行链必须验证失败/取消/断流时框架能保存什么，再决定最小补存储；不能把它留成未检查的恢复承诺。
+  当前文本链复用 Agno 的取消、错误和 Run 持久化；本轮已用合成流验证非终态不标完成，真实供应商断流后的保存范围与后台续跑仍待隔离验收。
 - 跨系统业务任务复用 Temporal 的调度、等待、重试和恢复；领域状态记录用户关心的业务结果和证据，
   Workflow History 不替代领域结果。重试策略按副作用设计，结果不确定的投递/发送先对账。
 - browser-use 的本次失败处理与历史压缩可辅助执行；长期进化还需要经验证的经验及检索。
@@ -112,34 +112,34 @@ CareerAct 管理产品历史；随后确认低风险经验自动记录、独立�
 
 | 组件与锁定版本 | 可复用与当前接入 | CareerAct 必须补齐 |
 | --- | --- | --- |
-| Agno 3.0.6（仓库 Fork） | PostgresDb、Session/Run、消息与工具记录、摘要、Memory/Learning、后台运行与取消；当前已接数据库、领域工具、动态规则及依据 metadata | 对话身份、领域归属/确认、Run 范围、请求去重和产品适配；正文按上述契约复用，不能把运行镜像理解为可随意删除 |
+| Agno 3.0.6（仓库 Fork） | PostgresDb、Session/Run、消息与工具记录、摘要、Memory/Learning、后台运行与取消；当前已接数据库、领域工具、动态规则、依据 metadata、对话 ID 和最近 3 个 Run 历史 | CareerAct 负责对话身份、领域归属/确认、上下文版本、请求去重和产品适配；正文按上述契约复用，不能把运行镜像理解为可随意删除 |
 | browser-use 0.13.10（仓库 Fork） | 页面观察/工具循环、历史压缩、失败计数与重规划；依赖已锁定，尚无 CareerAct 业务执行接入 | 站点适配、字段计划、独立结果核验、授权与经验生命周期；不重写通用浏览器 Agent |
 | Temporal Python 1.32.0 | 已有健康 Workflow；本地持久服务历史验证保留。部署 Server 1.31.2，本地 CLI dev 镜像 1.8.3 是不同组件 | 长业务任务/Activity 与领域结果关联；纯文本对话不以完整 Temporal 业务平台为前置 |
-| assistant-ui/react 0.15.18、react-ag-ui 0.0.58；AG-UI JS 0.0.59、Python 0.1.22 | RuntimeProvider、流式事件/工具展示和历史适配接口；旧链路已有，新壳尚未接发送 | 将产品对话绑定现有 Runtime、恢复真实状态、防迟到事件、错误与停止反馈；不另写消息渲染/流协议 |
+| assistant-ui/react 0.15.18、react-ag-ui 0.0.58；AG-UI JS 0.0.59、Python 0.1.22 | RuntimeProvider、按服务端对话绑定的流式事件、工具展示和历史适配接口；输入框已接真实 AG-UI 请求 | 真实供应商凭据、断流重连和页面关闭后台恢复仍待验收；不另写消息渲染/流协议 |
 | PostgreSQL 17.6 | 现有职业领域表、Agno 存储及事务/条件写入；产品与框架可各守自己的 schema | 最小对话目录与运行关联，领域版本/并发约束；相同物理库不等于业务和框架共享真相，也无需按记忆类型另建库 |
 
 关键证据与实际缺口：
 
-- [现有会话表](../../../services/api/migrations/versions/0006_agent_work_sessions.py)只有用户、项目和时间；
-  [BFF 线程 ID](../../../apps/web/src/lib/agent-session.ts)按用户派生，
-  [前端对话状态](../../../apps/web/src/lib/agent-space-state.ts)仍在 sessionStorage，独立服务端目录未实现。
+- [对话目录迁移](../../../services/api/migrations/versions/0009_conversation_directory.py)及上下文版本迁移保存用户、项目、归档、版本和范围版本；
+  [BFF 线程 ID](../../../apps/web/src/lib/agent-session.ts)沿用服务端对话 ID，
+  [前端对话状态](../../../apps/web/src/lib/agent-space-state.ts)只保留草稿和工作面状态。
 - [Agno 历史适配器](../../../services/api/infrastructure/agent_sessions.py)已从 Session 读取 user/assistant 消息，
   [框架 Session](../../../vendor/agno/libs/agno/agno/session/agent.py)保存多个 Run；再建完整消息库会产生双写、去重与一致性成本。
-  所有者隔离已有旧路径证据，新目录与映射仍需重验。
+  所有者隔离和新目录映射已在合成 PostgreSQL 专项中重验。
 - [AG-UI router](../../../vendor/agno/libs/agno/agno/os/interfaces/agui/router.py)普通请求提取最后一条用户输入；
-  [Runtime 配置](../../../services/api/infrastructure/agent_runtime.py)未开启历史上下文/摘要/学习，
-  [Agno 默认值](../../../vendor/agno/libs/agno/agno/agent/agent.py)的 add_history_to_context 为 false。
-  因此浏览器发了历史、后端存了历史，都不能证明模型看到了前文；接入时需选择唯一的服务端历史组装路径，
-  先做范围筛选，再按需摘要，不能同时把客户端历史与框架历史重复注入。
+  [Runtime 配置](../../../services/api/infrastructure/agent_runtime.py)已开启最近 3 个 Run 的历史上下文，
+  通过 [范围钩子](../../../services/api/infrastructure/agent_tools.py)先按对话上下文版本筛选，再交给 Agno 组装，
+  不把客户端完整历史重复注入。
 - [领域工具和 instructions](../../../services/api/infrastructure/agent_tools.py)实际在
   [factory](../../../services/api/app/factory.py)接入；[上下文服务](../../../services/api/application/agent_context.py)
-  读取个人及当前项目有效规则、档案按需加载，但工具每次查当前会话项目，尚未冻结 Run 范围。
-  依据现在保存在 Run metadata；复用该字段并验证保存时机，不预建第二套完整证据数据库。
-- [前端历史适配](../../../apps/web/src/app/runtime-provider.tsx)把已恢复 assistant 消息统一标为 complete，
-  append/update 为空；当前读取接口仅文本，不含运行终态。新链路必须修正，不能以旧历史显示证明异常恢复。
+  读取个人及当前项目有效规则、档案按需加载，Run 以 `context_version` 绑定范围，依据保存在 Run metadata；
+  复用该字段并验证保存时机，不预建第二套完整证据数据库。
+- [前端历史适配](../../../apps/web/src/app/runtime-provider.tsx)按服务端返回的 Run 状态映射完成、取消、失败和未知；
+  SSE 没有终态时明确报断流，历史读取失败不转为空历史。
 - [Agno Agent 路由](../../../vendor/agno/libs/agno/agno/os/routers/agents/router.py)存在后台与事件恢复路径，
-  但当前 AG-UI router 未走该后台入口，[Web BFF](../../../apps/web/src/app/api/agent/route.ts)沿用请求 signal。
-  停止的端到端语义、后台与 AG-UI 的适配、失败部分内容及重启后状态尚待隔离验证。
+  当前首版 AG-UI 通过 CareerAct 适配器消费 Agno 后台运行事件，并沿用框架取消语义；
+  [Web BFF](../../../apps/web/src/app/api/agent/route.ts)仍沿用请求 signal。
+  断流后的重连、页面关闭后台续跑和进程重启后的恢复尚待隔离验证；本轮不另建运行状态机。
 - 当前笔记/规则已有 candidate/confirmed/retired 和版本条件；修改规则回到候选，撤销不能直接重新启用。
   只存当前正文/软撤销行，尚无逐次版本审计、公司/批次范围和有效期；来源说明不等于已核验证据对象。
   合成材料有独立版本历史，不能据此宣称所有事实都有不可变历史版本。
@@ -169,8 +169,8 @@ CareerAct 管理产品历史；随后确认低风险经验自动记录、独立�
 | --- | --- |
 | 已明确的系统边界 | 对话/Run/领域归属、项目与历史范围、确认与学习、恢复含义及消息存储复用；不先固定所有表结构 |
 | 已完成的最小增量 | 独立对话服务端目录、项目/运行映射、归档/重命名、版本并发和历史读取，正式壳绑定服务端 ID；复用 Agno 历史，不实现独立消息编辑平台 |
-| 已完成的最小运行链 | 已保存对话绑定同一服务端 ID；Agno 开启最近 3 个 Run 的历史上下文，服务端按用户/项目读取职业规则与档案，现有输入框通过 AG-UI 发送并显示流式文本，停止使用框架取消语义，历史终态不统一标完成 |
-| 下一项运行验收 | 隔离真实模型、断流重连、重开读取和页面关闭后的已受理运行；不先扩展长期记忆、浏览器或职业业务 |
+| 已完成的最小运行链 | 已保存对话绑定同一服务端 ID；Agno 开启最近 3 个 Run 的历史上下文和自身 Run 状态持久化，CareerAct 按用户、对话锁和项目上下文版本做边界校验，现有输入框通过 AG-UI 发送并显示流式文本，停止使用框架取消语义，失败/取消/未知终态不标为完成 |
+| 下一项运行验收 | 用隔离凭据验证真实供应商模型、断流重连、重开读取和页面关闭后的已受理运行；不先扩展长期记忆、浏览器或职业业务 |
 | 之后按反馈演进 | 较长对话摘要、候选确认/撤销的持续一致性评测、一个职业业务路径，再验证表单“错误→修正→不复发→失效退出”；无须先实现通用学习平台 |
 
 下一项验收用隔离用户和合成数据，框架历史也用隔离 Session：

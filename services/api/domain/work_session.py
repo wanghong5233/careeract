@@ -21,6 +21,7 @@ class AgentWorkSession:
     title: str = "历史对话"
     archived: bool = False
     version: UUID = field(default_factory=uuid4)
+    context_version: UUID = field(default_factory=uuid4)
 
     def __post_init__(self) -> None:
         validate_session_id(self.session_id)

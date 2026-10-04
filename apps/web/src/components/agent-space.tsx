@@ -19,6 +19,7 @@ import { useProjectList } from "@/hooks/use-project-list";
 import { useAgentConversations } from "@/hooks/use-agent-conversations";
 import { useConversationHistory } from "@/hooks/use-conversation-history";
 import { cn } from "@/lib/utils";
+import { cancelConversationRun, queueConversationSend, takeConversationSend } from "@/lib/agent-runtime";
 import styles from "./agent-space.module.css";
 
 function LiveConversationMessages() {
@@ -53,6 +54,7 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
   const runtimeRunning = useAuiState(runtime => runtime.thread.isRunning);
   const runtimeHasMessages = useAuiState(runtime => runtime.thread.messages.length > 0);
   const [conversationBusy, setConversationBusy] = useState(false);
+  const [sendBusy, setSendBusy] = useState(false);
   const { projects, updateProjects: setProjects, loading: projectLoading, error: projectError, cursor: projectCursor, refresh: refreshProjects, loadMore: loadMoreProjects } = useProjectList();
   const [mobileNavigation, setMobileNavigation] = useState(false);
   const [collapsed, setCollapsed] = useState<string[]>([]);
@@ -71,7 +73,8 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
   const expandNavigation = useRef<HTMLButtonElement>(null);
   const collapseNavigation = useRef<HTMLButtonElement>(null);
   const pendingNavigation = useRef<string | null>(null);
-  const pendingSend = useRef<{ id: string; text: string } | null>(null);
+  const sendingConversation = useRef<string | null>(null);
+  const stopRequested = useRef(false);
   const space = useRef<HTMLDivElement>(null);
   const project = projects.find(item => item.id === current.projectId);
   const projectLabel = project?.title ?? (current.projectId ? "项目暂不可用" : "个人 Agent");
@@ -85,14 +88,21 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
   const panelOpen = contextOpen || (routeOpen && !current.panelHidden);
 
   const sendText = useCallback(async (text: string, id: string) => {
+    if (sendingConversation.current === id) return;
+    sendingConversation.current = id;
+    stopRequested.current = false;
+    setSendBusy(true);
     setFeedback("");
     try {
       await Promise.resolve(aui.thread.append({ role: "user", content: [{ type: "text", text }] }));
-      if (store.snapshot().selectedId === id) {
-        store.update(previous => ({ ...previous, conversations: previous.conversations.map(item => item.id === id ? { ...item, draft: "" } : item) }));
+      if (!stopRequested.current && store.snapshot().selectedId === id) {
+        store.update(previous => ({ ...previous, conversations: previous.conversations.map(item => item.id === id && item.draft.trim() === text ? { ...item, draft: "" } : item) }));
       }
     } catch (error) {
       setFeedback(error instanceof Error ? error.message : "本次发送未确认，草稿仍保留，请核对后重试。");
+    } finally {
+      if (sendingConversation.current === id) sendingConversation.current = null;
+      setSendBusy(false);
     }
   }, [aui, store]);
 
@@ -130,11 +140,15 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
   }), [registerAgent, store]);
 
   useEffect(() => {
-    const pending = pendingSend.current;
-    if (!pending || !current.version || pending.id !== current.id) return;
-    pendingSend.current = null;
-    void sendText(pending.text, pending.id);
-  }, [current.id, current.version, sendText]);
+    const sendPending = () => {
+      if (!current.version || history.loading || history.error) return;
+      const text = takeConversationSend(owner, current.id);
+      if (text) void sendText(text, current.id);
+    };
+    sendPending();
+    window.addEventListener("careeract:send-ready", sendPending);
+    return () => window.removeEventListener("careeract:send-ready", sendPending);
+  }, [current.id, current.version, history.loading, history.error, owner, sendText]);
 
   function update(patch: Partial<SpaceConversation>) {
     setFeedback("");
@@ -159,7 +173,7 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
 
   async function start(projectId: string | null = null, guarded = false) {
     if (conversationBusy) return;
-    if (runtimeRunning) {
+    if (runtimeRunning || sendBusy) {
       setFeedback("请先停止当前运行，再切换到新对话。");
       return;
     }
@@ -181,7 +195,7 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
   }
 
   async function changeConversation(id: string, changes: { project_id?: string | null; archived?: boolean }) {
-    if (conversationBusy) return;
+    if (conversationBusy || sendBusy) return;
     setConversationBusy(true); setFeedback("");
     try { await conversations.persist(id, changes); }
     catch (error) { setFeedback(error instanceof Error ? error.message : "未能保存对话，请重新读取核对。"); }
@@ -194,7 +208,7 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
       setLeaveAction(() => () => select(id, true));
       return;
     }
-    if (runtimeRunning && id !== current.id) {
+    if ((runtimeRunning || sendBusy || conversationBusy) && id !== current.id) {
       setFeedback("请先停止当前运行，再切换对话。");
       return;
     }
@@ -254,17 +268,21 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
     event.preventDefault();
     if (current.archived) return;
     if (runtimeRunning) {
-      aui.thread.cancelRun();
+      stopRequested.current = true;
+      void cancelConversationRun(current.id).catch(error => {
+        setFeedback(error instanceof Error ? error.message : "停止结果未确认，请重新读取运行状态。");
+      }).finally(() => aui.thread.cancelRun());
       setFeedback("正在停止本次运行，已保存的内容不会被删除。");
       return;
     }
     const text = current.draft.trim();
-    if (!text || conversationBusy) return;
+    if (!text || conversationBusy || sendBusy || history.loading || history.error) return;
     if (!current.version) {
       setConversationBusy(true);
       try {
         const saved = await conversations.persist(current.id);
-        pendingSend.current = { id: saved.session_id, text };
+        queueConversationSend(owner, saved.session_id, text);
+        window.dispatchEvent(new Event("careeract:send-ready"));
       } catch (error) {
         setFeedback(error instanceof Error ? error.message : "未能确认对话，草稿仍保留。请重试。");
       } finally {
@@ -412,7 +430,7 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
               <label htmlFor="career-agent-input" className="sr-only">消息</label>
               <textarea id="career-agent-input" ref={input} rows={3} maxLength={4000} readOnly={current.archived} value={current.draft} onChange={event => update({ draft: event.target.value })} onKeyDown={event => { if ((event.ctrlKey || event.metaKey) && event.key === "Enter" && !event.nativeEvent.isComposing) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} placeholder="发送消息…" />
               <AgentComposerTools key={current.id} readOnly={current.archived}>
-                <TooltipIconButton type="submit" variant="default" disabled={current.archived || conversationBusy || (!runtimeRunning && !current.draft.trim())} tooltip={runtimeRunning ? "停止运行" : "发送 · Ctrl/⌘ Enter"} aria-label={runtimeRunning ? "停止运行" : "发送"} side="top" className="size-8 rounded-full">{runtimeRunning ? <SquarePen className="rotate-45" /> : <ArrowUp />}</TooltipIconButton>
+                <TooltipIconButton type="submit" variant="default" disabled={current.archived || conversationBusy || (!runtimeRunning && (sendBusy || !current.draft.trim()))} tooltip={runtimeRunning ? "停止运行" : "发送 · Ctrl/⌘ Enter"} aria-label={runtimeRunning ? "停止运行" : "发送"} side="top" className="size-8 rounded-full">{runtimeRunning ? <SquarePen className="rotate-45" /> : <ArrowUp />}</TooltipIconButton>
               </AgentComposerTools>
             </form>
           {feedback && <p role="status" className={styles.feedback}>{feedback}</p>}

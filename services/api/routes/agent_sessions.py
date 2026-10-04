@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from services.api.application.context import ActorContext
+from services.api.application.ports.agent_runtime import AgentExecutionPort
 from services.api.application.ports.work_sessions import AgentHistoryReader
 from services.api.application.work_sessions import AgentWorkSessionService
 from services.api.domain.work_session import AgentWorkSession
@@ -72,6 +73,13 @@ class HistoryResponse(BaseModel):
     session: WorkSessionResponse
     messages: list[HistoryMessageResponse]
     truncated: bool
+    runs: list[dict[str, str | None]] = Field(default_factory=list)
+
+
+class CancelRunBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    run_id: str = Field(min_length=1, max_length=128)
 
 
 class ContextBasisResponse(BaseModel):
@@ -97,6 +105,17 @@ def get_actor(request: Request) -> ActorContext:
     request_id = str(uuid4())
     request.state.request_id = request_id
     return ActorContext(user_id=request.state.user_id, request_id=request_id)
+
+
+@router.post("/conversations/{session_id}/cancel")
+async def cancel_run(
+    session_id: str,
+    body: CancelRunBody,
+    request: Request,
+    actor: Annotated[ActorContext, Depends(get_actor)],
+) -> dict[str, str]:
+    execution = cast(AgentExecutionPort, request.app.state.agent_execution)
+    return {"status": await execution.cancel(actor, session_id, body.run_id)}
 
 
 def serialize_session(session: AgentWorkSession) -> WorkSessionResponse:
@@ -202,10 +221,14 @@ async def read_session_history(
     messages = await reader.read(
         session_id=session.session_id, user_id=actor.user_id, limit=limit + 1
     )
+    runs = getattr(reader, "runs", None)
     return HistoryResponse(
         session=serialize_session(session),
         messages=[HistoryMessageResponse(**asdict(message)) for message in messages[-limit:]],
         truncated=len(messages) > limit,
+        runs=await runs(session_id=session.session_id, user_id=actor.user_id)
+        if callable(runs)
+        else [],
     )
 
 

@@ -39,11 +39,13 @@ from services.api.domain.work_session import (
     WorkSessionNotFound,
     WorkSessionUnavailable,
 )
+from services.api.infrastructure.agent_execution import AgentExecution
 from services.api.infrastructure.agent_runtime import build_agent_os
 from services.api.infrastructure.agent_sessions import AgnoAgentHistoryReader
 from services.api.infrastructure.agent_tools import (
     build_agent_tools,
     build_career_instructions,
+    build_scope_hook,
     initialize_run_manifest,
     persist_run_manifest,
 )
@@ -100,20 +102,25 @@ def create_app(
 
     app.router.lifespan_context = lifespan
     app.state.profile_service = ProfileService(PostgresProfileRepository(engine))
-    app.state.project_service = ProjectService(PostgresProjectRepository(engine))
+    project_repository = PostgresProjectRepository(engine)
+    app.state.project_service = ProjectService(project_repository)
     app.state.memory_service = MemoryService(PostgresMemoryRepository(engine))
     app.state.material_service = MaterialService(
         PostgresMaterialRepository(engine), enabled=settings.synthetic_materials_enabled
     )
-    app.state.agent_work_session_service = AgentWorkSessionService(
-        PostgresAgentWorkSessionRepository(engine)
-    )
+    session_repository = PostgresAgentWorkSessionRepository(engine)
+    app.state.agent_work_session_service = AgentWorkSessionService(session_repository)
     agents = getattr(agent_os, "agents", None) or []
     career_agent = next(
         (agent for agent in agents if getattr(agent, "id", None) == "careeract-agent"), None
     )
     if career_agent is not None:
         app.state.agent_history_reader = AgnoAgentHistoryReader(career_agent)
+        session_repository.history = app.state.agent_history_reader
+        project_repository.history = app.state.agent_history_reader
+        app.state.agent_execution = AgentExecution(
+            engine, app.state.agent_work_session_service, career_agent
+        )
         app.state.agent_work_session_service.history = app.state.agent_history_reader
         set_tools = getattr(career_agent, "set_tools", None)
         if callable(set_tools):
@@ -127,7 +134,10 @@ def create_app(
             set_tools(build_agent_tools(context_service))
             career_agent.cache_callables = False
             career_agent.instructions = build_career_instructions(context_service)
-            career_agent.pre_hooks = [initialize_run_manifest]
+            career_agent.pre_hooks = [
+                initialize_run_manifest,
+                build_scope_hook(app.state.agent_work_session_service),
+            ]
             career_agent.post_hooks = [persist_run_manifest]
     app.state.settings = settings
     app.state.agent_os = agent_os

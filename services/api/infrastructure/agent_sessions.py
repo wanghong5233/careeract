@@ -13,6 +13,24 @@ class AgnoAgentHistoryReader:
     def __init__(self, agent: Any) -> None:
         self.agent = agent
 
+    async def runs(self, *, session_id: str, user_id: str) -> list[dict[str, str | None]]:
+        try:
+            session = await self.agent.aget_session(session_id=session_id, user_id=user_id)
+        except (AgnoError, DBAPIError, PoolTimeoutError, ValueError, TypeError):
+            raise WorkSessionHistoryUnavailable("Agent run status is unavailable") from None
+        return (
+            [
+                {
+                    "run_id": run.run_id,
+                    "status": getattr(getattr(run, "status", None), "value", "UNKNOWN"),
+                }
+                for run in (session.runs or [])
+                if getattr(run, "parent_run_id", None) is None
+            ][-100:]
+            if session
+            else []
+        )
+
     async def has_active_run(self, *, session_id: str, user_id: str) -> bool:
         try:
             session = await self.agent.aget_session(session_id=session_id, user_id=user_id)

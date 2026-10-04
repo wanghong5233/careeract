@@ -49,6 +49,7 @@ class SyntheticSession:
     runs = [
         SimpleNamespace(
             run_id="synthetic-run",
+            status=SimpleNamespace(value="COMPLETED"),
             metadata={
                 "career_basis": [
                     {"type": "rule", "id": "synthetic-rule", "title": "合成规则", "version": "v1"}
