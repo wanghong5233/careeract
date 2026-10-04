@@ -148,6 +148,14 @@ class PostgresProjectRepository:
                     {**parameters, "version": uuid4()},
                 )
                 await connection.execute(
+                    text(
+                        "UPDATE career.agent_work_sessions SET project_id=NULL, "
+                        "version=gen_random_uuid(), "
+                        "updated_at=clock_timestamp() WHERE project_id=:id AND user_id=:user_id"
+                    ),
+                    parameters,
+                )
+                await connection.execute(
                     text("DELETE FROM career.career_projects WHERE id=:id AND user_id=:user_id"),
                     parameters,
                 )

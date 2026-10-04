@@ -1,18 +1,31 @@
 export type SpaceTab = { href: string; label: string };
-export type SpaceConversation = { id: string; projectId: string | null; title: string; draft: string; archived: boolean; tabs: SpaceTab[]; activeHref: string; panelHidden: boolean };
+import type { AgentConversation } from "@/lib/agent-conversations";
+
+export type SpaceConversation = { id: string; projectId: string | null; title: string; draft: string; archived: boolean; tabs: SpaceTab[]; activeHref: string; panelHidden: boolean; version?: string; createId?: string };
 export type SpaceState = { conversations: SpaceConversation[]; selectedId: string; navigation: boolean; panelWidth: number };
 export function newSpaceConversation(id: string, projectId: string | null = null): SpaceConversation {
   return { id, projectId, title: "新对话", draft: "", archived: false, tabs: [], activeHref: "/workspace", panelHidden: false };
 }
 
 export function beginSpaceConversation(state: SpaceState, id: string, projectId: string | null = null): SpaceState {
-  const empty = state.conversations.find(item => !item.archived && !item.draft && item.title === "新对话" && item.projectId === projectId && !item.tabs.length);
+  const empty = state.conversations.find(item => !item.version && !item.archived && !item.draft && item.title === "新对话" && item.projectId === projectId && !item.tabs.length);
   const conversation = { ...newSpaceConversation(empty?.id ?? id, projectId), panelHidden: true };
   return {
     ...state,
     selectedId: conversation.id,
     conversations: empty ? state.conversations.map(item => item.id === empty.id ? conversation : item) : [conversation, ...state.conversations],
   };
+}
+
+export function mergeSpaceConversations(state: SpaceState, conversations: AgentConversation[]): SpaceState {
+  const local = new Map(state.conversations.map(item => [item.id, item]));
+  const remoteIds = new Set(conversations.map(item => item.session_id));
+  const merged = conversations.map(item => ({
+    ...newSpaceConversation(item.session_id), ...local.get(item.session_id),
+    id: item.session_id, title: item.title, projectId: item.project_id,
+    archived: item.archived, version: item.version,
+  }));
+  return { ...state, conversations: [...merged, ...state.conversations.filter(item => !remoteIds.has(item.id))] };
 }
 const initialState: SpaceState = { conversations: [newSpaceConversation("new")], selectedId: "new", navigation: true, panelWidth: 50 };
 
@@ -45,6 +58,8 @@ function isSpaceState(value: unknown): value is SpaceState & { tabs?: SpaceTab[]
     && state.conversations.every(item => item && typeof item.id === "string"
       && (item.projectId === null || typeof item.projectId === "string")
       && typeof item.title === "string" && typeof item.draft === "string" && typeof item.archived === "boolean"
+      && (item.version === undefined || typeof item.version === "string")
+      && (item.createId === undefined || typeof item.createId === "string")
       && (item.tabs === undefined || validTabs(item.tabs))
       && (item.activeHref === undefined || item.activeHref === "/workspace" || (typeof item.activeHref === "string" && item.activeHref.startsWith("/workspace/") && !item.activeHref.includes("\\")))
       && (item.panelHidden === undefined || typeof item.panelHidden === "boolean"))

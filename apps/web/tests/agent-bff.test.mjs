@@ -23,15 +23,21 @@ function sessionRequest(body = { project_id: projectId }, headers = {}) {
   });
 }
 
-test("history GET reads the server-derived session without writing its project association", async () => {
+test("history GET forwards the selected session for API ownership verification without changing its project", async () => {
   const { handler, calls } = fixture("history");
   const response = await handler.GET(new Request(`${origin}/api/agent/history?session_id=another-user`));
   assert.equal(response.status, 200);
   assert.equal(calls.length, 1);
   assert.equal(calls[0].options.method ?? "GET", "GET");
-  assert.equal(calls[0].url.searchParams.get("session_id"), "session-owner");
+  assert.equal(calls[0].url.searchParams.get("session_id"), "another-user");
   assert.equal(calls[0].options.cache, "no-store");
   assert.equal(response.headers.get("cache-control"), "no-store");
+});
+
+test("history GET retains the legacy mapping when no conversation is selected", async () => {
+  const { handler, calls } = fixture("history");
+  await handler.GET(new Request(`${origin}/api/agent/history`));
+  assert.equal(calls[0].url.searchParams.get("session_id"), "session-owner");
 });
 
 test("history preserves missing session status", async () => {

@@ -13,6 +13,24 @@ class AgnoAgentHistoryReader:
     def __init__(self, agent: Any) -> None:
         self.agent = agent
 
+    async def has_active_run(self, *, session_id: str, user_id: str) -> bool:
+        try:
+            session = await self.agent.aget_session(session_id=session_id, user_id=user_id)
+        except (AgnoError, DBAPIError, PoolTimeoutError, ValueError, TypeError):
+            raise WorkSessionHistoryUnavailable("Agent run status is unavailable") from None
+        return bool(
+            session
+            and any(
+                str(
+                    getattr(
+                        getattr(run, "status", None), "value", getattr(run, "status", "UNKNOWN")
+                    )
+                )
+                not in {"COMPLETED", "CANCELLED", "ERROR", "REGENERATED"}
+                for run in session.runs or []
+            )
+        )
+
     async def basis(self, *, session_id: str, user_id: str) -> AgentContextBasis:
         try:
             session = await self.agent.aget_session(session_id=session_id, user_id=user_id)
@@ -53,11 +71,25 @@ class AgnoAgentHistoryReader:
             messages = session.get_messages(
                 skip_roles=["system", "tool"],
                 skip_history_messages=True,
+                skip_statuses=[],
                 limit=limit,
             )
         except (AgnoError, DBAPIError, PoolTimeoutError, ValueError, TypeError) as error:
             raise WorkSessionHistoryUnavailable("Agent history is unavailable") from error
         result: list[AgentHistoryMessage] = []
+        message_runs = {
+            message.id: (
+                run.run_id,
+                str(
+                    getattr(
+                        getattr(run, "status", None), "value", getattr(run, "status", "UNKNOWN")
+                    )
+                ),
+            )
+            for run in session.runs or []
+            if getattr(run, "parent_run_id", None) is None
+            for message in getattr(run, "messages", None) or []
+        }
         for message in messages:
             if message.role not in {"user", "assistant"}:
                 continue
@@ -70,6 +102,8 @@ class AgnoAgentHistoryReader:
                     role=message.role,
                     content=content,
                     created_at=message.created_at,
+                    run_id=message_runs.get(message.id, (None, "UNKNOWN"))[0],
+                    run_status=message_runs.get(message.id, (None, "UNKNOWN"))[1],
                 )
             )
         return tuple(result[-limit:])

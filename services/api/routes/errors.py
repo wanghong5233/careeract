@@ -26,6 +26,7 @@ from services.api.domain.project import (
     ProjectUnavailable,
 )
 from services.api.domain.work_session import (
+    WorkSessionConflict,
     WorkSessionHistoryUnavailable,
     WorkSessionInvalid,
     WorkSessionNotFound,
@@ -126,6 +127,12 @@ async def work_session_error(request: Request, error: Exception) -> JSONResponse
         status, code, message = 422, "invalid_agent_session", "伙伴会话标识无效。"
     elif isinstance(error, WorkSessionNotFound):
         status, code, message = 404, "agent_session_not_found", "找不到该伙伴工作。"
+    elif isinstance(error, WorkSessionConflict):
+        status, code, message = (
+            409,
+            "conversation_conflict",
+            "对话已有更新，请重新读取后再保存，输入仍保留。",
+        )
     elif isinstance(error, WorkSessionHistoryUnavailable):
         status, code, message = (
             503,

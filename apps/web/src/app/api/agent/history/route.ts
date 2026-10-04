@@ -17,7 +17,7 @@ export async function GET(request: NextRequest): Promise<Response> {
   if (!session) return failure(401, "unauthorized", "登录已失效，请重新登录。", requestId);
   const { token } = await getAuth().api.getToken({ headers: request.headers });
   if (!token) return failure(401, "unauthorized", "登录验证失败，请重新登录。", requestId);
-  const sessionId = agentThreadId(session.user.id);
+  const sessionId = new URL(request.url).searchParams.get("session_id") ?? agentThreadId(session.user.id);
   const history = new URL("/api/v1/agent/session/history", serverEnv.apiBaseUrl);
   history.searchParams.set("session_id", sessionId);
   history.searchParams.set("limit", "100");

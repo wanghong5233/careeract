@@ -3,7 +3,7 @@ from typing import Annotated, cast
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, Query, Request, Response
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from services.api.application.context import ActorContext
 from services.api.application.ports.work_sessions import AgentHistoryReader
@@ -25,6 +25,38 @@ class WorkSessionResponse(BaseModel):
     project_id: UUID | None
     created_at: str
     updated_at: str
+    title: str
+    archived: bool
+    version: UUID
+
+
+class WorkSessionPageResponse(BaseModel):
+    items: list[WorkSessionResponse]
+    next_cursor: str | None
+
+
+class CreateConversationBody(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    id: UUID
+    title: str = Field(default="新对话", min_length=1, max_length=120)
+    project_id: UUID | None = None
+
+
+class UpdateConversationBody(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    version: UUID
+    title: str | None = Field(default=None, min_length=1, max_length=120)
+    archived: bool | None = None
+    project_id: UUID | None = None
+
+    @model_validator(mode="after")
+    def require_changes(self) -> "UpdateConversationBody":
+        changes = self.model_fields_set - {"version"}
+        if not changes or any(getattr(self, field) is None for field in changes - {"project_id"}):
+            raise ValueError("Provide conversation changes")
+        return self
 
 
 class HistoryMessageResponse(BaseModel):
@@ -32,11 +64,14 @@ class HistoryMessageResponse(BaseModel):
     role: str
     content: str
     created_at: int
+    run_id: str | None
+    run_status: str
 
 
 class HistoryResponse(BaseModel):
     session: WorkSessionResponse
     messages: list[HistoryMessageResponse]
+    truncated: bool
 
 
 class ContextBasisResponse(BaseModel):
@@ -70,6 +105,73 @@ def serialize_session(session: AgentWorkSession) -> WorkSessionResponse:
         project_id=session.project_id,
         created_at=session.created_at.isoformat(),
         updated_at=session.updated_at.isoformat(),
+        title=session.title,
+        archived=session.archived,
+        version=session.version,
+    )
+
+
+@router.get("/conversations", response_model=WorkSessionPageResponse)
+async def list_conversations(
+    response: Response,
+    service: Annotated[AgentWorkSessionService, Depends(get_service)],
+    actor: Annotated[ActorContext, Depends(get_actor)],
+    cursor: Annotated[str | None, Query(max_length=512)] = None,
+    limit: Annotated[int, Query(ge=1, le=50)] = 20,
+    archived: bool | None = None,
+) -> WorkSessionPageResponse:
+    response.headers["Cache-Control"] = "no-store"
+    page = await service.list(actor, cursor=cursor, limit=limit, archived=archived)
+    return WorkSessionPageResponse(
+        items=[serialize_session(item) for item in page.items], next_cursor=page.next_cursor
+    )
+
+
+@router.post("/conversations", response_model=WorkSessionResponse, status_code=201)
+async def create_conversation(
+    body: CreateConversationBody,
+    response: Response,
+    service: Annotated[AgentWorkSessionService, Depends(get_service)],
+    actor: Annotated[ActorContext, Depends(get_actor)],
+) -> WorkSessionResponse:
+    response.headers["Cache-Control"] = "no-store"
+    return serialize_session(
+        await service.create(
+            actor, conversation_id=body.id, title=body.title, project_id=body.project_id
+        )
+    )
+
+
+@router.get("/conversations/{session_id}", response_model=WorkSessionResponse)
+async def read_conversation(
+    session_id: str,
+    response: Response,
+    service: Annotated[AgentWorkSessionService, Depends(get_service)],
+    actor: Annotated[ActorContext, Depends(get_actor)],
+) -> WorkSessionResponse:
+    response.headers["Cache-Control"] = "no-store"
+    return serialize_session(await service.read(actor, session_id=session_id))
+
+
+@router.patch("/conversations/{session_id}", response_model=WorkSessionResponse)
+async def update_conversation(
+    session_id: str,
+    body: UpdateConversationBody,
+    response: Response,
+    service: Annotated[AgentWorkSessionService, Depends(get_service)],
+    actor: Annotated[ActorContext, Depends(get_actor)],
+) -> WorkSessionResponse:
+    response.headers["Cache-Control"] = "no-store"
+    return serialize_session(
+        await service.update(
+            actor,
+            session_id=session_id,
+            title=body.title,
+            archived=body.archived,
+            project_id=body.project_id,
+            change_project="project_id" in body.model_fields_set,
+            expected_version=body.version,
+        )
     )
 
 
@@ -97,10 +199,13 @@ async def read_session_history(
 ) -> HistoryResponse:
     response.headers["Cache-Control"] = "no-store"
     session = await service.read(actor, session_id=session_id)
-    messages = await reader.read(session_id=session.session_id, user_id=actor.user_id, limit=limit)
+    messages = await reader.read(
+        session_id=session.session_id, user_id=actor.user_id, limit=limit + 1
+    )
     return HistoryResponse(
         session=serialize_session(session),
-        messages=[HistoryMessageResponse(**asdict(message)) for message in messages],
+        messages=[HistoryMessageResponse(**asdict(message)) for message in messages[-limit:]],
+        truncated=len(messages) > limit,
     )
 
 

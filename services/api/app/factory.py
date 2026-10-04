@@ -33,6 +33,7 @@ from services.api.domain.project import (
     ProjectUnavailable,
 )
 from services.api.domain.work_session import (
+    WorkSessionConflict,
     WorkSessionHistoryUnavailable,
     WorkSessionInvalid,
     WorkSessionNotFound,
@@ -113,6 +114,7 @@ def create_app(
     )
     if career_agent is not None:
         app.state.agent_history_reader = AgnoAgentHistoryReader(career_agent)
+        app.state.agent_work_session_service.history = app.state.agent_history_reader
         set_tools = getattr(career_agent, "set_tools", None)
         if callable(set_tools):
             context_service = AgentContextService(
@@ -153,6 +155,7 @@ def create_app(
     app.add_exception_handler(ProjectNotFound, project_error)
     app.add_exception_handler(ProjectUnavailable, project_error)
     app.add_exception_handler(WorkSessionInvalid, work_session_error)
+    app.add_exception_handler(WorkSessionConflict, work_session_error)
     app.add_exception_handler(WorkSessionNotFound, work_session_error)
     app.add_exception_handler(WorkSessionUnavailable, work_session_error)
     app.add_exception_handler(WorkSessionHistoryUnavailable, work_session_error)

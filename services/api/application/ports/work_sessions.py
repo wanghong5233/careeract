@@ -12,6 +12,14 @@ class AgentHistoryMessage:
     role: str
     content: str
     created_at: int
+    run_id: str | None = None
+    run_status: str = "UNKNOWN"
+
+
+@dataclass(frozen=True, slots=True)
+class WorkSessionPage:
+    items: tuple[AgentWorkSession, ...]
+    next_cursor: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,6 +30,8 @@ class AgentContextBasis:
 
 
 class AgentHistoryReader(Protocol):
+    async def has_active_run(self, *, session_id: str, user_id: str) -> bool: ...
+
     async def basis(self, *, session_id: str, user_id: str) -> AgentContextBasis: ...
 
     async def read(
@@ -30,6 +40,26 @@ class AgentHistoryReader(Protocol):
 
 
 class AgentWorkSessionRepository(Protocol):
+    async def list(
+        self, actor: ActorContext, *, cursor: str | None, limit: int, archived: bool | None
+    ) -> WorkSessionPage: ...
+
+    async def create(
+        self, actor: ActorContext, *, session_id: str, title: str, project_id: UUID | None
+    ) -> AgentWorkSession: ...
+
+    async def update(
+        self,
+        actor: ActorContext,
+        *,
+        session_id: str,
+        title: str | None,
+        archived: bool | None,
+        project_id: UUID | None,
+        change_project: bool,
+        expected_version: UUID,
+    ) -> AgentWorkSession | None: ...
+
     async def get(self, actor: ActorContext, session_id: str) -> AgentWorkSession | None: ...
 
     async def associate(

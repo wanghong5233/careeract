@@ -8,12 +8,15 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { AccountButton } from "@/components/workspace-account";
 import { AgentComposerTools } from "@/components/agent-composer-tools";
 import { AgentProjectPicker } from "@/components/agent-project-picker";
+import { ConversationHistory } from "@/components/conversation-history";
 import { TooltipIconButton } from "@/components/tooltip-icon-button";
 import { useWorkspaceActions } from "@/components/workspace-actions";
 import { navigationHref, workspaceSections } from "@/components/workspace-sections";
 import { beginSpaceConversation, getSpaceStore, removeSpaceProject, type SpaceConversation } from "@/lib/agent-space-state";
 import { createProject, deleteProject, ProjectRequestError, readProject, updateProject, type CareerProject } from "@/lib/projects";
 import { useProjectList } from "@/hooks/use-project-list";
+import { useAgentConversations } from "@/hooks/use-agent-conversations";
+import { useConversationHistory } from "@/hooks/use-conversation-history";
 import { cn } from "@/lib/utils";
 import styles from "./agent-space.module.css";
 
@@ -27,6 +30,9 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
   const updateSpace = store.update;
   const state = useSyncExternalStore(store.subscribe, store.snapshot, store.serverSnapshot);
   const current = state.conversations.find(item => item.id === state.selectedId)!;
+  const conversations = useAgentConversations(owner);
+  const history = useConversationHistory(current.id, !!current.version);
+  const [conversationBusy, setConversationBusy] = useState(false);
   const { projects, updateProjects: setProjects, loading: projectLoading, error: projectError, cursor: projectCursor, refresh: refreshProjects, loadMore: loadMoreProjects } = useProjectList();
   const [mobileNavigation, setMobileNavigation] = useState(false);
   const [collapsed, setCollapsed] = useState<string[]>([]);
@@ -111,7 +117,8 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
     openCapabilities();
   }
 
-  function start(projectId: string | null = null, guarded = false) {
+  async function start(projectId: string | null = null, guarded = false) {
+    if (conversationBusy) return;
     if (!guarded && !window.dispatchEvent(new Event("careeract:before-navigate", { cancelable: true }))) {
       setMobileNavigation(false);
       setLeaveAction(() => () => start(projectId, true));
@@ -119,9 +126,22 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
     }
     pendingNavigation.current = "/workspace";
     store.update(previous => beginSpaceConversation(previous, crypto.randomUUID(), projectId));
+    const id = store.snapshot().selectedId;
     router.push("/workspace");
     if (projectId) setCollapsed(previous => previous.filter(id => id !== projectId));
     setContextOpen(false); setShowArchived(false); setMobileNavigation(false); setFeedback(""); requestAnimationFrame(() => input.current?.focus());
+    setConversationBusy(true);
+    try { await conversations.persist(id); }
+    catch (error) { setFeedback(error instanceof Error ? error.message : "未能确认创建结果，草稿仍保留。请重新读取核对。"); }
+    finally { setConversationBusy(false); }
+  }
+
+  async function changeConversation(id: string, changes: { project_id?: string | null; archived?: boolean }) {
+    if (conversationBusy) return;
+    setConversationBusy(true); setFeedback("");
+    try { await conversations.persist(id, changes); }
+    catch (error) { setFeedback(error instanceof Error ? error.message : "未能保存对话，请重新读取核对。"); }
+    finally { setConversationBusy(false); }
   }
 
   function select(id: string, guarded = false) {
@@ -168,7 +188,7 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
     setBusy(true); setEditingError("");
     try {
       if (edit.kind === "conversation") {
-        store.update(previous => ({ ...previous, conversations: previous.conversations.map(item => item.id === edit.id ? { ...item, title: edit.title.trim() } : item) }));
+        await conversations.persist(edit.id!, { title: edit.title.trim() });
       } else {
         const existing = projects.find(item => item.id === edit.id);
         const saved = edit.kind === "create"
@@ -232,7 +252,7 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
     } finally { setDeleteBusy(false); }
   }
 
-  const listedConversations = state.conversations.filter(item => item.archived === showArchived && (item.draft || item.title !== "新对话" || item.archived));
+  const listedConversations = state.conversations.filter(item => item.archived === showArchived && (item.version || item.draft || item.title !== "新对话" || item.archived));
 
   useEffect(() => {
     function dismissMenus(event: PointerEvent | KeyboardEvent) {
@@ -279,8 +299,11 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
       </section>)}
       {projectCursor && <Button variant="ghost" size="sm" disabled={projectLoading} onClick={loadMoreProjects}>更多项目</Button>}
       <div className={styles.sectionHeading}><span>{showArchived ? "已归档对话" : "对话"}</span><Button variant="ghost" size="icon" title={showArchived ? "显示对话" : "已归档对话"} aria-label={showArchived ? "显示对话" : "已归档对话"} aria-pressed={showArchived} onClick={() => setShowArchived(value => !value)}><Archive className="size-3.5" /></Button></div>
+      {conversations.loading && <p role="status" className="px-2 py-2 text-xs text-muted-foreground">正在读取对话…</p>}
+      {conversations.error && <div className="px-2 py-2 text-xs"><p role="alert" className="text-destructive">{conversations.error}</p><Button variant="ghost" size="sm" onClick={conversations.refresh}>重新读取对话</Button></div>}
       {listedConversations.filter(item => !item.projectId || !projects.some(project => project.id === item.projectId)).map(renderConversation)}
       {showArchived && !listedConversations.length && <p className="px-2 text-xs text-muted-foreground">没有已归档对话。</p>}
+      {conversations.cursor && <Button variant="ghost" size="sm" disabled={conversations.loading} onClick={conversations.loadMore}>更多对话</Button>}
       </div>
       <div className={styles.navigationFooter}><AccountButton compact onClick={() => { setMobileNavigation(false); openAccount(); }} /></div>
     </nav>
@@ -308,10 +331,15 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
           <TooltipIconButton className="size-9" tooltip="查看背景与引用" aria-label="查看上下文" aria-pressed={contextOpen} onClick={() => setContextOpen(value => !value)}><ListTree /></TooltipIconButton>
           <TooltipIconButton className="size-9" disabled={!panelOpen && !routeOpen && !current.tabs.length} tooltip={panelOpen ? "收起内容区" : "展开内容区"} aria-label={panelOpen ? "收起内容区" : "展开内容区"} aria-expanded={panelOpen} onClick={() => { if (panelOpen) hideContent(); else if (routeOpen) update({ panelHidden: false }); else if (current.tabs.length) openRoute(current.tabs.at(-1)!.href); }}><PanelRight /></TooltipIconButton>
         </header>
-        <div className={styles.startArea}><div className={styles.welcome}><h1>{current.archived ? "已归档对话" : current.title}</h1></div>
+        <div className={styles.startArea}>
+          {history.loading && <p role="status" className={styles.feedback}>正在读取历史…</p>}
+          {history.error && <div className={styles.feedback}><p role="alert">{history.error}</p><Button variant="ghost" size="sm" onClick={history.refresh}>重新读取历史</Button></div>}
+          {!!history.history?.messages.length && <ConversationHistory key={current.id} messages={history.history.messages} />}
+          {history.history?.truncated && <p className={styles.feedback}>当前显示最近 100 条消息，更早内容仍保留。</p>}
+          {!history.loading && !history.error && !history.history?.messages.length && <div className={styles.welcome}><h1>{current.archived ? "已归档对话" : current.title}</h1></div>}
           <div className={styles.composerArea}>
             <div className={styles.composerProject}>
-              <AgentProjectPicker key={current.id} projects={projects} projectId={current.projectId} readOnly={current.archived} loading={projectLoading} error={projectError} hasMore={!!projectCursor} onRefresh={() => void refreshProjects()} onLoadMore={() => void loadMoreProjects()} onChange={projectId => update({ projectId })} onCreate={() => { setEditingError(""); setEdit({ kind: "create", id: crypto.randomUUID(), title: "" }); }} />
+              <AgentProjectPicker key={current.id} projects={projects} projectId={current.projectId} readOnly={current.archived || conversationBusy} loading={projectLoading} error={projectError} hasMore={!!projectCursor} onRefresh={() => void refreshProjects()} onLoadMore={() => void loadMoreProjects()} onChange={projectId => void changeConversation(current.id, { project_id: projectId })} onCreate={() => { setEditingError(""); setEdit({ kind: "create", id: crypto.randomUUID(), title: "" }); }} />
             </div>
             <form onSubmit={submit} className={styles.composer}>
               <label htmlFor="career-agent-input" className="sr-only">消息</label>
@@ -322,7 +350,7 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
             </form>
           {feedback && <p role="status" className={styles.feedback}>{feedback}</p>}
           {!store.storageAvailable() && <p role="alert" className={styles.feedback}>此浏览器无法保留草稿，请勿关闭页面。</p>}
-          {current.archived && <p className={styles.feedback}>已归档。<button className="underline underline-offset-4" onClick={() => update({ archived: false })}>恢复对话</button></p>}
+          {current.archived && <p className={styles.feedback}>已归档。<button disabled={conversationBusy} className="underline underline-offset-4" onClick={() => void changeConversation(current.id, { archived: false })}>恢复对话</button></p>}
           </div>
         </div>
       </main>
@@ -343,7 +371,7 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
             </section>
             <section>
               <h3>本次引用</h3>
-              <p>此对话尚未运行，没有实际读取记录。打开内容标签不会自动把正文发送给模型。</p>
+              <p>{history.history?.messages.length ? "历史引用需按当次工作记录核对。" : "此对话尚无已保存的运行消息。"}打开内容标签不会自动把正文发送给模型。</p>
               <Button variant="outline" size="sm" onClick={() => openRoute("/workspace/library")}>查看资料与成果</Button>
             </section>
           </article>}
@@ -374,6 +402,6 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
   </div>;
 
   function renderConversation(item: SpaceConversation) {
-    return <div key={item.id} className={cn(styles.conversationRow, item.id === state.selectedId && styles.selected)}><button aria-current={item.id === state.selectedId ? "page" : undefined} onClick={() => select(item.id)} className={styles.conversationLink} title={item.title}><span className="truncate">{item.title}</span>{item.draft && <span className={styles.draftMark}>草稿</span>}</button><details className={styles.conversationMenu}><summary aria-label={`${item.title}的操作`} title="对话操作"><MoreHorizontal className="size-3.5" /></summary><div><button onClick={event => { event.currentTarget.closest("details")?.removeAttribute("open"); setMobileNavigation(false); setEditingError(""); setEdit({ kind: "conversation", id: item.id, title: item.title }); }}>重命名</button><button onClick={event => { event.currentTarget.closest("details")?.removeAttribute("open"); store.update(previous => ({ ...previous, conversations: previous.conversations.map(conversation => conversation.id === item.id ? { ...conversation, archived: !conversation.archived } : conversation) })); }}>{item.archived ? "恢复对话" : "归档对话"}</button></div></details></div>;
+    return <div key={item.id} className={cn(styles.conversationRow, item.id === state.selectedId && styles.selected)}><button aria-current={item.id === state.selectedId ? "page" : undefined} onClick={() => select(item.id)} className={styles.conversationLink} title={item.title}><span className="truncate">{item.title}</span>{item.draft && <span className={styles.draftMark}>草稿</span>}</button><details className={styles.conversationMenu}><summary aria-label={`${item.title}的操作`} title="对话操作"><MoreHorizontal className="size-3.5" /></summary><div><button disabled={conversationBusy} onClick={event => { event.currentTarget.closest("details")?.removeAttribute("open"); setMobileNavigation(false); setEditingError(""); setEdit({ kind: "conversation", id: item.id, title: item.title }); }}>重命名</button><button disabled={conversationBusy} onClick={event => { event.currentTarget.closest("details")?.removeAttribute("open"); void changeConversation(item.id, { archived: !item.archived }); }}>{item.archived ? "恢复对话" : "归档对话"}</button></div></details></div>;
   }
 }
