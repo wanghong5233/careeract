@@ -188,4 +188,6 @@ def test_agent_runtime_uses_private_schema_and_disables_telemetry() -> None:
     assert all(agent.telemetry is False for agent in runtime.agents)
     assert all(agent.debug_mode is False for agent in runtime.agents)
     assert all(agent.store_media is False for agent in runtime.agents)
+    assert all(agent.add_history_to_context is True for agent in runtime.agents)
+    assert all(agent.num_history_runs == 3 for agent in runtime.agents)
     assert runtime.tracing is False

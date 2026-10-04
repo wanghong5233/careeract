@@ -32,6 +32,8 @@ def build_agent_os(settings: Settings) -> AgentOS:
         debug_mode=False,
         store_media=False,
         cache_callables=False,
+        add_history_to_context=True,
+        num_history_runs=3,
         instructions=PARTNER_INSTRUCTIONS,
         telemetry=False,
     )

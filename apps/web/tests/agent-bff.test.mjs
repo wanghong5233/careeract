@@ -23,6 +23,30 @@ function sessionRequest(body = { project_id: projectId }, headers = {}) {
   });
 }
 
+function agentFixture({ session = { user: { id: "owner" } }, token = "test-token", upstream = () => new Response("data: {}\n\n", { headers: { "Content-Type": "text/event-stream" } }) } = {}) {
+  const calls = [];
+  const handler = loadSource("app/api/agent/route.ts", {
+    "next/server": { NextResponse: { json: Response.json } },
+    "@/lib/auth": { getAuth: () => ({ api: { getSession: async () => session, getToken: async () => ({ token }) } }) },
+    "@/lib/server-env": { serverEnv: { betterAuthUrl: origin, apiBaseUrl: "https://api.example" } },
+  }, { fetch: async (url, options) => { calls.push({ url, options }); return upstream(); } });
+  return { handler, calls };
+}
+
+test("agent BFF forwards the selected conversation thread to AG-UI and preserves the stream", async () => {
+  const { handler, calls } = agentFixture();
+  const response = await handler.POST(new Request(`${origin}/api/agent`, {
+    method: "POST",
+    headers: { Origin: origin, "Content-Type": "application/json", Accept: "text/event-stream" },
+    body: JSON.stringify({ threadId: "conversation:synthetic", messages: [{ role: "user", content: "合成请求" }] }),
+  }));
+  assert.equal(response.status, 200);
+  assert.equal(calls.length, 1);
+  assert.equal(new URL(calls[0].url).pathname, "/agui");
+  assert.equal(JSON.parse(calls[0].options.body).threadId, "conversation:synthetic");
+  assert.equal(response.headers.get("content-type"), "text/event-stream");
+});
+
 test("history GET forwards the selected session for API ownership verification without changing its project", async () => {
   const { handler, calls } = fixture("history");
   const response = await handler.GET(new Request(`${origin}/api/agent/history?session_id=another-user`));
