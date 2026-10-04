@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { AccountButton } from "@/components/workspace-account";
 import { AgentComposerTools } from "@/components/agent-composer-tools";
 import { AgentProjectPicker } from "@/components/agent-project-picker";
+import { ConversationHistory } from "@/components/conversation-history";
 import { MarkdownText } from "@/components/markdown-text";
 import { TooltipIconButton } from "@/components/tooltip-icon-button";
 import { useWorkspaceActions } from "@/components/workspace-actions";
@@ -51,10 +52,12 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
   const conversations = useAgentConversations(owner);
   const history = useConversationHistory(current.id, !!current.version);
   const aui = useAui();
-  const runtimeRunning = useAuiState(runtime => runtime.thread.isRunning);
+  const localRunning = useAuiState(runtime => runtime.thread.isRunning);
+  const runtimeRunning = localRunning || !!history.activeRun;
   const runtimeHasMessages = useAuiState(runtime => runtime.thread.messages.length > 0);
   const [conversationBusy, setConversationBusy] = useState(false);
   const [sendBusy, setSendBusy] = useState(false);
+  const [stopBusy, setStopBusy] = useState(false);
   const { projects, updateProjects: setProjects, loading: projectLoading, error: projectError, cursor: projectCursor, refresh: refreshProjects, loadMore: loadMoreProjects } = useProjectList();
   const [mobileNavigation, setMobileNavigation] = useState(false);
   const [collapsed, setCollapsed] = useState<string[]>([]);
@@ -75,6 +78,7 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
   const pendingNavigation = useRef<string | null>(null);
   const sendingConversation = useRef<string | null>(null);
   const stopRequested = useRef(false);
+  const wasRunning = useRef(false);
   const space = useRef<HTMLDivElement>(null);
   const project = projects.find(item => item.id === current.projectId);
   const projectLabel = project?.title ?? (current.projectId ? "项目暂不可用" : "个人 Agent");
@@ -86,6 +90,11 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
   const visibleTabs = routeOpen && !tabs.some(tab => tab.href === currentHref)
     ? [...tabs, { href: currentHref, label: tabLabel }] : tabs;
   const panelOpen = contextOpen || (routeOpen && !current.panelHidden);
+
+  useEffect(() => {
+    if (wasRunning.current && !localRunning) void history.refresh();
+    wasRunning.current = localRunning;
+  }, [localRunning, history]);
 
   const sendText = useCallback(async (text: string, id: string) => {
     if (sendingConversation.current === id) return;
@@ -141,14 +150,14 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
 
   useEffect(() => {
     const sendPending = () => {
-      if (!current.version || history.loading || history.error) return;
+      if (!current.version || history.loading || history.error || history.activeRun) return;
       const text = takeConversationSend(owner, current.id);
       if (text) void sendText(text, current.id);
     };
     sendPending();
     window.addEventListener("careeract:send-ready", sendPending);
     return () => window.removeEventListener("careeract:send-ready", sendPending);
-  }, [current.id, current.version, history.loading, history.error, owner, sendText]);
+  }, [current.id, current.version, history.loading, history.error, history.activeRun, owner, sendText]);
 
   function update(patch: Partial<SpaceConversation>) {
     setFeedback("");
@@ -268,11 +277,19 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
     event.preventDefault();
     if (current.archived) return;
     if (runtimeRunning) {
+      if (stopBusy) return;
+      setStopBusy(true);
       stopRequested.current = true;
-      void cancelConversationRun(current.id).catch(error => {
-        setFeedback(error instanceof Error ? error.message : "停止结果未确认，请重新读取运行状态。");
-      }).finally(() => aui.thread.cancelRun());
       setFeedback("正在停止本次运行，已保存的内容不会被删除。");
+      try {
+        await cancelConversationRun(current.id, history.activeRun?.run_id);
+        aui.thread.cancelRun();
+      } catch (error) {
+        setFeedback(error instanceof Error ? error.message : "停止结果未确认，请重新读取运行状态。");
+      } finally {
+        setStopBusy(false);
+        void history.refresh();
+      }
       return;
     }
     const text = current.draft.trim();
@@ -419,7 +436,8 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
         <div className={styles.startArea}>
           {history.loading && <p role="status" className={styles.feedback}>正在读取历史…</p>}
           {history.error && <div className={styles.feedback}><p role="alert">{history.error}</p><Button variant="ghost" size="sm" onClick={history.refresh}>重新读取历史</Button></div>}
-          <LiveConversationMessages />
+          {!localRunning && !sendBusy && history.history ? <ConversationHistory messages={history.history.messages} /> : <LiveConversationMessages />}
+          {history.activeRun && !localRunning && <div className={styles.feedback}><p role="status">{["RUNNING", "PENDING"].includes(history.activeRun.status) ? "服务端运行尚未结束，可停止或重新读取状态。" : "运行状态需要核对，请勿重复发送。"}</p><Button variant="ghost" size="sm" onClick={history.refresh}>重新读取运行状态</Button></div>}
           {history.history?.truncated && <p className={styles.feedback}>当前显示最近 100 条消息，更早内容仍保留。</p>}
           {!history.loading && !history.error && !history.history?.messages.length && !runtimeHasMessages && <div className={styles.welcome}><h1>{current.archived ? "已归档对话" : current.title}</h1></div>}
           <div className={styles.composerArea}>
@@ -430,7 +448,7 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
               <label htmlFor="career-agent-input" className="sr-only">消息</label>
               <textarea id="career-agent-input" ref={input} rows={3} maxLength={4000} readOnly={current.archived} value={current.draft} onChange={event => update({ draft: event.target.value })} onKeyDown={event => { if ((event.ctrlKey || event.metaKey) && event.key === "Enter" && !event.nativeEvent.isComposing) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} placeholder="发送消息…" />
               <AgentComposerTools key={current.id} readOnly={current.archived}>
-                <TooltipIconButton type="submit" variant="default" disabled={current.archived || conversationBusy || (!runtimeRunning && (sendBusy || !current.draft.trim()))} tooltip={runtimeRunning ? "停止运行" : "发送 · Ctrl/⌘ Enter"} aria-label={runtimeRunning ? "停止运行" : "发送"} side="top" className="size-8 rounded-full">{runtimeRunning ? <SquarePen className="rotate-45" /> : <ArrowUp />}</TooltipIconButton>
+                <TooltipIconButton type="submit" variant="default" disabled={current.archived || conversationBusy || stopBusy || history.loading || !!history.error || (!runtimeRunning && (sendBusy || !current.draft.trim()))} tooltip={runtimeRunning ? "停止运行" : "发送 · Ctrl/⌘ Enter"} aria-label={runtimeRunning ? "停止运行" : "发送"} side="top" className="size-8 rounded-full">{runtimeRunning ? <SquarePen className="rotate-45" /> : <ArrowUp />}</TooltipIconButton>
               </AgentComposerTools>
             </form>
           {feedback && <p role="status" className={styles.feedback}>{feedback}</p>}

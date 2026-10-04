@@ -1,12 +1,20 @@
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from types import SimpleNamespace
+from typing import Any
+from unittest.mock import AsyncMock
 
 import agno.os.interfaces.agui.router as agui_router
+import httpx
 import pytest
-from ag_ui.core import RunAgentInput
+from ag_ui.core import EventType, RunAgentInput, RunFinishedEvent
 from agno.os.interfaces.agui.router import run_entity
 from agno.run.base import RunContext
+from fastapi import FastAPI, Request
 
-from services.api.infrastructure.agent_stream import BackgroundTextAgent
+from services.api.application.context import ActorContext
+from services.api.infrastructure.agent_execution import AgentExecution
+from services.api.infrastructure.agent_stream import BackgroundTextAgent, CareerAGUI
 
 
 class CapturingAgent:
@@ -91,3 +99,67 @@ async def test_background_text_agent_rehydrates_agno_sse_events() -> None:
         )
     ]
     assert events[0].event == "RunStarted"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["COMPLETED", "CANCELLED", "ERROR", None])
+async def test_stream_terminal_uses_stored_string_status(
+    status: str | None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import services.api.infrastructure.agent_stream as stream_module
+
+    @asynccontextmanager
+    async def accept(*_: object) -> AsyncIterator[None]:
+        yield
+
+    async def events(*_: object, **__: object) -> AsyncIterator[RunFinishedEvent]:
+        yield RunFinishedEvent(
+            type=EventType.RUN_FINISHED, thread_id="conversation:synthetic", run_id="run"
+        )
+
+    agent: Any = AsyncMock()
+    agent.aget_run_output.return_value = SimpleNamespace(status=status)
+    app = FastAPI()
+    app.state.agent_execution = SimpleNamespace(accept=accept)
+
+    @app.middleware("http")
+    async def actor(request: Request, call_next: Any) -> Any:
+        request.state.user_id = "synthetic-owner"
+        return await call_next(request)
+
+    app.include_router(CareerAGUI(agent).get_router())
+    monkeypatch.setattr(stream_module, "run_entity", events)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            "/agui",
+            json={
+                "threadId": "conversation:synthetic",
+                "runId": "run",
+                "messages": [],
+                "tools": [],
+                "context": [],
+                "forwardedProps": {},
+            },
+        )
+    assert response.status_code == 200
+    assert ('"type":"RUN_FINISHED"' in response.text) is (status == "COMPLETED")
+    assert ('"type":"RUN_ERROR"' in response.text) is (status != "COMPLETED")
+
+
+@pytest.mark.asyncio
+async def test_cancel_stored_terminal_status_does_not_recancel() -> None:
+    agent = AsyncMock()
+    agent.aget_run_output.return_value = SimpleNamespace(
+        session_id="conversation:synthetic", user_id="synthetic-owner", status="CANCELLED"
+    )
+    sessions = AsyncMock()
+    execution = AgentExecution(AsyncMock(), sessions, agent)
+    assert (
+        await execution.cancel(
+            ActorContext("synthetic-owner", "request"), "conversation:synthetic", "run"
+        )
+        == "CANCELLED"
+    )
+    agent.acancel_run.assert_not_awaited()

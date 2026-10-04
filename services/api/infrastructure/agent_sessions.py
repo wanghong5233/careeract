@@ -22,7 +22,7 @@ class AgnoAgentHistoryReader:
             [
                 {
                     "run_id": run.run_id,
-                    "status": getattr(getattr(run, "status", None), "value", "UNKNOWN"),
+                    "status": str(getattr(run.status, "value", run.status) or "UNKNOWN"),
                 }
                 for run in (session.runs or [])
                 if getattr(run, "parent_run_id", None) is None

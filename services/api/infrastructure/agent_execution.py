@@ -57,7 +57,7 @@ class AgentExecution:
         )
         if output is None or output.session_id != session_id or output.user_id != actor.user_id:
             raise WorkSessionNotFound("Run does not exist")
-        status = getattr(output.status, "value", "UNKNOWN")
+        status = getattr(output.status, "value", output.status) or "UNKNOWN"
         if status in {"COMPLETED", "CANCELLED", "ERROR", "REGENERATED"}:
             return str(status)
         if not await self.agent.acancel_run(run_id):

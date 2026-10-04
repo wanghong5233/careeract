@@ -14,6 +14,10 @@ export function historyMessageStatus(runStatus: string) {
   };
 }
 
+export function activeConversationRun(runs: Array<{ run_id: string; status: string }> | undefined) {
+  return runs?.find(run => !["COMPLETED", "CANCELLED", "ERROR", "REGENERATED"].includes(run.status)) ?? null;
+}
+
 const pendingSends = new Map<string, { id: string; text: string }>();
 const activeRuns = new Map<string, string>();
 

@@ -76,7 +76,8 @@ class CareerAGUI:
                                     session_id=run_input.thread_id,
                                     user_id=actor.user_id,
                                 )
-                                status = getattr(getattr(output, "status", None), "value", None)
+                                value = getattr(output, "status", None)
+                                status = getattr(value, "value", value)
                                 if status != "COMPLETED":
                                     event = RunErrorEvent(
                                         type=EventType.RUN_ERROR,

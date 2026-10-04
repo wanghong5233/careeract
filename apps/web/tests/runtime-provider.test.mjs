@@ -22,6 +22,14 @@ test("runtime history keeps non-completed run states incomplete", () => {
   assert.deepEqual(runtimeProvider.historyMessageStatus("UNKNOWN"), { type: "incomplete", reason: "other" });
 });
 
+test("runtime history restores the active server run for stop", () => {
+  assert.deepEqual(runtimeProvider.activeConversationRun([
+    { run_id: "completed", status: "COMPLETED" },
+    { run_id: "running", status: "RUNNING" },
+  ]), { run_id: "running", status: "RUNNING" });
+  assert.equal(runtimeProvider.activeConversationRun([{ run_id: "cancelled", status: "CANCELLED" }]), null);
+});
+
 test("runtime send queue is isolated by owner and selected conversation", () => {
   runtimeProvider.queueConversationSend("owner-one", "conversation:first", "合成消息");
   assert.equal(runtimeProvider.takeConversationSend("owner-two", "conversation:first"), undefined);

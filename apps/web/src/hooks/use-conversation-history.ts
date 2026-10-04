@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { createLatestRequest } from "@/lib/latest-request";
 import { readConversationHistory, type ConversationHistory } from "@/lib/agent-conversations";
+import { activeConversationRun } from "@/lib/agent-runtime";
 
 export function useConversationHistory(id: string, persisted: boolean) {
   const [result, setResult] = useState<{ id: string; history: ConversationHistory | null; error: string; loading: boolean } | null>(null);
@@ -24,7 +25,14 @@ export function useConversationHistory(id: string, persisted: boolean) {
     return () => { requests.cancel(); window.removeEventListener("focus", refresh); };
   }, [load, requests]);
   const visible = result?.id === id && persisted ? result : null;
-  return { history: visible?.history ?? null, error: visible?.error ?? "", loading: persisted && (visible?.loading ?? true), refresh: () => {
+  const activeRun = activeConversationRun(visible?.history?.runs);
+  const activeRunId = activeRun?.run_id;
+  useEffect(() => {
+    if (!activeRunId) return;
+    const timer = setInterval(() => { void load(); }, 2000);
+    return () => clearInterval(timer);
+  }, [activeRunId, load]);
+  return { history: visible?.history ?? null, activeRun, error: visible?.error ?? "", loading: persisted && (visible?.loading ?? true), refresh: () => {
     setResult({ id, history: null, error: "", loading: true });
     return load();
   } };

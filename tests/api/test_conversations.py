@@ -62,6 +62,25 @@ async def test_history_includes_cancelled_and_failed_runs_with_their_actual_stat
 
 
 @pytest.mark.asyncio
+async def test_history_run_states_accept_database_strings() -> None:
+    session = AgentSession(session_id="synthetic-history", user_id="synthetic-owner")
+    session.runs = [
+        RunOutput(run_id="complete", status=RunStatus.completed),
+        RunOutput(run_id="cancel", status=RunStatus.cancelled),
+    ]
+    for run in session.runs:
+        run.status = run.status.value
+    agent = AsyncMock()
+    agent.aget_session.return_value = session
+    reader = AgnoAgentHistoryReader(agent)
+    assert await reader.runs(session_id=session.session_id, user_id="synthetic-owner") == [
+        {"run_id": "complete", "status": "COMPLETED"},
+        {"run_id": "cancel", "status": "CANCELLED"},
+    ]
+    assert not await reader.has_active_run(session_id=session.session_id, user_id="synthetic-owner")
+
+
+@pytest.mark.asyncio
 async def test_history_failure_does_not_become_empty_history() -> None:
     agent = AsyncMock()
     agent.aget_session.side_effect = ValueError("invalid stored session")

@@ -27,7 +27,7 @@ function hooksFixture(source, dependencies, globals = {}) {
       }
     },
   };
-  const loaded = loadSource(source, { react: hooks, "@/lib/latest-request": loadSource("lib/latest-request.ts"), ...dependencies }, globals);
+  const loaded = loadSource(source, { react: hooks, "@/lib/latest-request": loadSource("lib/latest-request.ts"), "@/lib/agent-runtime": loadSource("lib/agent-runtime.ts"), ...dependencies }, globals);
   return {
     render(name, ...args) {
       slot = 0;
@@ -147,5 +147,29 @@ test("history hook cancels old reads and never displays the previous conversatio
   calls[2].resolve({ messages: [{ id: "stale-retry" }] });
   await retry;
   assert.equal(view.render("useConversationHistory", "local-draft", false).history, null);
+  view.unmount();
+});
+
+test("history hook restores and polls a server run without replaying input", async () => {
+  const events = new EventTarget();
+  const timers = new Map();
+  const calls = [];
+  const view = hooksFixture("hooks/use-conversation-history.ts", {
+    "@/lib/agent-conversations": { readConversationHistory: (id, signal) => new Promise(resolve => calls.push({ id, signal, resolve })) },
+  }, { window: events, setInterval: callback => { timers.set(1, callback); return 1; }, clearInterval: id => timers.delete(id) });
+  const render = () => view.render("useConversationHistory", "restored", true);
+  render();
+  await settle();
+  calls[0].resolve({ messages: [], runs: [{ run_id: "accepted", status: "RUNNING" }] });
+  await settle();
+  assert.deepEqual(render().activeRun, { run_id: "accepted", status: "RUNNING" });
+  assert.equal(timers.size, 1);
+  timers.get(1)();
+  calls[1].resolve({ messages: [{ id: "saved", run_status: "CANCELLED" }], runs: [{ run_id: "accepted", status: "CANCELLED" }] });
+  await settle();
+  assert.equal(render().activeRun, null);
+  assert.equal(render().history.messages[0].run_status, "CANCELLED");
+  assert.equal(timers.size, 0);
+  assert.equal(calls.length, 2);
   view.unmount();
 });
