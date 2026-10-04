@@ -24,19 +24,26 @@ import { cancelConversationRun, queueConversationSend, takeConversationSend } fr
 import styles from "./agent-space.module.css";
 
 function LiveConversationMessages() {
-  return <ThreadPrimitive.Root className="mx-auto w-full max-w-[680px] space-y-6 py-6">
+  return <ThreadPrimitive.Root className={cn(styles.messageThread, "mx-auto w-full max-w-[704px] space-y-6 py-6")}>
     <ThreadPrimitive.Messages components={{ UserMessage: LiveUserMessage, AssistantMessage: LiveAssistantMessage }} />
   </ThreadPrimitive.Root>;
 }
 
 function LiveUserMessage() {
-  return <MessagePrimitive.Root className="ml-auto w-fit max-w-[85%] whitespace-pre-wrap break-words rounded-2xl bg-muted px-4 py-3 text-base leading-relaxed"><MessagePrimitive.Content /></MessagePrimitive.Root>;
+  return <MessagePrimitive.Root className={styles.userMessage}><MessagePrimitive.Content /></MessagePrimitive.Root>;
 }
 
 function LiveAssistantMessage() {
   const status = useAuiState(state => state.message.status);
   const incomplete = status?.type === "incomplete";
-  return <MessagePrimitive.Root className="min-w-0 break-words text-base leading-relaxed"><MessagePrimitive.Content components={{ Text: MarkdownText }} />{incomplete && <p role="status" className="mt-2 text-xs text-muted-foreground">本次运行未完成，已显示当前保存内容。</p>}</MessagePrimitive.Root>;
+  const running = status?.type === "running";
+  const incompleteReason = incomplete ? status.reason : undefined;
+  const statusText = incompleteReason === "cancelled" ? "本次运行已取消，已显示当前保存内容。" : incompleteReason === "error" ? "本次运行失败，已显示当前保存内容。" : "本次运行未完成，已显示当前保存内容。";
+  return <MessagePrimitive.Root className={styles.assistantMessage}>
+    <MessagePrimitive.Content components={{ Text: MarkdownText }} />
+    {running && <p role="status" aria-live="polite" className={cn(styles.messageStatus, styles.messageStatusRunning)}><span aria-hidden="true" className={styles.streamingIndicator} />正在生成</p>}
+    {incomplete && <p role="status" className={cn(styles.messageStatus, incompleteReason === "error" ? styles.messageStatusError : styles.messageStatusIncomplete)}>{statusText}</p>}
+  </MessagePrimitive.Root>;
 }
 
 export function AgentHome({ owner, children }: { owner: string; children?: ReactNode }) {
@@ -447,7 +454,7 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
             </div>
             <form onSubmit={submit} className={styles.composer}>
               <label htmlFor="career-agent-input" className="sr-only">消息</label>
-              <textarea id="career-agent-input" ref={input} rows={3} maxLength={4000} readOnly={current.archived} value={current.draft} onChange={event => update({ draft: event.target.value })} onKeyDown={event => { if ((event.ctrlKey || event.metaKey) && event.key === "Enter" && !event.nativeEvent.isComposing) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} placeholder="发送消息…" />
+              <textarea id="career-agent-input" ref={input} rows={1} maxLength={4000} readOnly={current.archived} value={current.draft} onChange={event => update({ draft: event.target.value })} onKeyDown={event => { if ((event.ctrlKey || event.metaKey) && event.key === "Enter" && !event.nativeEvent.isComposing) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} placeholder="发送消息…" />
               <AgentComposerTools key={current.id} readOnly={current.archived}>
                 <TooltipIconButton type="submit" variant="default" disabled={current.archived || conversationBusy || stopBusy || history.loading || !!history.error || (!runtimeRunning && (sendBusy || !current.draft.trim()))} tooltip={runtimeRunning ? "停止运行" : "发送 · Ctrl/⌘ Enter"} aria-label={runtimeRunning ? "停止运行" : "发送"} side="top" className="size-8 rounded-full">{runtimeRunning ? <SquarePen className="rotate-45" /> : <ArrowUp />}</TooltipIconButton>
               </AgentComposerTools>

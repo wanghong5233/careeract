@@ -27,12 +27,21 @@
 .conversationHeading { flex:1; min-width:0; display:flex; align-items:center; flex-wrap:wrap; gap:4px 12px; }
 .conversationTitle { min-width:0; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; }
 .startArea { flex:1; min-height:0; overflow:auto; display:flex; flex-direction:column; justify-content:flex-end; padding:24px; }
+.messageThread { color:var(--foreground); }
+.userMessage { align-self:flex-end; width:fit-content; max-width:85%; overflow-wrap:anywhere; white-space:pre-wrap; border-radius:14px; background:var(--muted); padding:10px 14px; font-size:15px; line-height:1.6; }
+.assistantMessage { min-width:0; overflow-wrap:anywhere; padding:0 8px; font-size:15px; line-height:1.72; }
+.messageStatus { display:flex; align-items:center; gap:6px; margin-top:10px; font-size:12px; line-height:1.6; }
+.messageStatusRunning { color:var(--muted-foreground); }
+.messageStatusIncomplete { color:var(--muted-foreground); }
+.messageStatusError { color:var(--destructive); }
+.streamingIndicator { width:6px; height:6px; border-radius:999px; background:currentColor; animation:pulse 1.5s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity:.4; } }
 .welcome { flex:1; display:flex; align-items:center; justify-content:center; width:100%; max-width:680px; margin:0 auto; padding:24px 8px; }
 .welcome h1 { font-size:24px; font-weight:500; letter-spacing:-.5px; line-height:1.5; overflow-wrap:anywhere; }
 .composerArea { width:100%; max-width:680px; margin:0 auto; }
-.composer { border:1px solid var(--border); background:var(--background); border-radius:18px; padding:16px; box-shadow:0 3px 18px #00000004; }
+.composer { border:1px solid var(--border); background:var(--background); border-radius:18px; padding:10px; box-shadow:0 3px 18px #00000004; transition:border-color .15s ease,box-shadow .15s ease; }
 .composer:focus-within { border-color:var(--ring); box-shadow:0 0 0 2px color-mix(in srgb,var(--ring) 10%,transparent); }
-.composer textarea { display:block; width:100%; resize:none; field-sizing:content; min-height:78px; max-height:240px; font-family:var(--font-sans); font-size:16px; font-weight:400; line-height:1.65; letter-spacing:normal; margin-bottom:12px; outline:none; background:transparent; }
+.composer textarea { display:block; width:100%; resize:none; field-sizing:content; min-height:44px; max-height:240px; font-family:var(--font-sans); font-size:16px; font-weight:400; line-height:1.5; letter-spacing:normal; margin-bottom:8px; padding:4px 6px; outline:none; background:transparent; overflow-y:auto; }
 .composer textarea::placeholder { color:var(--muted-foreground); opacity:.85; }
 .composerTools { display:flex; align-items:center; gap:4px; min-width:0; }
 .composer>.composerTools { justify-content:flex-start; }

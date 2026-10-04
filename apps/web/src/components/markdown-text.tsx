@@ -50,7 +50,7 @@ const MarkdownTextImpl: FC<MarkdownTextProps> = ({ components }) => {
   return (
     <MarkdownTextPrimitive
       remarkPlugins={[remarkGfm]}
-      className="aui-md"
+    className="aui-md break-words text-[15px] leading-[1.72]"
       components={markdownComponents}
       defer
     />
@@ -71,7 +71,7 @@ const CodeHeader: FC<CodeHeaderProps> = ({ language, code }) => {
       <span className="aui-code-header-language text-muted-foreground font-medium lowercase">
         {language}
       </span>
-      <TooltipIconButton tooltip="Copy" onClick={onCopy}>
+      <TooltipIconButton tooltip={isCopied ? "已复制" : "复制代码"} onClick={onCopy}>
         {!isCopied && (
           <CopyIcon className="animate-in zoom-in-75 fade-in duration-150" />
         )}
@@ -141,7 +141,7 @@ const defaultComponents = memoizeMarkdownComponents({
   p: ({ className, ...props }) => (
     <p
       className={cn(
-        "aui-md-p my-3 leading-relaxed first:mt-0 last:mb-0",
+        "aui-md-p my-3 leading-[1.72] first:mt-0 last:mb-0",
         className,
       )}
       {...props}
@@ -159,7 +159,7 @@ const defaultComponents = memoizeMarkdownComponents({
   blockquote: ({ className, ...props }) => (
     <blockquote
       className={cn(
-        "aui-md-blockquote border-muted-foreground/30 text-muted-foreground my-3 border-s-2 ps-4",
+        "aui-md-blockquote border-muted-foreground/30 bg-muted/30 text-muted-foreground my-4 border-s-2 py-1 ps-4",
         className,
       )}
       {...props}
@@ -168,7 +168,7 @@ const defaultComponents = memoizeMarkdownComponents({
   ul: ({ className, ...props }) => (
     <ul
       className={cn(
-        "aui-md-ul marker:text-muted-foreground my-3 ms-5 list-disc [&>li]:mt-1",
+        "aui-md-ul marker:text-muted-foreground my-3 ms-5 list-disc space-y-1 [&>li]:ps-1",
         className,
       )}
       {...props}
@@ -177,7 +177,7 @@ const defaultComponents = memoizeMarkdownComponents({
   ol: ({ className, ...props }) => (
     <ol
       className={cn(
-        "aui-md-ol marker:text-muted-foreground my-3 ms-5 list-decimal [&>li]:mt-1",
+        "aui-md-ol marker:text-muted-foreground my-3 ms-5 list-decimal space-y-1 [&>li]:ps-1",
         className,
       )}
       {...props}
@@ -228,7 +228,7 @@ const defaultComponents = memoizeMarkdownComponents({
     />
   ),
   li: ({ className, ...props }) => (
-    <li className={cn("aui-md-li leading-relaxed", className)} {...props} />
+    <li className={cn("aui-md-li leading-[1.72]", className)} {...props} />
   ),
   strong: ({ className, ...props }) => (
     <strong
@@ -245,7 +245,7 @@ const defaultComponents = memoizeMarkdownComponents({
   pre: ({ className, ...props }) => (
     <pre
       className={cn(
-        "aui-md-pre border-border/50 bg-muted/30 overflow-x-auto rounded-t-none rounded-b-xl border border-t-0 p-3.5 text-[13px] leading-relaxed",
+        "aui-md-pre border-border/50 bg-muted/30 overflow-x-auto rounded-t-none rounded-b-xl border border-t-0 p-3.5 font-mono text-[13px] leading-[1.6]",
         className,
       )}
       {...props}
@@ -257,7 +257,7 @@ const defaultComponents = memoizeMarkdownComponents({
       <code
         className={cn(
           !isCodeBlock &&
-            "aui-md-inline-code bg-muted rounded-md px-1.5 py-0.5 font-mono text-[0.85em]",
+            "aui-md-inline-code bg-muted rounded-md px-1.5 py-0.5 font-mono text-[0.85em] break-words",
           className,
         )}
         {...props}
