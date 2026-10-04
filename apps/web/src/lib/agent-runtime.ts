@@ -18,6 +18,14 @@ export function activeConversationRun(runs: Array<{ run_id: string; status: stri
   return runs?.find(run => !["COMPLETED", "CANCELLED", "ERROR", "REGENERATED"].includes(run.status)) ?? null;
 }
 
+export function unansweredRunStatuses(runs: Array<{ run_id: string; status: string }> | undefined, messages: Array<{ role: string; run_id: string | null }>) {
+  const answered = new Set(messages.filter(message => message.role === "assistant").map(message => message.run_id));
+  return (runs ?? []).filter(run => !answered.has(run.run_id) && !["COMPLETED", "REGENERATED", "RUNNING", "PENDING"].includes(run.status)).map(run => ({
+    run_id: run.run_id,
+    label: run.status === "CANCELLED" ? "已取消" : run.status === "ERROR" ? "运行失败" : run.status === "PAUSED" ? "等待继续" : "运行状态未确认",
+  }));
+}
+
 const pendingSends = new Map<string, { id: string; text: string }>();
 const activeRuns = new Map<string, string>();
 

@@ -4,8 +4,9 @@ import { useMemo } from "react";
 import { AssistantRuntimeProvider, MessagePrimitive, ThreadPrimitive, useExternalStoreRuntime, type ThreadMessageLike } from "@assistant-ui/react";
 import { MarkdownText } from "@/components/markdown-text";
 import type { HistoryMessage } from "@/lib/agent-conversations";
+import { unansweredRunStatuses } from "@/lib/agent-runtime";
 
-export function ConversationHistory({ messages }: { messages: HistoryMessage[] }) {
+export function ConversationHistory({ messages, runs }: { messages: HistoryMessage[]; runs?: Array<{ run_id: string; status: string }> }) {
   const converted = useMemo<ThreadMessageLike[]>(() => messages.map(message => ({
     id: message.id, role: message.role, content: message.content, createdAt: new Date(message.created_at * 1000),
     ...(message.role === "assistant" ? { status: message.run_status === "COMPLETED"
@@ -16,6 +17,7 @@ export function ConversationHistory({ messages }: { messages: HistoryMessage[] }
   return <AssistantRuntimeProvider runtime={runtime}><ThreadPrimitive.Root className="mx-auto w-full max-w-[680px] space-y-8 py-6">
     <ThreadPrimitive.Messages components={{ UserMessage: HistoryUserMessage, AssistantMessage: HistoryAssistantMessage }} />
     {messages.filter(message => message.role === "assistant" && message.run_status !== "COMPLETED").map(message => <p key={message.id} role="status" className="text-xs text-muted-foreground">{message.run_status === "CANCELLED" ? "已取消" : message.run_status === "ERROR" ? "运行失败" : message.run_status === "PAUSED" ? "等待继续" : message.run_status === "RUNNING" || message.run_status === "PENDING" ? "运行尚未结束" : "运行状态未确认"} · 显示已保存内容</p>)}
+    {unansweredRunStatuses(runs, messages).map(run => <p key={run.run_id} role="status" className="text-xs text-muted-foreground">{run.label} · 本次运行没有已保存的回复</p>)}
   </ThreadPrimitive.Root></AssistantRuntimeProvider>;
 }
 

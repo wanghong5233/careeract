@@ -284,6 +284,7 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
       try {
         await cancelConversationRun(current.id, history.activeRun?.run_id);
         aui.thread.cancelRun();
+        setFeedback("已请求停止，请以服务端保存状态为准。");
       } catch (error) {
         setFeedback(error instanceof Error ? error.message : "停止结果未确认，请重新读取运行状态。");
       } finally {
@@ -436,7 +437,7 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
         <div className={styles.startArea}>
           {history.loading && <p role="status" className={styles.feedback}>正在读取历史…</p>}
           {history.error && <div className={styles.feedback}><p role="alert">{history.error}</p><Button variant="ghost" size="sm" onClick={history.refresh}>重新读取历史</Button></div>}
-          {!localRunning && !sendBusy && history.history ? <ConversationHistory messages={history.history.messages} /> : <LiveConversationMessages />}
+          {!localRunning && !sendBusy && history.history ? <ConversationHistory messages={history.history.messages} runs={history.history.runs} /> : <LiveConversationMessages />}
           {history.activeRun && !localRunning && <div className={styles.feedback}><p role="status">{["RUNNING", "PENDING"].includes(history.activeRun.status) ? "服务端运行尚未结束，可停止或重新读取状态。" : "运行状态需要核对，请勿重复发送。"}</p><Button variant="ghost" size="sm" onClick={history.refresh}>重新读取运行状态</Button></div>}
           {history.history?.truncated && <p className={styles.feedback}>当前显示最近 100 条消息，更早内容仍保留。</p>}
           {!history.loading && !history.error && !history.history?.messages.length && !runtimeHasMessages && <div className={styles.welcome}><h1>{current.archived ? "已归档对话" : current.title}</h1></div>}

@@ -30,6 +30,24 @@ test("runtime history restores the active server run for stop", () => {
   assert.equal(runtimeProvider.activeConversationRun([{ run_id: "cancelled", status: "CANCELLED" }]), null);
 });
 
+test("cancelled and failed runs without an assistant message remain visible after recovery", () => {
+  const runs = [
+    { run_id: "cancelled", status: "CANCELLED" },
+    { run_id: "failed", status: "ERROR" },
+    { run_id: "unknown", status: "UNKNOWN" },
+    { run_id: "answered", status: "CANCELLED" },
+    { run_id: "completed", status: "COMPLETED" },
+    { run_id: "active", status: "RUNNING" },
+  ];
+  const messages = [{ role: "user", run_id: "cancelled" }, { role: "assistant", run_id: "answered" }];
+  assert.deepEqual(runtimeProvider.unansweredRunStatuses(runs, messages), [
+    { run_id: "cancelled", label: "已取消" },
+    { run_id: "failed", label: "运行失败" },
+    { run_id: "unknown", label: "运行状态未确认" },
+  ]);
+  assert.deepEqual(runtimeProvider.unansweredRunStatuses(undefined, messages), []);
+});
+
 test("runtime send queue is isolated by owner and selected conversation", () => {
   runtimeProvider.queueConversationSend("owner-one", "conversation:first", "合成消息");
   assert.equal(runtimeProvider.takeConversationSend("owner-two", "conversation:first"), undefined);
