@@ -28,7 +28,7 @@
 .sideQuote { padding:12px; margin:12px 20px; max-height:160px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; border-left:2px solid var(--border); font-size:var(--workspace-control-size); color:var(--muted-foreground); }
 .sideQuote .messageViewport { padding:0; }
 .sideQuote .assistantMessage { font-size:var(--workspace-control-size); color:var(--muted-foreground); }
-.assistantActions { display:flex; margin-top:8px; opacity:0; }
+.assistantActions { display:flex; justify-content:flex-end; gap:2px; width:100%; margin-top:6px; opacity:0; transition:opacity .15s ease; }
 .assistantMessage:hover .assistantActions,.assistantMessage:focus-within .assistantActions { opacity:1; }
 @media(hover:none) { .assistantActions { opacity:1; } }
 @media(max-width:900px) { .space:has(.sideChat:not([style])) { grid-template-columns:minmax(0,1fr); } .sideChat:not([style]) { position:absolute; inset:0; z-index:30; } }

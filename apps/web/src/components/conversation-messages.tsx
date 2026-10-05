@@ -98,12 +98,14 @@ export function ConversationAssistantMessage() {
     {hasText && <MessagePrimitive.Content components={{ Text: MarkdownText }} />}
     {running && <p role="status" className={cn(styles.messageStatus, styles.messageStatusRunning)}><span aria-hidden="true" className={styles.streamingIndicator} />{hasText ? "正在生成…" : "正在等待回复…"}</p>}
     {incomplete && <p role="status" className={cn(styles.messageStatus, reason === "error" ? styles.messageStatusError : styles.messageStatusIncomplete)}>{label} · {noSavedReply ? "本次运行没有已保存的回复" : "请核对已显示内容"}</p>}
-    {actions.quote && hasText && runStatus === "COMPLETED" && <div className={styles.assistantActions}><TooltipIconButton tooltip="在侧聊中追问 · 可先选中文字" aria-label="在侧聊中追问" onClick={() => {
-      const selection = window.getSelection();
-      const quote = selection?.anchorNode && root.current?.contains(selection.anchorNode) && selection.focusNode && root.current.contains(selection.focusNode) ? selection.toString() : "";
-      actions.quote?.(id, quote || original.slice(0, 4000));
-    }}><MessageSquarePlus /></TooltipIconButton></div>}
-    {actions.branch && hasText && runStatus === "COMPLETED" && <div className={styles.assistantActions}><TooltipIconButton tooltip="从此处创建独立分支" aria-label="从此处创建独立分支" onClick={() => actions.branch?.(id)}><GitBranch /></TooltipIconButton></div>}
+    {(actions.quote || actions.branch) && hasText && runStatus === "COMPLETED" && <div className={styles.assistantActions}>
+      {actions.quote && <TooltipIconButton tooltip="在侧聊中打开" aria-label="在侧聊中打开" onClick={() => {
+        const selection = window.getSelection();
+        const quote = selection?.anchorNode && root.current?.contains(selection.anchorNode) && selection.focusNode && root.current.contains(selection.focusNode) ? selection.toString() : "";
+        actions.quote?.(id, quote || original.slice(0, 4000));
+      }}><MessageSquarePlus /></TooltipIconButton>}
+      {actions.branch && <TooltipIconButton tooltip="从此处创建独立分支" aria-label="从此处创建独立分支" onClick={() => actions.branch?.(id)}><GitBranch /></TooltipIconButton>}
+    </div>}
   </MessagePrimitive.Root>;
 }
 
