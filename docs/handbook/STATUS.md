@@ -92,7 +92,9 @@ P1–P3 生产保护作为同时扩展其他模块的指令。后续业务仍须
   图标，改用 assistant-ui 选区监听/定位浮层，并提供“添加到对话”和“在侧边聊天中提问”
   两个文字按钮。合成 CareerAct 页面实际拖选回答文本可见浮层，添加到对话保留原草稿并聚焦输入，
   侧边聊天按选中原文打开；超过 4000 字时保留草稿并提示，不发送或自动执行。`npm run lint`、
-  `npm run typecheck` 和 `npm run test`（64 项）通过；未运行 build，未改变 Runtime/API/数据库。
+  `npm run typecheck` 和 `npm run test`（64 项）通过；提交门槛的 build、冻结依赖同步、Ruff、
+  mypy、pytest（133 通过/21 可选跳过）、变更与秘密扫描通过。未重启服务，未改变 Runtime/API/数据库；
+  本次入口参考用户提供的 Codex 选区截图，未新增客户端动态对照证据。
 
 - 2026-10-05 工作面增量 5：临时侧聊独立运行，实际 read_main_chat 读取主线新增合成标记，
   收起/重开/刷新保留草稿；换主聊天仍保留原来源。真实长 Run 停止后保存 CANCELLED，
