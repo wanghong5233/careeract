@@ -20,6 +20,7 @@ from services.api.domain.material import (
     MaterialUnavailable,
     MaterialVersion,
 )
+from services.api.domain.material_review import decide_changes, material_changes, review_body
 from services.api.domain.project import ProjectInvalid
 from services.api.infrastructure.projects import decode_cursor, encode_cursor
 
@@ -53,6 +54,13 @@ def proposal_from_row(row: RowMapping) -> MaterialProposal:
         base_body=row["base_body"],
         base_number=row["base_number"],
         references=tuple(row["references"]),
+        changes=tuple(
+            row["changes"]
+            if row["changes"] is not None
+            else material_changes(row["base_body"], row["proposed_body"])
+        ),
+        review_version_id=row["review_version_id"],
+        review_version=row["review_version"] or uuid5(row["id"], "initial-review"),
     )
 
 
@@ -183,13 +191,15 @@ async def insert_proposal(
     proposal_id: UUID,
     base_version_id: UUID,
     draft: MaterialDraft,
+    changes: tuple[dict[str, object], ...] = (),
 ) -> None:
     await connection.execute(
         text(
             "INSERT INTO career.material_proposals "
-            '(id,material_id,user_id,base_version_id,proposed_body,rationale,state,"references") '
+            "(id,material_id,user_id,base_version_id,proposed_body,rationale,state,"
+            '"references",changes) '
             "VALUES (:id,:material_id,:user_id,:base,:body,:rationale,'pending',"
-            "CAST(:refs AS jsonb))"
+            "CAST(:refs AS jsonb),CAST(:changes AS jsonb))"
         ),
         {
             "id": proposal_id,
@@ -199,6 +209,7 @@ async def insert_proposal(
             "body": draft.body,
             "rationale": draft.rationale,
             "refs": json.dumps(draft.references, ensure_ascii=False),
+            "changes": json.dumps(changes, ensure_ascii=False),
         },
     )
 
@@ -402,6 +413,7 @@ class PostgresMaterialRepository:
         rationale: str,
         proposal_id: UUID,
         references: tuple[dict[str, str], ...],
+        changes: tuple[dict[str, object], ...] = (),
     ) -> MaterialProposal | None:
         try:
             async with self.engine.begin() as connection:
@@ -425,6 +437,7 @@ class PostgresMaterialRepository:
                     proposal_id=proposal_id,
                     base_version_id=base_version_id,
                     draft=MaterialDraft(proposed_body, rationale, references),
+                    changes=changes,
                 )
                 saved = await read_detail(connection, actor, material_id)
                 if saved is None:
@@ -440,6 +453,9 @@ class PostgresMaterialRepository:
         material_id: UUID,
         proposal_id: UUID,
         state: str,
+        change_ids: tuple[str, ...] = (),
+        expected_version: UUID | None = None,
+        replacement: str | None = None,
     ) -> MaterialDetail | None:
         try:
             async with self.engine.begin() as connection:
@@ -452,6 +468,19 @@ class PostgresMaterialRepository:
                 proposal = next((item for item in detail.proposals if item.id == proposal_id), None)
                 if proposal is None:
                     raise MaterialNotFound("Proposal does not exist")
+                if change_ids:
+                    return await self.review_changes(
+                        connection,
+                        actor,
+                        detail,
+                        proposal,
+                        change_ids=change_ids,
+                        state=state,
+                        expected_version=expected_version,
+                        replacement=replacement,
+                    )
+                if proposal.review_version_id is not None:
+                    raise MaterialConflict("Select pending changes from the latest review")
                 if proposal.state == state:
                     return detail
                 if proposal.state != "pending":
@@ -477,3 +506,84 @@ class PostgresMaterialRepository:
                 return await read_detail(connection, actor, material_id)
         except (DBAPIError, PoolTimeoutError):
             raise MaterialUnavailable("Material proposal could not be resolved") from None
+
+    async def review_changes(
+        self,
+        connection: AsyncConnection,
+        actor: ActorContext,
+        detail: MaterialDetail,
+        proposal: MaterialProposal,
+        *,
+        change_ids: tuple[str, ...],
+        state: str,
+        expected_version: UUID | None,
+        replacement: str | None,
+    ) -> MaterialDetail | None:
+        changes = [dict(change) for change in proposal.changes] or material_changes(
+            proposal.base_body, proposal.proposed_body
+        )
+        if replacement is not None:
+            if len(change_ids) != 1:
+                raise MaterialInvalid("Rewrite one pending change at a time")
+            changed = next((change for change in changes if change["id"] == change_ids[0]), None)
+            if changed is None or changed["state"] != "pending":
+                raise MaterialConflict("Only pending changes can be rewritten")
+            changed["replacement"] = replacement
+        updated = changes if replacement is not None else decide_changes(changes, change_ids, state)
+        if updated == list(proposal.changes):
+            return detail
+        if expected_version is None or expected_version != proposal.review_version:
+            raise MaterialConflict("Proposal review changed; reload before deciding")
+        review_base = proposal.review_version_id or proposal.base_version_id
+        if (
+            detail.current_version.id != review_base
+            or review_body(proposal.base_body, changes) != detail.current_version.body
+        ):
+            raise MaterialConflict("Material changed outside this review")
+        body = review_body(proposal.base_body, updated)
+        from services.api.domain.material import validate_material_content
+        from services.api.domain.privacy import ensure_career_content
+
+        if body:
+            validate_material_content(body=body)
+            ensure_career_content(body)
+        if body != detail.current_version.body:
+            if not body.strip():
+                raise MaterialInvalid("Accepted material cannot be empty")
+            await insert_version(
+                connection,
+                actor,
+                detail.material.id,
+                body=body,
+                source="agent",
+                references=proposal.references,
+            )
+        current_version = await connection.scalar(
+            text("SELECT current_version_id FROM career.materials WHERE id=:id"),
+            {"id": detail.material.id},
+        )
+        pending = any(change["state"] == "pending" for change in updated)
+        proposal_state = (
+            "pending"
+            if pending
+            else "accepted"
+            if any(change["state"] == "accepted" for change in updated)
+            else "rejected"
+        )
+        await connection.execute(
+            text(
+                "UPDATE career.material_proposals SET changes=CAST(:changes AS jsonb), "
+                "review_version_id=:base, review_version=:version, state=:state, "
+                "resolved_at=CASE WHEN :state='pending' THEN NULL "
+                "ELSE clock_timestamp() END WHERE id=:id AND user_id=:user"
+            ),
+            {
+                "changes": json.dumps(updated, ensure_ascii=False),
+                "base": current_version,
+                "version": uuid4(),
+                "state": proposal_state,
+                "id": proposal.id,
+                "user": actor.user_id,
+            },
+        )
+        return await read_detail(connection, actor, detail.material.id)

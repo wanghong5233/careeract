@@ -55,6 +55,7 @@ class MaterialRepository(Protocol):
         rationale: str,
         proposal_id: UUID,
         references: tuple[dict[str, str], ...],
+        changes: tuple[dict[str, object], ...] = (),
     ) -> MaterialProposal | None: ...
 
     async def resolve_proposal(
@@ -64,4 +65,7 @@ class MaterialRepository(Protocol):
         material_id: UUID,
         proposal_id: UUID,
         state: str,
+        change_ids: tuple[str, ...] = (),
+        expected_version: UUID | None = None,
+        replacement: str | None = None,
     ) -> MaterialDetail | None: ...

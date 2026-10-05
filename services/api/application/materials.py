@@ -17,6 +17,7 @@ from services.api.domain.material import (
     MaterialProposal,
     validate_material_content,
 )
+from services.api.domain.material_review import material_changes
 from services.api.domain.privacy import ensure_career_content
 
 
@@ -123,6 +124,12 @@ class MaterialService:
         proposed_body, rationale = proposed_body.strip(), rationale.strip()
         self.validate(body=proposed_body, rationale=rationale)
         ensure_career_content((proposed_body, rationale, references))
+        detail = await self.read(actor, material_id)
+        base = next(
+            (version.body for version in detail.versions if version.id == base_version_id), None
+        )
+        if base is None:
+            raise MaterialConflict("Material version changed; reload before proposing")
         key = json.dumps(
             [
                 actor.user_id,
@@ -144,6 +151,7 @@ class MaterialService:
             rationale=rationale,
             proposal_id=uuid5(NAMESPACE_URL, key),
             references=references,
+            changes=tuple(material_changes(base, proposed_body)),
         )
         if proposal is None:
             existing = await self.read(actor, material_id)
@@ -159,10 +167,17 @@ class MaterialService:
         proposal_id: UUID,
         *,
         state: str,
+        change_ids: tuple[str, ...] = (),
+        expected_version: UUID | None = None,
+        replacement: str | None = None,
     ) -> MaterialDetail:
         self.require_enabled()
         if state not in {"accepted", "rejected"}:
             raise MaterialInvalid("Unknown proposal state")
+        if replacement is not None:
+            if not change_ids or len(replacement) > 4000:
+                raise MaterialInvalid("Select a pending range for rewriting")
+            ensure_career_content(replacement)
         current = await self.read(actor, material_id)
         proposal = next((item for item in current.proposals if item.id == proposal_id), None)
         if proposal is None:
@@ -171,7 +186,13 @@ class MaterialService:
             self.validate(body=proposal.proposed_body, rationale=proposal.rationale)
             ensure_career_content(proposal.references)
         detail = await self.repository.resolve_proposal(
-            actor, material_id=material_id, proposal_id=proposal_id, state=state
+            actor,
+            material_id=material_id,
+            proposal_id=proposal_id,
+            state=state,
+            change_ids=change_ids,
+            expected_version=expected_version,
+            replacement=replacement,
         )
         if detail is None:
             raise MaterialConflict("Proposal is stale or already resolved")

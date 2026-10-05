@@ -65,6 +65,9 @@ class MaterialProposal:
     base_body: str
     base_number: int
     references: tuple[dict[str, str], ...] = ()
+    changes: tuple[dict[str, object], ...] = ()
+    review_version_id: UUID | None = None
+    review_version: UUID | None = None
 
 
 @dataclass(frozen=True, slots=True)

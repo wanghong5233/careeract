@@ -39,6 +39,9 @@ class ResolveProposalBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     state: Literal["accepted", "rejected"]
+    change_ids: list[str] = Field(default_factory=list, max_length=200)
+    version: UUID | None = None
+    replacement: str | None = Field(default=None, max_length=4000)
 
 
 class VersionResponse(BaseModel):
@@ -61,6 +64,9 @@ class ProposalResponse(BaseModel):
     created_at: str
     resolved_at: str | None
     diff: list[str]
+    changes: list[dict[str, object]]
+    review_version: UUID | None
+    review_body: str
     base_body: str
     base_number: int
     references: list[dict[str, str]]
@@ -109,6 +115,8 @@ def version_response(version: MaterialVersion) -> VersionResponse:
 
 
 def proposal_response(detail: MaterialDetail, proposal: MaterialProposal) -> ProposalResponse:
+    from services.api.domain.material_review import review_body
+
     return ProposalResponse(
         id=proposal.id,
         material_id=proposal.material_id,
@@ -119,10 +127,13 @@ def proposal_response(detail: MaterialDetail, proposal: MaterialProposal) -> Pro
         created_at=proposal.created_at.isoformat(),
         resolved_at=proposal.resolved_at.isoformat() if proposal.resolved_at else None,
         diff=MaterialService.diff(detail, proposal),
+        changes=list(proposal.changes),
+        review_version=proposal.review_version,
+        review_body=review_body(proposal.base_body, list(proposal.changes), preview=True),
         base_body=proposal.base_body,
         base_number=proposal.base_number,
         references=list(proposal.references),
-        stale=proposal.base_version_id != detail.current_version.id,
+        stale=(proposal.review_version_id or proposal.base_version_id) != detail.current_version.id,
     )
 
 
@@ -242,4 +253,14 @@ async def resolve_proposal(
     actor: Annotated[ActorContext, Depends(get_actor)],
 ) -> MaterialResponse:
     response.headers["Cache-Control"] = "no-store"
-    return serialize(await service.resolve(actor, material_id, proposal_id, state=body.state))
+    return serialize(
+        await service.resolve(
+            actor,
+            material_id,
+            proposal_id,
+            state=body.state,
+            change_ids=tuple(body.change_ids),
+            expected_version=body.version,
+            replacement=body.replacement,
+        )
+    )

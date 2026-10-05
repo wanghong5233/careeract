@@ -26,6 +26,9 @@ export type MaterialProposal = {
   base_number: number;
   references: MaterialReference[];
   stale: boolean;
+  changes: Array<{ id: string; start: number; end: number; original: string; replacement: string; state: "pending" | "accepted" | "rejected" }>;
+  review_version: string | null;
+  review_body: string;
 };
 
 export type CareerMaterial = {
@@ -90,8 +93,8 @@ export function saveMaterialVersion(id: string, input: { base_version_id: string
   });
 }
 
-export function resolveMaterialProposal(id: string, proposalId: string, state: "accepted" | "rejected", signal?: AbortSignal): Promise<CareerMaterial> {
+export function resolveMaterialProposal(id: string, proposalId: string, input: { state: "accepted" | "rejected"; change_ids?: string[]; version?: string; replacement?: string }, signal?: AbortSignal): Promise<CareerMaterial> {
   return requestMaterial(`/api/materials/${encodeURIComponent(id)}/proposals/${encodeURIComponent(proposalId)}/resolve`, {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ state }), signal,
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input), signal,
   });
 }
