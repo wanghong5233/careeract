@@ -31,6 +31,8 @@ def work_session_from_row(row: RowMapping) -> AgentWorkSession:
         archived=row["archived"],
         version=row["version"],
         context_version=row["context_version"],
+        title_origin=row["title_origin"],
+        title_generation_attempted=row["title_generation_attempted"],
     )
 
 
@@ -64,6 +66,65 @@ class PostgresAgentWorkSessionRepository:
     def __init__(self, engine: AsyncEngine) -> None:
         self.engine = engine
         self.history: AgentHistoryReader | None = None
+
+    async def claim_title(
+        self, actor: ActorContext, *, session_id: str, expected_version: UUID
+    ) -> AgentWorkSession | None:
+        return await self._title_write(
+            actor,
+            session_id,
+            expected_version,
+            "title_generation_attempted=true",
+            "title_origin='default' AND NOT title_generation_attempted",
+        )
+
+    async def save_generated_title(
+        self, actor: ActorContext, *, session_id: str, title: str, expected_version: UUID
+    ) -> AgentWorkSession | None:
+        return await self._title_write(
+            actor,
+            session_id,
+            expected_version,
+            "title=:title, title_origin='generated'",
+            "title_origin='default' AND title_generation_attempted",
+            title,
+        )
+
+    async def _title_write(
+        self,
+        actor: ActorContext,
+        session_id: str,
+        expected_version: UUID,
+        assignments: str,
+        condition: str,
+        title: str | None = None,
+    ) -> AgentWorkSession | None:
+        try:
+            async with self.engine.begin() as connection:
+                row = (
+                    (
+                        await connection.execute(
+                            text(
+                                f"UPDATE career.agent_work_sessions SET {assignments}, "
+                                "version=:version, updated_at=clock_timestamp() "
+                                "WHERE session_id=:session_id AND user_id=:user_id "
+                                f"AND version=:expected_version AND {condition} RETURNING *"
+                            ),
+                            {
+                                "session_id": session_id,
+                                "user_id": actor.user_id,
+                                "expected_version": expected_version,
+                                "version": uuid4(),
+                                "title": title,
+                            },
+                        )
+                    )
+                    .mappings()
+                    .one_or_none()
+                )
+                return work_session_from_row(row) if row else None
+        except (DBAPIError, PoolTimeoutError):
+            raise WorkSessionUnavailable("Conversation title could not be saved") from None
 
     async def list(
         self, actor: ActorContext, *, cursor: str | None, limit: int, archived: bool | None
@@ -118,14 +179,16 @@ class PostgresAgentWorkSessionRepository:
                     "user_id": actor.user_id,
                     "title": title,
                     "project_id": project_id,
+                    "title_origin": "default" if title == "新对话" else "manual",
                 }
                 row = (
                     (
                         await connection.execute(
                             text(
                                 "INSERT INTO career.agent_work_sessions "
-                                "(session_id, user_id, title, project_id) "
-                                "VALUES (:session_id, :user_id, :title, :project_id) "
+                                "(session_id, user_id, title, project_id, title_origin) "
+                                "VALUES (:session_id, :user_id, :title, :project_id, "
+                                ":title_origin) "
                                 "ON CONFLICT (session_id) DO NOTHING RETURNING *"
                             ),
                             parameters,
@@ -195,6 +258,8 @@ class PostgresAgentWorkSessionRepository:
                             text(
                                 "UPDATE career.agent_work_sessions SET "
                                 "title=COALESCE(:title, title), "
+                                "title_origin=CASE WHEN CAST(:title AS TEXT) IS NOT NULL "
+                                "THEN 'manual' ELSE title_origin END, "
                                 "archived=COALESCE(:archived, archived), "
                                 "project_id=CASE WHEN :change_project THEN :project_id "
                                 "ELSE project_id END, "

@@ -61,6 +61,10 @@ test("real assistant-ui history renders Markdown and puts cancelled status befor
   assert.ok(html.indexOf("已取消") < html.indexOf("合成用户二"));
   assert.equal((html.match(/已取消/g) ?? []).length, 1);
   assert.match(html, /class="userMessage"/);
+  assert.match(html, /data-prompt-id="user1"/);
+  assert.match(html, /aria-label="复制消息"/);
+  assert.match(html, /aria-label="对话轮次导航"/);
+  assert.match(html, /跳到第 2 条消息/);
   assert.match(html, /返回最新消息/);
 });
 

@@ -29,6 +29,13 @@ class WorkSessionResponse(BaseModel):
     title: str
     archived: bool
     version: UUID
+    title_origin: str
+    title_generation_attempted: bool
+
+
+class GenerateTitleBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    version: UUID
 
 
 class WorkSessionPageResponse(BaseModel):
@@ -127,6 +134,8 @@ def serialize_session(session: AgentWorkSession) -> WorkSessionResponse:
         title=session.title,
         archived=session.archived,
         version=session.version,
+        title_origin=session.title_origin,
+        title_generation_attempted=session.title_generation_attempted,
     )
 
 
@@ -144,6 +153,30 @@ async def list_conversations(
     return WorkSessionPageResponse(
         items=[serialize_session(item) for item in page.items], next_cursor=page.next_cursor
     )
+
+
+@router.post("/conversations/{session_id}/title", response_model=WorkSessionResponse)
+async def generate_conversation_title(
+    session_id: str,
+    body: GenerateTitleBody,
+    response: Response,
+    service: Annotated[AgentWorkSessionService, Depends(get_service)],
+    actor: Annotated[ActorContext, Depends(get_actor)],
+) -> WorkSessionResponse:
+    response.headers["Cache-Control"] = "no-store"
+    return serialize_session(
+        await service.generate_title(actor, session_id=session_id, expected_version=body.version)
+    )
+
+
+@router.get("/model")
+async def read_runtime_model(
+    request: Request,
+    response: Response,
+    actor: Annotated[ActorContext, Depends(get_actor)],
+) -> dict[str, str]:
+    response.headers["Cache-Control"] = "no-store"
+    return {"id": request.app.state.settings.litellm_model, "connection": "LiteLLM"}
 
 
 @router.post("/conversations", response_model=WorkSessionResponse, status_code=201)

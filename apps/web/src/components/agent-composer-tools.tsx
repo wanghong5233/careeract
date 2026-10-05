@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Menu } from "@base-ui/react/menu";
 import { Popover } from "@base-ui/react/popover";
 import { ChevronDown, FileText, ImagePlus, Keyboard, Plus } from "lucide-react";
@@ -8,12 +8,20 @@ import { Button } from "@/components/ui/button";
 import { TooltipIconButton } from "@/components/tooltip-icon-button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useWorkspaceActions } from "@/components/workspace-actions";
+import { readRuntimeModel } from "@/lib/agent-conversations";
 import styles from "./agent-space.module.css";
 
 export function AgentComposerTools({ readOnly, children }: { readOnly: boolean; children: ReactNode }) {
   const { openContent } = useWorkspaceActions();
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
+  const [model, setModel] = useState<{ id: string; connection: string } | null>(null);
+  const [modelError, setModelError] = useState("");
+  useEffect(() => {
+    const controller = new AbortController();
+    void readRuntimeModel(AbortSignal.any([controller.signal, AbortSignal.timeout(20_000)])).then(value => { if (!controller.signal.aborted) setModel(value); }).catch((failure: unknown) => { if (!controller.signal.aborted) setModelError(failure instanceof Error ? failure.message : "模型信息读取失败。"); });
+    return () => controller.abort();
+  }, []);
 
   return <div className={styles.composerTools}>
     <Menu.Root>
@@ -31,12 +39,12 @@ export function AgentComposerTools({ readOnly, children }: { readOnly: boolean; 
     </Menu.Root>
     <div className={styles.composerTools}>
     <Popover.Root open={modelOpen} onOpenChange={setModelOpen}>
-      <Popover.Trigger render={<Button type="button" variant="ghost" size="sm" disabled={readOnly} aria-label="选择模型" title="查看默认连接与模型切换状态" className={styles.modelSelector} />}>默认模型<ChevronDown className="size-3" /></Popover.Trigger>
+      <Popover.Trigger render={<Button type="button" variant="ghost" size="sm" disabled={readOnly} aria-label="选择模型" title={model ? `当前运行模型：${model.id}` : "查看模型连接状态"} className={styles.modelSelector} />}><span className="max-w-40 truncate">{model?.id ?? (modelError ? "模型读取失败" : "读取模型…")}</span><ChevronDown className="size-3" /></Popover.Trigger>
       <Popover.Portal>
         <Popover.Positioner side="top" align="end" sideOffset={8} className="z-50">
           <Popover.Popup className={styles.modelPopover}>
-            <Popover.Title className="text-sm font-medium">模型切换尚未接入</Popover.Title>
-            <Popover.Description className="mt-2 text-sm leading-6 text-muted-foreground">文本运行使用服务端默认连接，当前不能在此选择供应商或模型。</Popover.Description>
+            <Popover.Title className="text-sm font-medium">{model?.id ?? "模型连接"}</Popover.Title>
+            <Popover.Description className="mt-2 text-sm leading-6 text-muted-foreground">{model ? `当前使用 ${model.connection} 的运行标识 ${model.id}。模型切换尚未接入。` : modelError || "正在读取服务端实际运行配置。"}</Popover.Description>
             <Button type="button" variant="outline" size="sm" className="mt-4" onClick={() => { setModelOpen(false); openContent("/workspace/settings"); }}>设置与连接</Button>
           </Popover.Popup>
         </Popover.Positioner>

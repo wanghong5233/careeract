@@ -127,7 +127,7 @@ test("history hook cancels old reads and never displays the previous conversatio
   const first = view.render("useConversationHistory", "first", true);
   assert.equal(first.loading, true);
   await settle();
-  calls[0].resolve({ messages: [{ id: "first-message" }] });
+  calls[0].resolve({ session: remote("first"), messages: [{ id: "first-message" }] });
   await settle();
   assert.equal(view.render("useConversationHistory", "first", true).history.messages[0].id, "first-message");
   const changed = view.render("useConversationHistory", "second", true);
@@ -144,7 +144,7 @@ test("history hook cancels old reads and never displays the previous conversatio
   const local = view.render("useConversationHistory", "local-draft", false);
   assert.equal(local.loading, false);
   assert.equal(local.history, null);
-  calls[2].resolve({ messages: [{ id: "stale-retry" }] });
+  calls[2].resolve({ session: remote("second"), messages: [{ id: "stale-retry" }] });
   await retry;
   assert.equal(view.render("useConversationHistory", "local-draft", false).history, null);
   view.unmount();
@@ -160,16 +160,39 @@ test("history hook restores and polls a server run without replaying input", asy
   const render = () => view.render("useConversationHistory", "restored", true);
   render();
   await settle();
-  calls[0].resolve({ messages: [], runs: [{ run_id: "accepted", status: "RUNNING" }] });
+  calls[0].resolve({ session: remote("restored"), messages: [], runs: [{ run_id: "accepted", status: "RUNNING" }] });
   await settle();
   assert.deepEqual(render().activeRun, { run_id: "accepted", status: "RUNNING" });
   assert.equal(timers.size, 1);
   timers.get(1)();
-  calls[1].resolve({ messages: [{ id: "saved", run_status: "CANCELLED" }], runs: [{ run_id: "accepted", status: "CANCELLED" }] });
+  calls[1].resolve({ session: remote("restored"), messages: [{ id: "saved", run_status: "CANCELLED" }], runs: [{ run_id: "accepted", status: "CANCELLED" }] });
   await settle();
   assert.equal(render().activeRun, null);
   assert.equal(render().history.messages[0].run_status, "CANCELLED");
   assert.equal(timers.size, 0);
   assert.equal(calls.length, 2);
+  view.unmount();
+});
+
+test("automatic naming only follows saved completed input and late title responses cannot replace another conversation", async () => {
+  const events = new EventTarget();
+  const names = [];
+  const view = hooksFixture("hooks/use-conversation-history.ts", {
+    "@/lib/agent-conversations": {
+      readConversationHistory: async id => ({ session: { ...remote(id), title_origin: id === "manual" ? "manual" : "default", title_generation_attempted: false }, messages: [{ role: "user", content: "合成目标", run_status: "COMPLETED" }] }),
+      generateConversationTitle: (session, signal) => new Promise(resolve => names.push({ session, signal, resolve })),
+    },
+  }, { window: events });
+  view.render("useConversationHistory", "first", true);
+  await settle();
+  assert.equal(view.render("useConversationHistory", "first", true).history.session.title, "合成对话");
+  assert.equal(names.length, 1);
+  view.render("useConversationHistory", "manual", true);
+  await settle();
+  assert.equal(names[0].signal.aborted, true);
+  names[0].resolve({ ...remote("first", "v2"), title: "过期生成名称", title_origin: "generated", title_generation_attempted: true });
+  await settle();
+  assert.equal(view.render("useConversationHistory", "manual", true).history.session.session_id, "manual");
+  assert.equal(names.length, 1);
   view.unmount();
 });

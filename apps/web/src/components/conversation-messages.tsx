@@ -1,17 +1,19 @@
 "use client";
 
-import type { ReactNode } from "react";
-import { ArrowDown } from "lucide-react";
-import { MessagePrimitive, ThreadPrimitive, useAuiState } from "@assistant-ui/react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { ArrowDown, Check, Copy } from "lucide-react";
+import { ActionBarPrimitive, MessagePrimitive, ThreadPrimitive, useAuiState } from "@assistant-ui/react";
 import { MarkdownText } from "@/components/markdown-text";
 import { TooltipIconButton } from "@/components/tooltip-icon-button";
 import { cn } from "@/lib/utils";
 import styles from "./agent-space.module.css";
 
 export function ConversationMessages({ children }: { children?: ReactNode }) {
+  const viewport = useRef<HTMLDivElement>(null);
   const waiting = useAuiState(state => state.thread.isRunning && state.thread.messages.at(-1)?.role !== "assistant");
   return <ThreadPrimitive.Root className={styles.threadRoot}>
-    <ThreadPrimitive.Viewport className={styles.messageViewport}>
+    <PromptNavigation viewport={viewport} />
+    <ThreadPrimitive.Viewport ref={viewport} className={styles.messageViewport}>
       <div className={styles.messageThread}>
         <ThreadPrimitive.Messages components={{ UserMessage: ConversationUserMessage, AssistantMessage: ConversationAssistantMessage }} />
         {waiting && <p role="status" className={cn(styles.messageStatus, styles.messageStatusRunning)}><span aria-hidden="true" className={styles.streamingIndicator} />正在等待回复…</p>}
@@ -25,7 +27,49 @@ export function ConversationMessages({ children }: { children?: ReactNode }) {
 }
 
 export function ConversationUserMessage() {
-  return <MessagePrimitive.Root className={styles.userMessage}><MessagePrimitive.Content /></MessagePrimitive.Root>;
+  const id = useAuiState(state => state.message.id);
+  const copied = useAuiState(state => state.message.isCopied);
+  return <MessagePrimitive.Root className={styles.userTurn} data-prompt-id={id}>
+    <div className={styles.userMessage}><MessagePrimitive.Content /></div>
+    <ActionBarPrimitive.Root className={styles.userActions}>
+      <ActionBarPrimitive.Copy asChild><TooltipIconButton tooltip={copied ? "已复制" : "复制消息"} aria-label={copied ? "已复制" : "复制消息"}>{copied ? <Check /> : <Copy />}</TooltipIconButton></ActionBarPrimitive.Copy>
+      <span role="status" className="sr-only">{copied ? "消息已复制" : ""}</span>
+    </ActionBarPrimitive.Root>
+  </MessagePrimitive.Root>;
+}
+
+function PromptNavigation({ viewport }: { viewport: React.RefObject<HTMLDivElement | null> }) {
+  const messages = useAuiState(state => state.thread.messages);
+  const prompts = messages.filter(message => message.role === "user");
+  const promptIds = prompts.map(message => message.id).join("\0");
+  const [active, setActive] = useState<string | null>(null);
+  useEffect(() => {
+    const container = viewport.current;
+    if (!container) return;
+    const update = () => {
+      const boundary = container.getBoundingClientRect().top + 80;
+      const elements = Array.from(container.querySelectorAll<HTMLElement>("[data-prompt-id]"));
+      const current = elements.findLast(element => element.getBoundingClientRect().top <= boundary) ?? elements[0];
+      setActive(current?.dataset.promptId ?? null);
+    };
+    const observer = new ResizeObserver(update);
+    observer.observe(container);
+    if (container.firstElementChild) observer.observe(container.firstElementChild);
+    container.addEventListener("scroll", update, { passive: true });
+    update();
+    return () => { observer.disconnect(); container.removeEventListener("scroll", update); };
+  }, [promptIds, viewport]);
+  if (prompts.length < 2) return null;
+  return <nav aria-label="对话轮次导航" className={styles.promptNavigation}>
+    {prompts.map((message, index) => {
+      const text = message.content.filter(part => part.type === "text").map(part => part.text).join("\n");
+      return <TooltipIconButton key={message.id} className={styles.promptTick} tooltip={text.length > 300 ? `${text.slice(0, 300)}…` : text} side="right" aria-label={`跳到第 ${index + 1} 条消息`} aria-current={active === message.id ? "location" : undefined} onClick={() => {
+        const target = Array.from(viewport.current?.querySelectorAll<HTMLElement>("[data-prompt-id]") ?? []).find(element => element.dataset.promptId === message.id);
+        target?.scrollIntoView({ block: "start", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" });
+        setActive(message.id);
+      }}><span aria-hidden="true" /></TooltipIconButton>;
+    })}
+  </nav>;
 }
 
 export function ConversationAssistantMessage() {

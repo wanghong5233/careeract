@@ -4,6 +4,7 @@ from services.api.application.context import ActorContext
 from services.api.application.ports.work_sessions import (
     AgentHistoryReader,
     AgentWorkSessionRepository,
+    ConversationTitleGenerator,
     WorkSessionPage,
 )
 from services.api.domain.privacy import ensure_career_content
@@ -12,6 +13,7 @@ from services.api.domain.work_session import (
     WorkSessionConflict,
     WorkSessionInvalid,
     WorkSessionNotFound,
+    WorkSessionUnavailable,
     validate_session_id,
 )
 
@@ -20,6 +22,42 @@ class AgentWorkSessionService:
     def __init__(self, repository: AgentWorkSessionRepository) -> None:
         self.repository = repository
         self.history: AgentHistoryReader | None = None
+        self.title_generator: ConversationTitleGenerator | None = None
+
+    async def generate_title(
+        self, actor: ActorContext, *, session_id: str, expected_version: UUID
+    ) -> AgentWorkSession:
+        session = await self.read(actor, session_id=session_id)
+        if session.version != expected_version:
+            raise WorkSessionConflict("Conversation changed; reload before naming")
+        if session.title_origin != "default" or session.title_generation_attempted:
+            return session
+        if self.history is None or self.title_generator is None:
+            raise WorkSessionUnavailable("Conversation naming is unavailable")
+        messages = await self.history.read(session_id=session_id, user_id=actor.user_id, limit=100)
+        prompt = next(
+            (
+                message.content
+                for message in messages
+                if message.role == "user" and message.run_status == "COMPLETED"
+            ),
+            None,
+        )
+        if prompt is None:
+            return session
+        claimed = await self.repository.claim_title(
+            actor, session_id=session_id, expected_version=expected_version
+        )
+        if claimed is None:
+            raise WorkSessionConflict("Conversation changed; reload before naming")
+        try:
+            title = self.validate_title(await self.title_generator.generate(prompt[:4000]))
+        except (WorkSessionUnavailable, WorkSessionInvalid):
+            return await self.read(actor, session_id=session_id)
+        saved = await self.repository.save_generated_title(
+            actor, session_id=session_id, title=title, expected_version=claimed.version
+        )
+        return saved or await self.read(actor, session_id=session_id)
 
     async def list(
         self, actor: ActorContext, *, cursor: str | None, limit: int, archived: bool | None

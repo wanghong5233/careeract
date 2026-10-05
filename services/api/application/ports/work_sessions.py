@@ -40,6 +40,14 @@ class AgentHistoryReader(Protocol):
 
 
 class AgentWorkSessionRepository(Protocol):
+    async def claim_title(
+        self, actor: ActorContext, *, session_id: str, expected_version: UUID
+    ) -> AgentWorkSession | None: ...
+
+    async def save_generated_title(
+        self, actor: ActorContext, *, session_id: str, title: str, expected_version: UUID
+    ) -> AgentWorkSession | None: ...
+
     async def list(
         self, actor: ActorContext, *, cursor: str | None, limit: int, archived: bool | None
     ) -> WorkSessionPage: ...
@@ -65,3 +73,7 @@ class AgentWorkSessionRepository(Protocol):
     async def associate(
         self, actor: ActorContext, *, session_id: str, project_id: UUID | None
     ) -> AgentWorkSession | None: ...
+
+
+class ConversationTitleGenerator(Protocol):
+    async def generate(self, prompt: str) -> str: ...

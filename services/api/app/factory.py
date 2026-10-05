@@ -50,6 +50,7 @@ from services.api.infrastructure.agent_tools import (
     persist_run_manifest,
 )
 from services.api.infrastructure.authentication import JwtAuthenticationMiddleware
+from services.api.infrastructure.conversation_titles import AgnoConversationTitleGenerator
 from services.api.infrastructure.database import create_engine
 from services.api.infrastructure.materials import PostgresMaterialRepository
 from services.api.infrastructure.memories import PostgresMemoryRepository
@@ -110,6 +111,7 @@ def create_app(
     )
     session_repository = PostgresAgentWorkSessionRepository(engine)
     app.state.agent_work_session_service = AgentWorkSessionService(session_repository)
+    app.state.agent_work_session_service.title_generator = AgnoConversationTitleGenerator(settings)
     agents = getattr(agent_os, "agents", None) or []
     career_agent = next(
         (agent for agent in agents if getattr(agent, "id", None) == "careeract-agent"), None

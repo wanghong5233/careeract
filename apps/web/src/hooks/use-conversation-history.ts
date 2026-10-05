@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { createLatestRequest } from "@/lib/latest-request";
-import { readConversationHistory, type ConversationHistory } from "@/lib/agent-conversations";
+import { generateConversationTitle, readConversationHistory, type ConversationHistory } from "@/lib/agent-conversations";
 import { activeConversationRun } from "@/lib/agent-runtime";
 
 export function useConversationHistory(id: string, persisted: boolean) {
@@ -27,6 +27,21 @@ export function useConversationHistory(id: string, persisted: boolean) {
   const visible = result?.id === id && persisted ? result : null;
   const activeRun = activeConversationRun(visible?.history?.runs);
   const activeRunId = activeRun?.run_id;
+  const naming = visible?.history;
+  useEffect(() => {
+    if (!naming || naming.session.title_origin !== "default" || naming.session.title_generation_attempted || !naming.messages.some(message => message.role === "user" && message.run_status === "COMPLETED")) return;
+    const controller = new AbortController();
+    void generateConversationTitle(naming.session, AbortSignal.any([controller.signal, AbortSignal.timeout(20_000)])).then(session => {
+      if (controller.signal.aborted) return;
+      setResult(previous => previous?.id === id && previous.history?.session.version === naming.session.version ? { ...previous, history: { ...previous.history, session } } : previous);
+      window.dispatchEvent(new Event("careeract:conversations-changed"));
+    }).catch((failure: unknown) => {
+      if (controller.signal.aborted) return;
+      if (!(failure instanceof Error)) throw failure;
+      window.dispatchEvent(new Event("careeract:conversations-changed"));
+    });
+    return () => controller.abort();
+  }, [id, naming]);
   useEffect(() => {
     if (!activeRunId) return;
     const timer = setInterval(() => { void load(); }, 2000);
