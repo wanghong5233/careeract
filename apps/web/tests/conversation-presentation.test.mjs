@@ -43,11 +43,14 @@ const markdown = loadSource("components/markdown-text.tsx", {
   "@/lib/utils": utils,
 });
 const components = loadSource("components/conversation-messages.tsx", {
-  "@/components/message-actions": { useMessageActions: () => ({}) },
+  "@/components/message-actions": { useMessageActions: () => React.useContext(messageActions) },
+  "@/components/ui/button": { Button: props => React.createElement("button", { type: "button", onClick: props.onClick }, props.children) },
   "@/components/markdown-text": markdown, "@/components/tooltip-icon-button": tooltip,
   "@/lib/utils": utils, "./agent-space.module.css": styles,
   "@/lib/run-presentation": loadSource("lib/run-presentation.ts"),
 });
+
+const messageActions = React.createContext({});
 
 test("duration uses saved framework metrics and never invents missing or invalid timing", () => {
   const format = loadSource("lib/run-presentation.ts").formatRunDuration;
@@ -68,7 +71,7 @@ test("tool-separated replies display saved run duration once", () => {
   assert.equal(converted[1].metadata.custom.runDurationSeconds, undefined);
 });
 const history = loadSource("components/conversation-history.tsx", {
-  "@/components/message-actions": { MessageActionsContext: React.createContext({}) },
+  "@/components/message-actions": { MessageActionsContext: messageActions },
   "@/components/conversation-messages": components, "@/lib/conversation-presentation": presentation,
 });
 
@@ -103,6 +106,21 @@ test("failed, cancelled and unknown history have distinct, truthful presentation
 test("completed replies have no incomplete status footer", () => {
   const html = renderToStaticMarkup(React.createElement(history.ConversationHistory, { messages: [syntheticMessage("reply", "assistant", "run", "COMPLETED")] }));
   assert.doesNotMatch(html, /请核对已显示内容|运行失败|已取消|运行状态未确认/);
+});
+
+test("main answers expose a single branch action and only answer content is quote selectable", () => {
+  const messages = [syntheticMessage("input", "user", "run", "COMPLETED"), syntheticMessage("reply", "assistant", "run", "COMPLETED")];
+  const html = renderToStaticMarkup(React.createElement(history.ConversationHistory, { messages, onQuote() {}, onBranch() {}, onAddToConversation() {} }));
+  assert.equal((html.match(/class="assistantActions"/g) ?? []).length, 1);
+  assert.match(html, /从此处创建独立分支/);
+  assert.doesNotMatch(html, /在侧聊中打开|在侧聊中追问/);
+  assert.equal((html.match(/data-aui-quote-selectable="true"/g) ?? []).length, 1);
+  const readonly = renderToStaticMarkup(React.createElement(history.ConversationHistory, { messages }));
+  assert.doesNotMatch(readonly, /data-aui-quote-selectable="true"/);
+  for (const status of ["RUNNING", "CANCELLED", "ERROR", "UNKNOWN"]) {
+    const incomplete = renderToStaticMarkup(React.createElement(history.ConversationHistory, { messages: [syntheticMessage("reply", "assistant", "run", status)], onBranch() {} }));
+    assert.doesNotMatch(incomplete, /class="assistantActions"/);
+  }
 });
 
 test("live and saved replies use identical Markdown and message presentation", () => {

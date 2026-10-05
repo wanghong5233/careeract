@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { ArrowDown, Check, Copy, GitBranch, MessageSquarePlus, Pencil } from "lucide-react";
-import { ActionBarPrimitive, MessagePrimitive, ThreadPrimitive, useAuiState } from "@assistant-ui/react";
+import { ArrowDown, Check, Copy, GitBranch, Pencil } from "lucide-react";
+import { ActionBarPrimitive, MessagePrimitive, SelectionToolbarPrimitive, ThreadPrimitive, useAuiState } from "@assistant-ui/react";
 import { MarkdownText } from "@/components/markdown-text";
 import { TooltipIconButton } from "@/components/tooltip-icon-button";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { formatRunDuration } from "@/lib/run-presentation";
 import { useMessageActions } from "@/components/message-actions";
@@ -19,6 +20,7 @@ export function ConversationMessages({ children }: { children?: ReactNode }) {
     <ThreadPrimitive.Viewport ref={viewport} className={styles.messageViewport}>
       <div className={styles.messageThread}>
         <ThreadPrimitive.Messages components={{ UserMessage: ConversationUserMessage, AssistantMessage: ConversationAssistantMessage }} />
+        <MessageSelectionToolbar />
         {waiting && <div><RunElapsed startedAt={startedAt} running /><p role="status" className={cn(styles.messageStatus, styles.messageStatusRunning)}><span aria-hidden="true" className={styles.streamingIndicator} />正在等待回复…</p></div>}
         {children}
       </div>
@@ -29,12 +31,33 @@ export function ConversationMessages({ children }: { children?: ReactNode }) {
   </ThreadPrimitive.Root>;
 }
 
+function MessageSelectionToolbar() {
+  const actions = useMessageActions();
+  const addToConversation = actions.addToConversation;
+  if (!addToConversation) return null;
+  return <SelectionToolbarPrimitive.Root className={styles.selectionToolbar} role="toolbar" aria-label="选中文字操作">
+    <Button type="button" variant="ghost" size="sm" onClick={() => runSelectionAction(addToConversation)}>添加到对话</Button>
+    {actions.quote && <Button type="button" variant="ghost" size="sm" onClick={() => runSelectionAction((text, id) => actions.quote?.(id, text))}>在侧边聊天中提问</Button>}
+  </SelectionToolbarPrimitive.Root>;
+}
+
+function runSelectionAction(action: (text: string, id: string) => void) {
+  const selection = window.getSelection();
+  const text = selection?.toString().trim() ?? "";
+  const node = selection?.anchorNode instanceof Element ? selection.anchorNode : selection?.anchorNode?.parentElement;
+  const message = node?.closest<HTMLElement>("[data-message-id]");
+  const region = node?.closest<HTMLElement>('[data-aui-quote-selectable="true"]');
+  if (!text || !message?.dataset.messageId || !region || !selection?.focusNode || !region.contains(selection.focusNode)) return;
+  action(text, message.dataset.messageId);
+  selection?.removeAllRanges();
+}
+
 export function ConversationUserMessage() {
   const actions = useMessageActions();
   const id = useAuiState(state => state.message.id);
   const original = useAuiState(state => state.message.content.filter(part => part.type === "text").map(part => part.text).join("\n"));
   const copied = useAuiState(state => state.message.isCopied);
-  return <MessagePrimitive.Root className={styles.userTurn} data-prompt-id={id}>
+  return <MessagePrimitive.Root className={styles.userTurn} data-prompt-id={id} data-aui-quote-selectable="false">
     <div className={styles.userMessage}><MessagePrimitive.Content /></div>
     <ActionBarPrimitive.Root className={styles.userActions}>
       <ActionBarPrimitive.Copy asChild><TooltipIconButton tooltip={copied ? "已复制" : "复制消息"} aria-label={copied ? "已复制" : "复制消息"}>{copied ? <Check /> : <Copy />}</TooltipIconButton></ActionBarPrimitive.Copy>
@@ -81,8 +104,6 @@ function PromptNavigation({ viewport }: { viewport: React.RefObject<HTMLDivEleme
 export function ConversationAssistantMessage() {
   const actions = useMessageActions();
   const id = useAuiState(state => state.message.id);
-  const root = useRef<HTMLDivElement>(null);
-  const original = useAuiState(state => state.message.content.filter(part => part.type === "text").map(part => part.text).join("\n"));
   const duration = useAuiState(state => state.message.metadata.custom.runDurationSeconds);
   const startedAt = useAuiState(state => state.thread.messages.findLast(message => message.role === "user")?.createdAt?.getTime());
   const status = useAuiState(state => state.message.status);
@@ -93,18 +114,13 @@ export function ConversationAssistantMessage() {
   const incomplete = status?.type === "incomplete";
   const reason = incomplete ? status.reason : undefined;
   const label = runStatus === "INTERRUPTED" ? "运行中断 · 结果未知" : reason === "cancelled" ? "已取消" : reason === "error" ? "运行失败" : runStatus === "PAUSED" ? "等待继续" : ["RUNNING", "PENDING"].includes(String(runStatus)) ? "运行尚未结束" : "运行状态未确认";
-  return <MessagePrimitive.Root ref={root} className={styles.assistantMessage}>
+  return <MessagePrimitive.Root className={styles.assistantMessage} data-message-id={id} data-aui-quote-selectable="false">
     <RunElapsed duration={duration} startedAt={startedAt} running={running} />
-    {hasText && <MessagePrimitive.Content components={{ Text: MarkdownText }} />}
+    {hasText && <div data-aui-quote-selectable={actions.addToConversation ? "true" : "false"}><MessagePrimitive.Content components={{ Text: MarkdownText }} /></div>}
     {running && <p role="status" className={cn(styles.messageStatus, styles.messageStatusRunning)}><span aria-hidden="true" className={styles.streamingIndicator} />{hasText ? "正在生成…" : "正在等待回复…"}</p>}
     {incomplete && <p role="status" className={cn(styles.messageStatus, reason === "error" ? styles.messageStatusError : styles.messageStatusIncomplete)}>{label} · {noSavedReply ? "本次运行没有已保存的回复" : "请核对已显示内容"}</p>}
-    {(actions.quote || actions.branch) && hasText && runStatus === "COMPLETED" && <div className={styles.assistantActions}>
-      {actions.quote && <TooltipIconButton tooltip="在侧聊中打开" aria-label="在侧聊中打开" onClick={() => {
-        const selection = window.getSelection();
-        const quote = selection?.anchorNode && root.current?.contains(selection.anchorNode) && selection.focusNode && root.current.contains(selection.focusNode) ? selection.toString() : "";
-        actions.quote?.(id, quote || original.slice(0, 4000));
-      }}><MessageSquarePlus /></TooltipIconButton>}
-      {actions.branch && <TooltipIconButton tooltip="从此处创建独立分支" aria-label="从此处创建独立分支" onClick={() => actions.branch?.(id)}><GitBranch /></TooltipIconButton>}
+    {actions.branch && hasText && runStatus === "COMPLETED" && <div className={styles.assistantActions}>
+      <TooltipIconButton tooltip="从此处创建独立分支" aria-label="从此处创建独立分支" onClick={() => actions.branch?.(id)}><GitBranch /></TooltipIconButton>
     </div>}
   </MessagePrimitive.Root>;
 }
