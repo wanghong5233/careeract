@@ -4,7 +4,7 @@ version = "0.1.0"
 license = "Apache-2.0"
 requires-python = ">=3.11,<3.14"
 dependencies = [
-    "agno[agui,openai,os,postgres]",
+    "agno[agui,ddg,openai,os,postgres]",
     "alembic",
     "asyncpg",
     "fastapi",
