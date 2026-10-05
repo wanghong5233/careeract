@@ -6,17 +6,19 @@ import { ActionBarPrimitive, MessagePrimitive, ThreadPrimitive, useAuiState } fr
 import { MarkdownText } from "@/components/markdown-text";
 import { TooltipIconButton } from "@/components/tooltip-icon-button";
 import { cn } from "@/lib/utils";
+import { formatRunDuration } from "@/lib/run-presentation";
 import styles from "./agent-space.module.css";
 
 export function ConversationMessages({ children }: { children?: ReactNode }) {
   const viewport = useRef<HTMLDivElement>(null);
   const waiting = useAuiState(state => state.thread.isRunning && state.thread.messages.at(-1)?.role !== "assistant");
+  const startedAt = useAuiState(state => state.thread.messages.findLast(message => message.role === "user")?.createdAt?.getTime());
   return <ThreadPrimitive.Root className={styles.threadRoot}>
     <PromptNavigation viewport={viewport} />
     <ThreadPrimitive.Viewport ref={viewport} className={styles.messageViewport}>
       <div className={styles.messageThread}>
         <ThreadPrimitive.Messages components={{ UserMessage: ConversationUserMessage, AssistantMessage: ConversationAssistantMessage }} />
-        {waiting && <p role="status" className={cn(styles.messageStatus, styles.messageStatusRunning)}><span aria-hidden="true" className={styles.streamingIndicator} />正在等待回复…</p>}
+        {waiting && <div><RunElapsed startedAt={startedAt} running /><p role="status" className={cn(styles.messageStatus, styles.messageStatusRunning)}><span aria-hidden="true" className={styles.streamingIndicator} />正在等待回复…</p></div>}
         {children}
       </div>
       <ThreadPrimitive.ViewportFooter className={styles.scrollFooter}>
@@ -73,6 +75,8 @@ function PromptNavigation({ viewport }: { viewport: React.RefObject<HTMLDivEleme
 }
 
 export function ConversationAssistantMessage() {
+  const duration = useAuiState(state => state.message.metadata.custom.runDurationSeconds);
+  const startedAt = useAuiState(state => state.thread.messages.findLast(message => message.role === "user")?.createdAt?.getTime());
   const status = useAuiState(state => state.message.status);
   const runStatus = useAuiState(state => state.message.metadata.custom.runStatus);
   const noSavedReply = useAuiState(state => state.message.metadata.custom.noSavedReply === true);
@@ -82,8 +86,20 @@ export function ConversationAssistantMessage() {
   const reason = incomplete ? status.reason : undefined;
   const label = reason === "cancelled" ? "已取消" : reason === "error" ? "运行失败" : runStatus === "PAUSED" ? "等待继续" : ["RUNNING", "PENDING"].includes(String(runStatus)) ? "运行尚未结束" : "运行状态未确认";
   return <MessagePrimitive.Root className={styles.assistantMessage}>
+    <RunElapsed duration={duration} startedAt={startedAt} running={running} />
     {hasText && <MessagePrimitive.Content components={{ Text: MarkdownText }} />}
     {running && <p role="status" className={cn(styles.messageStatus, styles.messageStatusRunning)}><span aria-hidden="true" className={styles.streamingIndicator} />{hasText ? "正在生成…" : "正在等待回复…"}</p>}
     {incomplete && <p role="status" className={cn(styles.messageStatus, reason === "error" ? styles.messageStatusError : styles.messageStatusIncomplete)}>{label} · {noSavedReply ? "本次运行没有已保存的回复" : "请核对已显示内容"}</p>}
   </MessagePrimitive.Root>;
+}
+
+export function RunElapsed({ duration, startedAt, running = false }: { duration?: unknown; startedAt?: number; running?: boolean }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!running || startedAt === undefined) return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [running, startedAt]);
+  const label = running && startedAt !== undefined ? formatRunDuration(Math.max(0, (now - startedAt) / 1000)) : formatRunDuration(duration);
+  return label ? <p className={styles.runElapsed}>{running ? "本页计时" : "用时"} {label}</p> : null;
 }

@@ -14,6 +14,7 @@ class AgentHistoryMessage:
     created_at: int
     run_id: str | None = None
     run_status: str = "UNKNOWN"
+    run_duration_seconds: float | None = None
 
 
 @dataclass(frozen=True, slots=True)

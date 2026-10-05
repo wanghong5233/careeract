@@ -45,6 +45,19 @@ const markdown = loadSource("components/markdown-text.tsx", {
 const components = loadSource("components/conversation-messages.tsx", {
   "@/components/markdown-text": markdown, "@/components/tooltip-icon-button": tooltip,
   "@/lib/utils": utils, "./agent-space.module.css": styles,
+  "@/lib/run-presentation": loadSource("lib/run-presentation.ts"),
+});
+
+test("duration uses saved framework metrics and never invents missing or invalid timing", () => {
+  const format = loadSource("lib/run-presentation.ts").formatRunDuration;
+  assert.equal(format(65.9), "1分5秒");
+  assert.equal(format(0), "0秒");
+  for (const value of [undefined, null, -1, NaN, Infinity, "10"]) assert.equal(format(value), null);
+  const message = { ...syntheticMessage("reply", "assistant", "run", "CANCELLED"), run_duration_seconds: 8.4 };
+  const html = renderToStaticMarkup(React.createElement(history.ConversationHistory, { messages: [message] }));
+  assert.match(html, /用时 8秒/);
+  assert.match(html, /已取消/);
+  assert.doesNotMatch(html, /已完成|本页计时/);
 });
 const history = loadSource("components/conversation-history.tsx", {
   "@/components/conversation-messages": components, "@/lib/conversation-presentation": presentation,
@@ -88,6 +101,14 @@ test("live and saved replies use identical Markdown and message presentation", (
   const saved = renderToStaticMarkup(React.createElement(history.ConversationHistory, { messages }));
   const live = renderToStaticMarkup(React.createElement(history.ConversationHistory, { messages: [], liveMessages: presentation.historyThreadMessages(messages) }));
   assert.equal(live, saved);
+});
+
+test("saved timing stays visible while a subsequent reply streams", () => {
+  const message = { ...syntheticMessage("reply", "assistant", "run", "COMPLETED"), run_duration_seconds: 5 };
+  const live = [...presentation.historyThreadMessages([message]).map(item => ({ ...item, metadata: undefined })), { id: "new", role: "assistant", content: "合成流", status: { type: "running" } }];
+  const html = renderToStaticMarkup(React.createElement(history.ConversationHistory, { messages: [message], liveMessages: live, isRunning: true }));
+  assert.match(html, /用时 5秒/);
+  assert.match(html, /正在生成/);
 });
 
 test("live display distinguishes waiting, streaming and incomplete output without inventing completion", () => {

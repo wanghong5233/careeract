@@ -150,7 +150,7 @@ const defaultComponents = memoizeMarkdownComponents({
   a: ({ className, ...props }) => (
     <a
       className={cn(
-        "aui-md-a text-primary hover:text-primary/80 underline underline-offset-2",
+        "aui-md-a text-blue-700 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2",
         className,
       )}
       {...props}
@@ -168,7 +168,7 @@ const defaultComponents = memoizeMarkdownComponents({
   ul: ({ className, ...props }) => (
     <ul
       className={cn(
-        "aui-md-ul marker:text-muted-foreground my-3 ms-5 list-disc space-y-1 [&>li]:ps-1",
+        "aui-md-ul marker:text-muted-foreground my-3 ms-5 list-disc space-y-2 [&>li]:ps-1",
         className,
       )}
       {...props}
@@ -177,7 +177,7 @@ const defaultComponents = memoizeMarkdownComponents({
   ol: ({ className, ...props }) => (
     <ol
       className={cn(
-        "aui-md-ol marker:text-muted-foreground my-3 ms-5 list-decimal space-y-1 [&>li]:ps-1",
+        "aui-md-ol marker:text-muted-foreground my-3 ms-5 list-decimal space-y-2 [&>li]:ps-1",
         className,
       )}
       {...props}

@@ -122,6 +122,14 @@ class AgnoAgentHistoryReader:
                     created_at=message.created_at,
                     run_id=message_runs.get(message.id, (None, "UNKNOWN"))[0],
                     run_status=message_runs.get(message.id, (None, "UNKNOWN"))[1],
+                    run_duration_seconds=next(
+                        (
+                            getattr(getattr(run, "metrics", None), "duration", None)
+                            for run in session.runs or []
+                            if run.run_id == message_runs.get(message.id, (None, "UNKNOWN"))[0]
+                        ),
+                        None,
+                    ),
                 )
             )
         return tuple(result[-limit:])

@@ -7,6 +7,7 @@ import httpx
 import pytest
 from agno.agent import Agent
 from agno.db.postgres import PostgresDb
+from agno.metrics import RunMetrics
 from agno.models.message import Message
 from agno.run.agent import RunOutput
 from agno.run.base import RunStatus
@@ -33,6 +34,7 @@ async def test_history_includes_cancelled_and_failed_runs_with_their_actual_stat
             RunOutput(
                 run_id="cancelled-run",
                 status=RunStatus.cancelled,
+                metrics=RunMetrics(duration=8.4),
                 messages=[
                     Message(id="input", role="user", content="合成目标"),
                     Message(id="partial", role="assistant", content="合成部分输出"),
@@ -56,6 +58,8 @@ async def test_history_includes_cancelled_and_failed_runs_with_their_actual_stat
         ("partial", "CANCELLED"),
         ("failed", "ERROR"),
     ]
+    assert messages[1].run_duration_seconds == 8.4
+    assert messages[2].run_duration_seconds is None
     assert not await reader.has_active_run(session_id=session.session_id, user_id="synthetic-owner")
     session.runs.append(RunOutput(run_id="running", status=RunStatus.running))
     assert await reader.has_active_run(session_id=session.session_id, user_id="synthetic-owner")

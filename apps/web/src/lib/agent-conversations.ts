@@ -2,7 +2,7 @@ import { isRestrictedResponse, restrictedContentMessage } from "@/lib/privacy";
 
 export type AgentConversation = { session_id: string; title: string; project_id: string | null; archived: boolean; version: string; created_at: string; updated_at: string; title_origin?: "default" | "manual" | "generated"; title_generation_attempted?: boolean };
 export type ConversationPage = { items: AgentConversation[]; next_cursor: string | null };
-export type HistoryMessage = { id: string; role: "user" | "assistant"; content: string; created_at: number; run_id: string | null; run_status: string };
+export type HistoryMessage = { id: string; role: "user" | "assistant"; content: string; created_at: number; run_id: string | null; run_status: string; run_duration_seconds?: number | null };
 export type ConversationHistory = { session: AgentConversation; messages: HistoryMessage[]; truncated: boolean; runs?: Array<{ run_id: string; status: string }> };
 
 async function request<T>(url: string, init: RequestInit = {}): Promise<T> {

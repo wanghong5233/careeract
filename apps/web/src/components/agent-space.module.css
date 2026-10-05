@@ -1,4 +1,4 @@
-.shell { display:grid; grid-template-columns:248px minmax(0,1fr); height:100dvh; overflow:clip; background:var(--background); }
+.shell { --workspace-body-size:15px; --workspace-control-size:14px; --workspace-caption-size:12px; --foreground:oklch(0.29 0 0); --muted-foreground:oklch(0.49 0 0); display:grid; grid-template-columns:248px minmax(0,1fr); height:100dvh; overflow:clip; background:var(--background); font-size:var(--workspace-control-size); line-height:1.5; }
 .noNavigation { grid-template-columns:48px minmax(0,1fr); }
 .rail { display:none; flex-direction:column; align-items:center; gap:6px; padding:9px 4px; background:var(--sidebar); border-right:1px solid var(--border); }
 .noNavigation .rail { display:flex; }
@@ -7,12 +7,12 @@
 .navigationHeader { display:flex; align-items:center; justify-content:space-between; min-height:54px; padding-left:8px; margin-bottom:12px; }
 .navigationList { flex:1; min-height:0; overflow:auto; padding-bottom:16px; }
 .navigationFooter { padding:8px 0; border-top:1px solid var(--border); }
-.navButton { display:flex; align-items:center; gap:9px; width:100%; padding:9px 8px; border-radius:6px; font-size:13px; text-align:left; }
+.navButton { display:flex; align-items:center; gap:9px; width:100%; padding:9px 8px; border-radius:6px; font-size:var(--workspace-control-size); text-align:left; }
 .navButton svg { width:15px; height:15px; flex-shrink:0; }
 .navButton:hover,.conversationRow:hover { background:var(--muted); }
 .sectionHeading { display:flex; align-items:center; justify-content:space-between; margin-top:20px; padding-left:8px; font-size:12px; color:var(--muted-foreground); }
 .conversationRow { display:flex; align-items:center; position:relative; border-radius:6px; }
-.conversationLink { display:flex; align-items:center; gap:7px; flex:1; min-width:0; padding:9px 5px 9px 12px; text-align:left; font-size:13px; }
+.conversationLink { display:flex; align-items:center; gap:7px; flex:1; min-width:0; padding:9px 5px 9px 12px; text-align:left; font-size:var(--workspace-control-size); }
 .draftMark { font-size:10px; color:var(--muted-foreground); margin-left:auto; flex-shrink:0; }
 .selected { background:var(--sidebar-accent); }
 .conversationMenu summary { list-style:none; padding:9px 6px; cursor:pointer; color:var(--muted-foreground); }
@@ -25,13 +25,13 @@
 .agent { display:flex; flex-direction:column; min-width:0; min-height:0; }
 .header { display:flex; align-items:center; gap:4px; min-height:54px; padding:8px 17px; border-bottom:1px solid var(--border); }
 .conversationHeading { flex:1; min-width:0; display:flex; align-items:center; flex-wrap:wrap; gap:4px 12px; }
-.conversationTitle { min-width:0; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; }
+.conversationTitle { min-width:0; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:var(--workspace-control-size); }
 .startArea { flex:1; min-height:0; overflow:hidden; display:flex; flex-direction:column; }
 .threadRoot { position:relative; display:flex; flex:1; flex-direction:column; min-height:0; min-width:0; }
 .messageViewport { flex:1; min-height:0; overflow-y:auto; overflow-x:hidden; display:flex; flex-direction:column; padding:24px; }
-.messageThread { display:flex; flex-direction:column; flex-shrink:0; gap:24px; width:100%; max-width:736px; margin:auto auto 0; color:var(--foreground); }
+.messageThread { display:flex; flex-direction:column; flex-shrink:0; gap:20px; width:100%; max-width:736px; margin:auto auto 0; color:var(--foreground); }
 .userTurn { align-self:flex-end; margin-left:auto; max-width:70%; min-width:0; scroll-margin-top:24px; }
-.userMessage { overflow-wrap:anywhere; white-space:pre-wrap; border-radius:18px; background:var(--muted); padding:10px 14px; font-size:14px; line-height:1.65; }
+.userMessage { overflow-wrap:anywhere; white-space:pre-wrap; border-radius:18px; background:var(--muted); padding:10px 14px; font-size:var(--workspace-body-size); line-height:1.7; }
 .userActions { display:flex; justify-content:flex-end; height:28px; padding-top:4px; opacity:0; transition:opacity .15s ease; }
 .userTurn:hover .userActions,.userTurn:focus-within .userActions { opacity:1; }
 .promptNavigation { position:absolute; z-index:10; left:2px; top:50%; transform:translateY(-50%); display:flex; flex-direction:column; max-height:60%; overflow-y:auto; scrollbar-width:none; }
@@ -39,7 +39,8 @@
 .promptTick>span:first-child { width:8px; height:2px; border-radius:2px; background:var(--muted-foreground); opacity:.4; }
 .promptTick[aria-current] >span:first-child,.promptTick:hover>span:first-child,.promptTick:focus-visible>span:first-child { width:12px; opacity:1; }
 @media(hover:none) { .userActions { opacity:1; } }
-.assistantMessage { min-width:0; overflow-wrap:anywhere; font-size:14px; line-height:1.7; }
+.assistantMessage { min-width:0; overflow-wrap:anywhere; font-size:var(--workspace-body-size); line-height:1.8; }
+.runElapsed { margin-bottom:10px; font-size:var(--workspace-caption-size); line-height:1.5; color:var(--muted-foreground); font-variant-numeric:tabular-nums; }
 .scrollFooter { position:sticky; bottom:0; display:flex; justify-content:center; flex-shrink:0; pointer-events:none; }
 .scrollToBottom { pointer-events:auto; width:32px; height:32px; margin-top:12px; border:1px solid var(--border); border-radius:999px; background:var(--background); box-shadow:0 2px 8px #00000010; }
 .scrollToBottom:disabled { display:none; }
@@ -54,7 +55,7 @@
 .composerArea { flex-shrink:0; width:100%; max-width:784px; margin:0 auto; padding:0 24px 24px; }
 .composer { border:1px solid var(--border); background:var(--background); border-radius:18px; padding:10px; box-shadow:0 3px 18px #00000004; transition:border-color .15s ease,box-shadow .15s ease; }
 .composer:focus-within { border-color:var(--ring); box-shadow:0 0 0 2px color-mix(in srgb,var(--ring) 10%,transparent); }
-.composer textarea { display:block; width:100%; resize:none; field-sizing:content; min-height:44px; max-height:240px; font-family:var(--font-sans); font-size:14px; font-weight:400; line-height:1.65; letter-spacing:normal; margin-bottom:8px; padding:4px 6px; outline:none; background:transparent; overflow-y:auto; }
+.composer textarea { display:block; width:100%; resize:none; field-sizing:content; min-height:44px; max-height:240px; font-family:var(--font-sans); font-size:var(--workspace-body-size); font-weight:400; line-height:1.7; letter-spacing:normal; margin-bottom:8px; padding:4px 6px; outline:none; background:transparent; overflow-y:auto; }
 .composer textarea::placeholder { color:var(--muted-foreground); opacity:.85; }
 .composerTools { display:flex; align-items:center; gap:4px; min-width:0; }
 .composer>.composerTools { justify-content:flex-start; }
@@ -62,7 +63,7 @@
 .modelSelector { color:var(--muted-foreground); font-weight:400; }
 .composerMenu,.modelPopover { border:1px solid var(--border); border-radius:12px; background:var(--popover); color:var(--popover-foreground); box-shadow:0 8px 30px #00000012; outline:none; }
 .composerMenu { width:min(290px,calc(100vw - 32px)); padding:5px; }
-.composerMenuItem { display:flex; align-items:center; gap:10px; border-radius:7px; padding:10px; font-size:13px; cursor:default; }
+.composerMenuItem { display:flex; align-items:center; gap:10px; border-radius:7px; padding:10px; font-size:var(--workspace-control-size,14px); cursor:default; }
 .composerMenuItem svg { width:16px; height:16px; flex-shrink:0; }
 .composerMenuItem[data-highlighted] { background:var(--muted); }
 .composerMenuItem[data-disabled] { color:var(--muted-foreground); }
@@ -99,6 +100,7 @@
 .document p { font-size:14px; line-height:1.9; color:var(--muted-foreground); margin-bottom:12px; }
 .document section { margin-top:28px; }
 .shell button:focus-visible,.shell summary:focus-visible,.shell select:focus-visible { outline:2px solid var(--ring); outline-offset:2px; }
+:global(.dark) .shell { --foreground:oklch(0.92 0 0); --muted-foreground:oklch(0.73 0 0); }
 .skipLink { position:fixed; top:10px; left:10px; z-index:80; transform:translateY(-200%); padding:8px 12px; background:var(--background); border:1px solid var(--border); border-radius:6px; }
 .skipLink:focus { transform:none; }
 .mobileDrawer { top:0; left:0; width:min(300px,calc(100vw - 44px)); height:100dvh; max-width:none; padding:0; border-radius:0; transform:none; translate:none; animation:none; gap:0; }

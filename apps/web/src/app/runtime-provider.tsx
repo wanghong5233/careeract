@@ -7,7 +7,9 @@ import { useAgUiRuntime } from "@assistant-ui/react-ag-ui";
 import { type ReactNode, useMemo, useState } from "react";
 
 import { isRestrictedResponse, restrictedContentMessage } from "@/lib/privacy";
-import { conversationHistoryUrl, historyMessageStatus, registerConversationRun, requireFinishedStream } from "@/lib/agent-runtime";
+import { conversationHistoryUrl, registerConversationRun, requireFinishedStream } from "@/lib/agent-runtime";
+import { historyThreadMessages } from "@/lib/conversation-presentation";
+import type { ConversationHistory } from "@/lib/agent-conversations";
 
 const AGENT_BFF_URL = "/api/agent";
 
@@ -58,16 +60,10 @@ export function RuntimeProvider({ children, agentThreadId }: Readonly<{ children
       if (!agentThreadId) return { messages: [] };
       const response = await fetch(conversationHistoryUrl(threadId), { cache: "no-store", signal: AbortSignal.timeout(20_000) });
       if (!response.ok) throw new Error("Agent 历史暂时无法读取，请稍后重试。");
-      const body = await response.json() as { messages: Array<{ id: string; role: "user" | "assistant"; content: string; created_at: number; run_status: string }> };
-      const messages = body.messages.map(message => ({
-        id: message.id,
-        role: message.role,
-        content: message.content,
-        createdAt: new Date(message.created_at * 1000),
-        ...(message.role === "assistant" ? { status: historyMessageStatus(message.run_status) } : {}),
-      }));
+      const body = await response.json() as ConversationHistory;
+      const messages = historyThreadMessages(body.messages, body.runs);
       return ExportedMessageRepository.fromBranchableArray(
-        messages.map((message, index) => ({ message, parentId: index > 0 ? messages[index - 1]!.id : null })),
+        messages.map((message, index) => ({ message, parentId: index > 0 ? messages[index - 1]!.id ?? null : null })),
       );
     },
     async append() {},

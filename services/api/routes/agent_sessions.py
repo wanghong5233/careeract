@@ -74,6 +74,7 @@ class HistoryMessageResponse(BaseModel):
     created_at: int
     run_id: str | None
     run_status: str
+    run_duration_seconds: float | None = None
 
 
 class HistoryResponse(BaseModel):
