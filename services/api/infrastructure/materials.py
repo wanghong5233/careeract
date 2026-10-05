@@ -42,6 +42,13 @@ def material_version_from_row(row: RowMapping) -> MaterialVersion:
 
 
 def proposal_from_row(row: RowMapping) -> MaterialProposal:
+    changes = row["changes"] or material_changes(row["base_body"], row["proposed_body"])
+    if row["state"] != "pending" and row["review_version_id"] is None:
+        changes = (
+            decide_changes(changes, tuple(str(change["id"]) for change in changes), row["state"])
+            if changes
+            else []
+        )
     return MaterialProposal(
         id=row["id"],
         material_id=row["material_id"],
@@ -54,11 +61,7 @@ def proposal_from_row(row: RowMapping) -> MaterialProposal:
         base_body=row["base_body"],
         base_number=row["base_number"],
         references=tuple(row["references"]),
-        changes=tuple(
-            row["changes"]
-            if row["changes"] is not None
-            else material_changes(row["base_body"], row["proposed_body"])
-        ),
+        changes=tuple(changes),
         review_version_id=row["review_version_id"],
         review_version=row["review_version"] or uuid5(row["id"], "initial-review"),
     )
@@ -191,7 +194,7 @@ async def insert_proposal(
     proposal_id: UUID,
     base_version_id: UUID,
     draft: MaterialDraft,
-    changes: tuple[dict[str, object], ...] = (),
+    changes: tuple[dict[str, object], ...] | None = None,
 ) -> None:
     await connection.execute(
         text(
@@ -209,7 +212,7 @@ async def insert_proposal(
             "body": draft.body,
             "rationale": draft.rationale,
             "refs": json.dumps(draft.references, ensure_ascii=False),
-            "changes": json.dumps(changes, ensure_ascii=False),
+            "changes": json.dumps(changes, ensure_ascii=False) if changes is not None else None,
         },
     )
 
@@ -519,6 +522,11 @@ class PostgresMaterialRepository:
         expected_version: UUID | None,
         replacement: str | None,
     ) -> MaterialDetail | None:
+        if proposal.state != "pending":
+            if replacement is not None:
+                raise MaterialConflict("Resolved proposals cannot be rewritten")
+            decide_changes(list(proposal.changes), change_ids, state)
+            return detail
         changes = [dict(change) for change in proposal.changes] or material_changes(
             proposal.base_body, proposal.proposed_body
         )
@@ -528,6 +536,17 @@ class PostgresMaterialRepository:
             changed = next((change for change in changes if change["id"] == change_ids[0]), None)
             if changed is None or changed["state"] != "pending":
                 raise MaterialConflict("Only pending changes can be rewritten")
+            if changed["replacement"] == replacement:
+                return detail
+            revisions = changed.get("revisions", [])
+            changed["revisions"] = [
+                *(revisions if isinstance(revisions, list) else []),
+                {
+                    "replacement": changed["replacement"],
+                    "review_version": str(proposal.review_version),
+                    "request_id": actor.request_id,
+                },
+            ]
             changed["replacement"] = replacement
         updated = changes if replacement is not None else decide_changes(changes, change_ids, state)
         if updated == list(proposal.changes):
@@ -535,18 +554,29 @@ class PostgresMaterialRepository:
         if expected_version is None or expected_version != proposal.review_version:
             raise MaterialConflict("Proposal review changed; reload before deciding")
         review_base = proposal.review_version_id or proposal.base_version_id
-        if (
+        stale = (
             detail.current_version.id != review_base
             or review_body(proposal.base_body, changes) != detail.current_version.body
-        ):
+        )
+        if stale and (state == "accepted" or replacement is not None):
             raise MaterialConflict("Material changed outside this review")
-        body = review_body(proposal.base_body, updated)
+        body = detail.current_version.body if stale else review_body(proposal.base_body, updated)
         from services.api.domain.material import validate_material_content
         from services.api.domain.privacy import ensure_career_content
 
         if body:
-            validate_material_content(body=body)
+            try:
+                validate_material_content(body=body)
+            except ValueError:
+                raise MaterialInvalid("Invalid accepted material content") from None
             ensure_career_content(body)
+        preview = review_body(proposal.base_body, updated, preview=True)
+        if replacement is not None:
+            try:
+                validate_material_content(body=preview)
+            except ValueError:
+                raise MaterialInvalid("Invalid rewritten material content") from None
+            ensure_career_content(preview)
         if body != detail.current_version.body:
             if not body.strip():
                 raise MaterialInvalid("Accepted material cannot be empty")
@@ -579,7 +609,7 @@ class PostgresMaterialRepository:
             ),
             {
                 "changes": json.dumps(updated, ensure_ascii=False),
-                "base": current_version,
+                "base": review_base if stale else current_version,
                 "version": uuid4(),
                 "state": proposal_state,
                 "id": proposal.id,

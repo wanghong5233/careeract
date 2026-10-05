@@ -241,9 +241,18 @@ def build_agent_tools(
             return encode_context(payload)
 
         async def propose_material_edit(
-            material_id: str, base_version_id: str, proposed_body: str, rationale: str = ""
+            material_id: str,
+            base_version_id: str,
+            proposed_body: str,
+            rationale: str = "",
+            proposal_id: str | None = None,
+            change_id: str | None = None,
+            review_version: str | None = None,
         ) -> str:
-            """Create a user-reviewable material edit; never accept it automatically."""
+            """Propose an edit; never accept automatically.
+
+            Targeted rewrites use identifiers from read_material and only replace one block.
+            """
             try:
                 payload = await service.propose_material_edit(
                     actor_for(run_context),
@@ -253,6 +262,9 @@ def build_agent_tools(
                     proposed_body=proposed_body,
                     rationale=rationale,
                     references=tuple((run_context.metadata or {}).get("career_basis", [])),
+                    proposal_id=UUID(proposal_id) if proposal_id else None,
+                    change_id=change_id,
+                    review_version=UUID(review_version) if review_version else None,
                 )
             except (ValueError, *CONTEXT_FAILURES):
                 return json.dumps(

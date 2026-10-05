@@ -26,7 +26,7 @@ export type MaterialProposal = {
   base_number: number;
   references: MaterialReference[];
   stale: boolean;
-  changes: Array<{ id: string; start: number; end: number; original: string; replacement: string; state: "pending" | "accepted" | "rejected" }>;
+  changes: Array<{ id: string; start: number; end: number; original: string; replacement: string; state: "pending" | "accepted" | "rejected"; revisions?: Array<{ replacement: string; review_version: string; request_id: string }> }>;
   review_version: string | null;
   review_body: string;
 };

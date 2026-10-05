@@ -17,7 +17,7 @@ from services.api.domain.material import (
     MaterialProposal,
     validate_material_content,
 )
-from services.api.domain.material_review import material_changes
+from services.api.domain.material_review import material_changes, review_body
 from services.api.domain.privacy import ensure_career_content
 
 
@@ -203,7 +203,7 @@ class MaterialService:
         return list(
             unified_diff(
                 proposal.base_body.splitlines(),
-                proposal.proposed_body.splitlines(),
+                review_body(proposal.base_body, list(proposal.changes), preview=True).splitlines(),
                 fromfile=f"v{proposal.base_number}",
                 tofile="提议",
                 lineterm="",

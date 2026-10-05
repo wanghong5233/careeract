@@ -3,9 +3,11 @@
 import { useEffect, useState } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useAuiState } from "@assistant-ui/react";
-import { ArrowUpRight, Check, Copy, FileText, LoaderCircle, Plus, RefreshCw } from "lucide-react";
+import { ArrowUpRight, Copy, FileText, LoaderCircle, Plus, RefreshCw } from "lucide-react";
 
 import { useWorkspaceActions } from "@/components/workspace-actions";
+import { MaterialProposalReview } from "@/components/material-proposal-review";
+import { pendingSelection, rewritePrompt, toggleSelection } from "@/lib/material-review";
 import { useDraftGuard } from "@/hooks/use-draft-guard";
 import { useConfirmAction } from "@/hooks/use-confirm-action";
 import { Button } from "@/components/ui/button";
@@ -33,6 +35,7 @@ export function WorkspaceMaterials({ review = false }: { review?: boolean }) {
   const [mode, setMode] = useState(review ? "改动" : "正文");
   const [editing, setEditing] = useState(false);
   const [selectedChanges, setSelectedChanges] = useState<Record<string, string[]>>({});
+  const [rewriteDrafts, setRewriteDrafts] = useState<Record<string, string>>({});
   const [draft, setDraft] = useState("");
   const [error, setError] = useState("");
   const [listError, setListError] = useState("");
@@ -45,7 +48,8 @@ export function WorkspaceMaterials({ review = false }: { review?: boolean }) {
   const [needsCheck, setNeedsCheck] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [listAttempt, setListAttempt] = useState(0);
-  const dirty = editing && Boolean(selected) && draft !== (selected?.current_version?.body ?? "");
+  const rewriteDirty = selected?.proposals.some(proposal => proposal.changes.some(change => rewriteDrafts[`${proposal.id}:${change.id}`] !== undefined && rewriteDrafts[`${proposal.id}:${change.id}`] !== change.replacement)) ?? false;
+  const dirty = (editing && Boolean(selected) && draft !== (selected?.current_version?.body ?? "")) || rewriteDirty;
   useDraftGuard(dirty || busy);
 
   useEffect(() => {
@@ -88,7 +92,7 @@ export function WorkspaceMaterials({ review = false }: { review?: boolean }) {
   function refresh() {
     if (busy) return;
     const reload = () => {
-      setEditing(false); setError(""); setListError(""); setDetailError(null); setLoading(true);
+      setEditing(false); setRewriteDrafts({}); setSelectedChanges({}); setError(""); setListError(""); setDetailError(null); setLoading(true);
       setDetailLoading(Boolean(selectedId)); setSelected(null); setAttempt(value => value + 1); setListAttempt(value => value + 1);
     };
     if (dirty) requestConfirmation(reload, "重新读取会放弃未保存的精确修正，是否继续？");
@@ -97,18 +101,19 @@ export function WorkspaceMaterials({ review = false }: { review?: boolean }) {
 
   function changeMaterial(id: string) {
     if (busy || id === selectedId) return;
-    const select = () => { setEditing(false); selectMaterial(id); setNotice(""); setError(""); };
+    const select = () => { setEditing(false); setRewriteDrafts({}); setSelectedChanges({}); selectMaterial(id); setNotice(""); setError(""); };
     if (dirty) requestConfirmation(select, "切换会放弃未保存的精确修正，是否继续？");
     else select();
   }
 
-  async function delegate(create = false) {
+  async function delegate(create = false, proposalId?: string, changeId?: string) {
     if (busy || running || listError) return;
     if (dirty) { setNotice("请先保存或取消精确修正，再交还 Agent。"); return; }
     setBusy(true); setError("");
     try {
       if (selected && !create) await associateAgentSession(selected.project_id, AbortSignal.timeout(15_000));
-      const prompt = selected && !create
+      const proposal = selected?.proposals.find(item => item.id === proposalId);
+      const prompt = selected && proposal && changeId ? rewritePrompt(selected.id, proposal, changeId) : selected && !create
         ? `请用 read_material 读取材料 ${selected.id} 的当前版本，再根据我的反馈提出修改。我的反馈：\n\n不要添加未提供的职业事实；用 propose_material_edit 保存待审阅提议，不自动接受。`
         : "请帮我创作一份合成文本材料。先问我用途、希望表达的内容和事实边界，再用 propose_new_material 保存待审阅草稿。不要读取真实私人资料，不自动接受。";
       openAgent(prompt);
@@ -116,16 +121,17 @@ export function WorkspaceMaterials({ review = false }: { review?: boolean }) {
     finally { setBusy(false); }
   }
 
-  async function resolve(proposalId: string, state: "accepted" | "rejected") {
-    if (!selected || dirty || busy || needsCheck) return;
+  async function resolve(proposalId: string, state: "accepted" | "rejected", changeId?: string) {
+    if (!selected || (dirty && !changeId) || busy || needsCheck) return;
     setBusy(true); setError(""); setNotice("");
     try {
       const proposal = selected.proposals.find(item => item.id === proposalId);
-      const changeIds = selectedChanges[proposalId] ?? proposal?.changes.filter(change => change.state === "pending").map(change => change.id) ?? [];
-      const value = await resolveMaterialProposal(selected.id, proposalId, { state, change_ids: changeIds, version: proposal?.review_version ?? undefined }, AbortSignal.timeout(20_000));
-      setSelected(value); setNotice(state === "accepted" ? "已接受并保存新版本。职业事实与投递授权没有改变。" : "已拒绝提议，正文未改变。");
+      const changeIds = proposal ? pendingSelection(proposal, selectedChanges[proposalId]) : [];
+      const value = await resolveMaterialProposal(selected.id, proposalId, { state, change_ids: changeId ? [changeId] : changeIds, version: proposal?.review_version ?? undefined, replacement: changeId ? rewriteDrafts[`${proposalId}:${changeId}`] : undefined }, AbortSignal.timeout(20_000));
+      setSelected(value); setSelectedChanges(previous => { const next = { ...previous }; delete next[proposalId]; return next; });
+      if (changeId) setRewriteDrafts(previous => { const next = { ...previous }; delete next[`${proposalId}:${changeId}`]; return next; });
+      setNotice(changeId ? "待审建议已改写，正文和其他决定未改变。" : state === "accepted" ? "已接受所选并保存新版本，其余建议保持待审。职业事实与投递授权没有改变。" : "已拒绝所选，正文与未选建议未改变。");
       setListAttempt(value => value + 1);
-      if (state === "accepted") setMode("正文");
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : "处理结果未确认，请重新读取核对。");
       setNeedsCheck(true);
@@ -177,7 +183,7 @@ export function WorkspaceMaterials({ review = false }: { review?: boolean }) {
           <div className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-4"><div><h2 className="text-base font-medium break-words">{selected.title}</h2><p className="mt-1 text-xs text-muted-foreground">{initialDraft ? "草稿 · 尚未接受" : `已接受版本 v${selected.current_version?.number}`}{pending.length ? ` · ${pending.length} 条待审阅` : ""}</p></div><Button onClick={() => void delegate()} disabled={busy || running || dirty} size="sm">继续打磨<ArrowUpRight className="size-3.5" /></Button></div>
           <div role="group" aria-label="材料视图" className="flex flex-wrap gap-1 border-b px-4 py-2">{["正文", "改动", "来源", "版本"].map(view => <button key={view} disabled={busy || editing} onClick={() => setMode(view)} aria-pressed={view === mode} className={cn("min-h-9 rounded-md px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring", view === mode ? "bg-muted font-medium" : "text-muted-foreground hover:bg-muted/50")}>{view}{view === "改动" && pending.length ? ` · ${pending.length}` : ""}</button>)}</div>
           {mode === "正文" && <div className="p-5 sm:p-7">{editing ? <><label htmlFor="material-body" className="mb-3 block text-xs text-muted-foreground">精确修正 · 保存前仅保留在当前页面</label><textarea id="material-body" value={draft} onChange={event => setDraft(event.target.value)} maxLength={40000} className="min-h-72 w-full rounded-md border bg-background p-4 text-[15px] leading-7 outline-none focus:ring-2 focus:ring-ring" /><div className="mt-4 flex justify-end gap-2"><Button variant="ghost" onClick={() => { if (dirty) requestConfirmation(() => setEditing(false), "取消修正会放弃未保存的输入，是否继续？"); else setEditing(false); }} disabled={busy}>取消修正</Button><Button onClick={() => void save()} disabled={!dirty || !draft.trim() || busy || needsCheck}>保存新版本</Button></div></> : <><p className="whitespace-pre-wrap break-words text-[15px] leading-7">{shownBody}</p><div className="mt-7 flex flex-wrap justify-end gap-2">{!initialDraft && <><Button size="sm" variant="ghost" onClick={async () => { try { await navigator.clipboard.writeText(selected.current_version?.body ?? ""); setNotice("已复制纯文本。"); } catch { setError("复制失败，可选择正文复制。"); } }}><Copy className="size-3.5" />复制纯文本</Button><Button size="sm" variant="ghost" disabled={busy || running || needsCheck} onClick={() => { setDraft(selected.current_version?.body ?? ""); setEditing(true); }}>精确修正</Button></>}{pending.length > 0 && <Button size="sm" variant="outline" onClick={() => setMode("改动")}>审阅修改</Button>}</div></>}</div>}
-          {mode === "改动" && <div className="divide-y">{pending.length ? pending.map(proposal => <article key={proposal.id} className="p-5 sm:p-7"><div className="flex flex-wrap items-baseline justify-between gap-2"><h3 className="text-sm font-medium">{proposal.base_number === 0 ? "Agent 创作的草稿" : `基于 v${proposal.base_number} 的修改`}</h3><span className="text-xs text-muted-foreground">{proposal.stale ? "基准已变化 · 请重新打磨" : "待你审阅"}</span></div><p className="my-3 text-sm leading-6 text-muted-foreground">{proposal.rationale || "请核对表达和事实边界。"}</p><div className="space-y-2 rounded-lg border p-3">{proposal.changes.map(change => <label key={change.id} className="flex gap-2 text-sm"><input type="checkbox" checked={(selectedChanges[proposal.id] ?? proposal.changes.filter(item => item.state === "pending").map(item => item.id)).includes(change.id)} disabled={change.state !== "pending" || busy || proposal.stale} onChange={event => setSelectedChanges(previous => ({ ...previous, [proposal.id]: event.target.checked ? [...(previous[proposal.id] ?? []), change.id] : (previous[proposal.id] ?? []).filter(id => id !== change.id) }))} /><span><del>{change.original || "∅"}</del> → <ins>{change.replacement || "∅"}</ins></span></label>)}</div><pre aria-label="材料修改 Diff" className="mt-3 max-h-96 overflow-y-auto rounded-lg bg-muted/40 p-4 text-sm leading-6 whitespace-pre-wrap break-words">{proposal.diff.map((line, index) => <span key={index} className={cn("block", line.startsWith("+") && !line.startsWith("+++") ? "bg-emerald-500/10" : line.startsWith("-") && !line.startsWith("---") ? "bg-red-500/10" : "text-muted-foreground")}>{line || " "}</span>)}</pre><details className="mt-4 text-xs"><summary className="cursor-pointer text-muted-foreground">本次来源与版本</summary><div className="mt-3"><References items={proposal.references} /></div></details><div className="mt-5 flex flex-wrap justify-end gap-2"><Button variant="ghost" size="sm" onClick={() => void delegate()} disabled={busy || running}>反馈给 Agent</Button><Button variant="outline" size="sm" onClick={() => void resolve(proposal.id, "rejected")} disabled={busy || needsCheck || !(selectedChanges[proposal.id] ?? proposal.changes.filter(item => item.state === "pending").map(item => item.id)).length}>拒绝所选</Button><Button size="sm" onClick={() => void resolve(proposal.id, "accepted")} disabled={busy || needsCheck || proposal.stale || !(selectedChanges[proposal.id] ?? proposal.changes.filter(item => item.state === "pending").map(item => item.id)).length}><Check className="size-3.5" />接受所选</Button></div></article>) : <div className="p-7"><p className="text-sm font-medium">没有待审阅修改</p><p className="mt-2 text-sm text-muted-foreground">告诉 Agent 哪里要改，它会读取当前版本再提出修改。</p></div>}</div>}
+          {mode === "改动" && <div className="divide-y">{pending.length ? pending.map(proposal => <MaterialProposalReview key={proposal.id} proposal={proposal} selection={selectedChanges[proposal.id]} rewrites={Object.fromEntries(proposal.changes.filter(change => rewriteDrafts[`${proposal.id}:${change.id}`] !== undefined).map(change => [change.id, rewriteDrafts[`${proposal.id}:${change.id}`]]))} busy={busy} running={running} needsCheck={needsCheck} onToggle={(identifier, checked) => setSelectedChanges(previous => ({ ...previous, [proposal.id]: toggleSelection(proposal, previous[proposal.id], identifier, checked) }))} onRewrite={(identifier, value) => setRewriteDrafts(previous => ({ ...previous, [`${proposal.id}:${identifier}`]: value }))} onResolve={(state, changeId) => void resolve(proposal.id, state, changeId)} onDelegate={changeId => void delegate(false, proposal.id, changeId)} />) : <div className="p-7"><p className="text-sm font-medium">没有待审阅修改</p><p className="mt-2 text-sm text-muted-foreground">告诉 Agent 哪里要改，它会读取当前版本再提出修改。</p></div>}</div>}
           {mode === "来源" && <div className="p-7"><h3 className="mb-4 text-sm font-medium">当前版本的创作依据</h3><References items={selected.current_version?.references ?? []} /><p className="mt-6 text-xs leading-5 text-muted-foreground">这里记录实际读取的对象版本，不能证明模型表达中的每一句都是已验证事实。原始文件和段落级引用尚未开放。</p></div>}
           {mode === "版本" && <div className="divide-y">{selected.versions.filter(version => version.number > 0).map(version => <details key={version.id} className="p-5"><summary className="cursor-pointer text-sm">v{version.number} · {version.source === "agent" ? "接受 Agent 提议" : "用户保存"}{version.id === selected.current_version_id ? " · 当前" : ""}</summary><p className="mt-4 whitespace-pre-wrap break-words text-sm leading-7">{version.body}</p><div className="mt-4"><References items={version.references} /></div></details>)}{selected.proposals.filter(proposal => proposal.state !== "pending").map(proposal => <details key={proposal.id} className="p-5"><summary className="cursor-pointer text-sm">{proposal.state === "accepted" ? "已接受" : "已拒绝"}的提议 · 基于 v{proposal.base_number}</summary><p className="mt-3 whitespace-pre-wrap break-words text-sm leading-7">{proposal.proposed_body}</p><p className="mt-3 text-xs text-muted-foreground">{proposal.rationale}</p></details>)}{initialDraft && !selected.proposals.some(proposal => proposal.state !== "pending") && <p className="p-7 text-sm text-muted-foreground">接受第一份草稿后，版本会从 v1 开始保留。</p>}</div>}
         </>}

@@ -166,10 +166,13 @@ class AgentContextService:
                             "body": item.proposed_body,
                             "rationale": item.rationale,
                             "status": "unconfirmed_expression",
+                            "review_version": str(item.review_version),
+                            "changes": list(item.changes),
                         }
                         for item in detail.proposals
                         if item.state == "pending"
-                        and item.base_version_id == detail.current_version.id
+                        and (item.review_version_id or item.base_version_id)
+                        == detail.current_version.id
                     ),
                     None,
                 ),
@@ -188,6 +191,9 @@ class AgentContextService:
         proposed_body: str,
         rationale: str,
         references: tuple[dict[str, str], ...] = (),
+        proposal_id: UUID | None = None,
+        change_id: str | None = None,
+        review_version: UUID | None = None,
     ) -> dict[str, object]:
         if self.materials is None:
             raise MaterialInvalid("Materials are not available")
@@ -198,6 +204,35 @@ class AgentContextService:
             and detail.material.project_id != session.project_id
         ):
             raise MaterialNotFound("Material does not belong to the current work scope")
+        if proposal_id is not None:
+            if (
+                change_id is None
+                or review_version is None
+                or base_version_id != detail.current_version.id
+            ):
+                raise MaterialInvalid("Read the current material and select one pending change")
+            reviewed = await self.materials.resolve(
+                actor,
+                material_id,
+                proposal_id,
+                state="accepted",
+                change_ids=(change_id,),
+                expected_version=review_version,
+                replacement=proposed_body,
+            )
+            return {
+                "status": "pending",
+                "proposal_id": str(proposal_id),
+                "material_id": str(material_id),
+                "review_version": str(
+                    next(
+                        item.review_version for item in reviewed.proposals if item.id == proposal_id
+                    )
+                ),
+                "message": "所选待审建议已改写，正文与其他决定未改变，仍需用户审阅。",
+            }
+        if change_id is not None or review_version is not None:
+            raise MaterialInvalid("Select the proposal for a targeted rewrite")
         proposal = await self.materials.propose(
             actor,
             material_id,
