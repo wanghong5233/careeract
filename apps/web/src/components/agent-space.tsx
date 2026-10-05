@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type FormEvent, type ReactNode } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Archive, ArrowUp, BookOpen, ChevronDown, FileText, Folder, ListTree, MoreHorizontal, PanelLeft, PanelRight, Plus, Search, Square, SquarePen, X } from "lucide-react";
+import { Archive, ArrowUp, BookOpen, ChevronDown, FileText, Folder, ListTree, MessageSquarePlus, MoreHorizontal, PanelLeft, PanelRight, Plus, Search, Square, SquarePen, X } from "lucide-react";
 import { useAui, useAuiState } from "@assistant-ui/react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -10,6 +10,7 @@ import { AccountButton } from "@/components/workspace-account";
 import { AgentComposerTools } from "@/components/agent-composer-tools";
 import { AgentProjectPicker } from "@/components/agent-project-picker";
 import { ConversationHistory } from "@/components/conversation-history";
+import { SideChatPanel, useSideChat } from "@/components/side-chat";
 import { TooltipIconButton } from "@/components/tooltip-icon-button";
 import { useWorkspaceActions } from "@/components/workspace-actions";
 import { navigationHref, workspaceSections } from "@/components/workspace-sections";
@@ -35,6 +36,9 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
   const current = state.conversations.find(item => item.id === state.selectedId)!;
   const conversations = useAgentConversations(owner);
   const history = useConversationHistory(current.id, !!current.version);
+  const mainCheckpoint = history.history?.messages.findLast(message => message.run_status === "COMPLETED")?.id ?? null;
+  const sideChat = useSideChat(owner, current.id, !!current.version, mainCheckpoint);
+  const sideOpen = !!sideChat.state.chat && !sideChat.state.hidden;
   const aui = useAui();
   const localRunning = useAuiState(runtime => runtime.thread.isRunning);
   const runtimeRunning = localRunning || !!history.activeRun;
@@ -74,7 +78,16 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
   const routeOpen = pathname !== "/workspace";
   const visibleTabs = routeOpen && !tabs.some(tab => tab.href === currentHref)
     ? [...tabs, { href: currentHref, label: tabLabel }] : tabs;
-  const panelOpen = contextOpen || (routeOpen && !current.panelHidden);
+  const panelOpen = sideOpen || contextOpen || (routeOpen && !current.panelHidden);
+
+  useEffect(() => {
+    const replace = (event: Event) => {
+      const detail = (event as CustomEvent<{ sourceId: string; messageId?: string; quote?: string }>).detail;
+      if (detail.sourceId === current.id) void sideChat.open(detail.messageId, detail.quote);
+    };
+    window.addEventListener("careeract:side-replace", replace);
+    return () => window.removeEventListener("careeract:side-replace", replace);
+  }, [current.id, sideChat]);
 
   useEffect(() => {
     if (wasRunning.current && !localRunning) void history.refresh();
@@ -155,6 +168,7 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
   }
 
   function hideContent() {
+    if (sideOpen) sideChat.store.update(previous => ({ ...previous, hidden: true }));
     setContextOpen(false);
     update({ panelHidden: true });
     requestAnimationFrame(() => input.current?.focus());
@@ -230,6 +244,7 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
       setLeaveAction(() => () => openRoute(href, true));
       return;
     }
+    sideChat.store.update(previous => ({ ...previous, hidden: true }));
     updateSpace(previous => ({ ...previous, conversations: previous.conversations.map(item => item.id === previous.selectedId ? { ...item, panelHidden: false } : item) }));
     setContextOpen(false); setMobileNavigation(false); router.push(href);
   }
@@ -442,12 +457,14 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
             <span className={styles.conversationTitle} title={current.title}>{current.title}</span>
           </div>
           <TooltipIconButton className="size-9" tooltip="查看背景与引用" aria-label="查看上下文" aria-pressed={contextOpen} onClick={() => setContextOpen(value => !value)}><ListTree /></TooltipIconButton>
+          <TooltipIconButton className="size-9" disabled={!current.version || sideChat.busy} tooltip={sideChat.state.chat ? "打开临时侧聊" : "新建临时侧聊"} aria-label="打开临时侧聊" onClick={() => void sideChat.open()}><MessageSquarePlus /></TooltipIconButton>
           <TooltipIconButton className="size-9" disabled={!panelOpen && !routeOpen && !current.tabs.length} tooltip={panelOpen ? "收起内容区" : "展开内容区"} aria-label={panelOpen ? "收起内容区" : "展开内容区"} aria-expanded={panelOpen} onClick={() => { if (panelOpen) hideContent(); else if (routeOpen) update({ panelHidden: false }); else if (current.tabs.length) openRoute(current.tabs.at(-1)!.href); }}><PanelRight /></TooltipIconButton>
         </header>
         <div className={styles.startArea}>
           {history.loading && <p role="status" className={styles.feedback}>正在读取历史…</p>}
           {history.error && <div className={styles.feedback}><p role="alert">{history.error}</p><Button variant="ghost" size="sm" onClick={history.refresh}>重新读取历史</Button></div>}
-          {(runtimeHasMessages || history.history?.messages.length || history.history?.runs?.length || localRunning || sendBusy) && <ConversationHistory key={current.id} messages={history.history?.messages ?? []} runs={history.history?.runs} liveMessages={localRunning || sendBusy || !history.history ? runtimeMessages : undefined} isRunning={localRunning || sendBusy} />}
+          {(runtimeHasMessages || history.history?.messages.length || history.history?.runs?.length || localRunning || sendBusy) && <ConversationHistory key={current.id} messages={history.history?.messages ?? []} runs={history.history?.runs} liveMessages={localRunning || sendBusy || !history.history ? runtimeMessages : undefined} isRunning={localRunning || sendBusy} onQuote={(id, quote) => void sideChat.open(id, quote)} />}
+          {sideChat.error && <p role="alert" className={styles.feedback}>{sideChat.error}</p>}
           {history.activeRun && !localRunning && <div className={styles.feedback}><p role="status">{["RUNNING", "PENDING"].includes(history.activeRun.status) ? "服务端运行尚未结束，可停止或重新读取状态。" : "运行状态需要核对，请勿重复发送。"}</p><Button variant="ghost" size="sm" onClick={history.refresh}>重新读取运行状态</Button><Button variant="ghost" size="sm" disabled={stopBusy} onClick={() => void reconcileRun()}>核对中断状态</Button><p>仅在确认没有执行进程后解除锁定；结果仍未知，不会重发。</p></div>}
           {history.history?.truncated && <p className={styles.feedback}>当前显示最近 100 条消息，更早内容仍保留。</p>}
           {!history.loading && !history.error && !history.history?.messages.length && !runtimeHasMessages && <div className={styles.welcome}><h1>{current.archived ? "已归档对话" : current.title}</h1></div>}
@@ -468,6 +485,7 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
           {current.archived && <p className={styles.feedback}>已归档。<button disabled={conversationBusy} className="underline underline-offset-4" onClick={() => void changeConversation(current.id, { archived: false })}>恢复对话</button></p>}
           </div>
       </main>
+      <SideChatPanel controller={sideChat} mainCheckpoint={sideChat.state.chat?.side_context.source_id === current.id ? mainCheckpoint : null} />
       {(routeOpen || contextOpen) && <>{panelOpen && <div role="separator" aria-label="调整内容区宽度" aria-orientation="vertical" tabIndex={0} aria-valuemin={30} aria-valuemax={65} aria-valuenow={state.panelWidth} className={styles.resizeHandle} onKeyDown={event => { if (event.key === "ArrowLeft" || event.key === "ArrowRight") { event.preventDefault(); store.update(previous => ({ ...previous, panelWidth: Math.min(65, Math.max(30, previous.panelWidth + (event.key === "ArrowLeft" ? 2 : -2))) })); } }} onPointerDown={event => event.currentTarget.setPointerCapture(event.pointerId)} onPointerMove={event => { if (!event.currentTarget.hasPointerCapture(event.pointerId)) return; const bounds = space.current?.getBoundingClientRect(); if (bounds) store.update(previous => ({ ...previous, panelWidth: Math.min(65, Math.max(30, (bounds.right - event.clientX) / bounds.width * 100)) })); }} onPointerUp={event => event.currentTarget.releasePointerCapture(event.pointerId)} />}
       <aside className={cn(styles.content, !panelOpen && styles.hiddenContent)} aria-label="内容工作区"><div className={styles.tabBar}><Button variant="ghost" size="icon" className="md:hidden shrink-0" aria-label="打开项目导航" aria-expanded={mobileNavigation} onClick={() => setMobileNavigation(true)}><PanelLeft /></Button><div role="tablist" aria-label="打开的内容" className={styles.tabList} onKeyDown={event => { if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return; const buttons = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')); const selected = buttons.indexOf(document.activeElement as HTMLButtonElement); if (selected < 0) return; event.preventDefault(); const next = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1 : (selected + (event.key === "ArrowRight" ? 1 : -1) + buttons.length) % buttons.length; buttons[next]?.focus(); buttons[next]?.click(); }}>{visibleTabs.map(tab => <div key={tab.href} className={cn(styles.tab, !contextOpen && tab.href === currentHref && styles.activeTab)}><button role="tab" tabIndex={!contextOpen && tab.href === currentHref ? 0 : -1} aria-selected={!contextOpen && tab.href === currentHref} aria-controls="space-content" id={`tab-${tab.href}`} title={tab.label} onClick={() => openRoute(tab.href)}><FileText className="size-3.5" /><span className="truncate">{tab.label}</span></button><button title={`关闭${tab.label}`} aria-label={`关闭${tab.label}标签`} onClick={() => closeTab(tab.href)}><X className="size-3" /></button></div>)}{contextOpen && <div className={cn(styles.tab, styles.activeTab)}><button role="tab" aria-selected aria-controls="space-content" id="tab-context"><ListTree className="size-3.5" />引用范围</button><button aria-label="关闭引用范围标签" onClick={() => setContextOpen(false)}><X className="size-3" /></button></div>}</div><Button variant="ghost" size="icon" title="收起并保留内容" aria-label="收起内容区并保留标签" onClick={hideContent}><PanelRight /></Button></div>
         <div id="space-content" role="tabpanel" aria-labelledby={contextOpen ? "tab-context" : `tab-${currentHref}`} className={styles.surface}>

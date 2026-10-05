@@ -43,6 +43,7 @@ const markdown = loadSource("components/markdown-text.tsx", {
   "@/lib/utils": utils,
 });
 const components = loadSource("components/conversation-messages.tsx", {
+  "@/components/message-actions": { useMessageActions: () => ({}) },
   "@/components/markdown-text": markdown, "@/components/tooltip-icon-button": tooltip,
   "@/lib/utils": utils, "./agent-space.module.css": styles,
   "@/lib/run-presentation": loadSource("lib/run-presentation.ts"),
@@ -59,7 +60,15 @@ test("duration uses saved framework metrics and never invents missing or invalid
   assert.match(html, /已取消/);
   assert.doesNotMatch(html, /已完成|本页计时/);
 });
+
+test("tool-separated replies display saved run duration once", () => {
+  const messages = ["before-tool", "after-tool"].map(id => ({ ...syntheticMessage(id, "assistant", "same-run", "COMPLETED"), run_duration_seconds: 9 }));
+  const converted = presentation.historyThreadMessages(messages);
+  assert.equal(converted[0].metadata.custom.runDurationSeconds, 9);
+  assert.equal(converted[1].metadata.custom.runDurationSeconds, undefined);
+});
 const history = loadSource("components/conversation-history.tsx", {
+  "@/components/message-actions": { MessageActionsContext: React.createContext({}) },
   "@/components/conversation-messages": components, "@/lib/conversation-presentation": presentation,
 });
 
@@ -139,6 +148,17 @@ test("a runtime without hydrated old messages keeps saved history while the next
   assert.match(html, /合成旧片段/);
   assert.match(html, /运行中断 · 结果未知/);
   assert.match(html, /正在生成/);
+});
+
+test("framework-restored IDs do not duplicate a saved prefix and identical new prompts remain", () => {
+  const saved = [syntheticMessage("saved-user", "user", "old", "COMPLETED", "合成重复输入"), syntheticMessage("saved-reply", "assistant", "old", "COMPLETED", "合成旧答复")];
+  const restored = presentation.historyThreadMessages(saved).map((message, index) => ({ ...message, id: `framework-${index}` }));
+  const live = [...restored, { id: "new-user", role: "user", content: "合成重复输入" }, { id: "new-reply", role: "assistant", content: "合成新回复", status: { type: "running" } }];
+  const html = renderToStaticMarkup(React.createElement(history.ConversationHistory, { messages: saved, liveMessages: live, isRunning: true }));
+  assert.equal((html.match(/合成旧答复/g) ?? []).length, 1);
+  assert.equal((html.match(/data-prompt-id=/g) ?? []).length, 2);
+  const unhydrated = renderToStaticMarkup(React.createElement(history.ConversationHistory, { messages: saved, liveMessages: live.slice(2), isRunning: true }));
+  assert.equal((unhydrated.match(/data-prompt-id=/g) ?? []).length, 2);
 });
 
 test("live display distinguishes waiting, streaming and incomplete output without inventing completion", () => {

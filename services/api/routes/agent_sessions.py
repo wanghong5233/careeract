@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from services.api.application.context import ActorContext
 from services.api.application.ports.agent_runtime import AgentExecutionPort
 from services.api.application.ports.work_sessions import AgentHistoryReader
+from services.api.application.side_chats import SideChatService
 from services.api.application.work_sessions import AgentWorkSessionService
 from services.api.domain.work_session import AgentWorkSession
 
@@ -32,6 +33,8 @@ class WorkSessionResponse(BaseModel):
     title_origin: str
     title_generation_attempted: bool
     model_id: str | None
+    temporary_until: str | None = None
+    side_context: dict[str, str] | None = None
 
 
 class GenerateTitleBody(BaseModel):
@@ -93,6 +96,15 @@ class CancelRunBody(BaseModel):
     run_id: str = Field(min_length=1, max_length=128)
 
 
+class CreateSideChatBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: UUID
+    tab_id: UUID
+    source_id: str = Field(min_length=1, max_length=128)
+    message_id: str | None = Field(default=None, max_length=128)
+    quote: str = Field(default="", max_length=4000)
+
+
 class ContextBasisResponse(BaseModel):
     run_id: str | None
     references: list[dict[str, str]]
@@ -116,6 +128,32 @@ def get_actor(request: Request) -> ActorContext:
     request_id = str(uuid4())
     request.state.request_id = request_id
     return ActorContext(user_id=request.state.user_id, request_id=request_id)
+
+
+@router.post("/side-chats", response_model=WorkSessionResponse, status_code=201)
+async def create_side_chat(
+    body: CreateSideChatBody, request: Request, actor: Annotated[ActorContext, Depends(get_actor)]
+) -> WorkSessionResponse:
+    service = cast(SideChatService, request.app.state.side_chat_service)
+    return serialize_session(
+        await service.create(
+            actor,
+            identifier=body.id,
+            tab_id=body.tab_id,
+            source_id=body.source_id,
+            message_id=body.message_id,
+            quote=body.quote,
+        )
+    )
+
+
+@router.post("/side-chats/{session_id}/close")
+async def close_side_chat(
+    session_id: str, request: Request, actor: Annotated[ActorContext, Depends(get_actor)]
+) -> dict[str, str]:
+    service = cast(SideChatService, request.app.state.side_chat_service)
+    await service.close(actor, session_id)
+    return {"status": "discarded"}
 
 
 @router.post("/conversations/{session_id}/cancel")
@@ -152,6 +190,8 @@ def serialize_session(session: AgentWorkSession) -> WorkSessionResponse:
         title_origin=session.title_origin,
         title_generation_attempted=session.title_generation_attempted,
         model_id=session.model_id,
+        temporary_until=session.temporary_until.isoformat() if session.temporary_until else None,
+        side_context=session.side_context,
     )
 
 

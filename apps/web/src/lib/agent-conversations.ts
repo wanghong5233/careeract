@@ -4,6 +4,7 @@ export type AgentConversation = { session_id: string; title: string; project_id:
 export type RuntimeModel = { id: string; provider: string; model: string; label: string };
 export type RuntimeModels = { id: string; connection: string; models: RuntimeModel[] };
 export type ConversationPage = { items: AgentConversation[]; next_cursor: string | null };
+export type SideChat = AgentConversation & { temporary_until: string; side_context: { source_id: string; source_title: string; source_scope: string; tab_id: string; quote: string; message_id: string } };
 export type HistoryMessage = { id: string; role: "user" | "assistant"; content: string; created_at: number; run_id: string | null; run_status: string; run_duration_seconds?: number | null };
 export type ConversationHistory = { session: AgentConversation; messages: HistoryMessage[]; truncated: boolean; runs?: Array<{ run_id: string; status: string }> };
 
@@ -41,4 +42,12 @@ export function generateConversationTitle(session: Pick<AgentConversation, "sess
 
 export function readRuntimeModel(signal?: AbortSignal): Promise<RuntimeModels> {
   return request("/api/agent/model", { signal });
+}
+
+export function createSideChat(id: string, tabId: string, sourceId: string, messageId?: string, quote = ""): Promise<SideChat> {
+  return request("/api/agent/side-chats", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, tab_id: tabId, source_id: sourceId, message_id: messageId, quote }), signal: AbortSignal.timeout(20_000) });
+}
+
+export function closeSideChat(id: string): Promise<{ status: string }> {
+  return request(`/api/agent/side-chats/${encodeURIComponent(id)}/close`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}", signal: AbortSignal.timeout(20_000) });
 }

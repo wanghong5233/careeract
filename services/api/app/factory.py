@@ -1,5 +1,7 @@
+import asyncio
+import logging
 from collections.abc import AsyncIterator, Callable
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from typing import Protocol
 
 from fastapi import FastAPI
@@ -11,6 +13,7 @@ from services.api.application.materials import MaterialService
 from services.api.application.memories import MemoryService
 from services.api.application.profiles import ProfileService
 from services.api.application.projects import ProjectService
+from services.api.application.side_chats import SideChatService
 from services.api.application.work_sessions import AgentWorkSessionService
 from services.api.domain.material import (
     MaterialConflict,
@@ -58,6 +61,7 @@ from services.api.infrastructure.memories import PostgresMemoryRepository
 from services.api.infrastructure.privacy import PrivacyBoundaryMiddleware
 from services.api.infrastructure.profiles import PostgresProfileRepository
 from services.api.infrastructure.projects import PostgresProjectRepository
+from services.api.infrastructure.side_chats import AgnoSideChatRuntime
 from services.api.infrastructure.work_sessions import PostgresAgentWorkSessionRepository
 from services.api.routes.agent_sessions import router as agent_session_router
 from services.api.routes.errors import (
@@ -96,10 +100,28 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
+        cleanup_task: asyncio.Task[None] | None = None
+
+        async def cleanup_side_chats() -> None:
+            while True:
+                try:
+                    await application.state.side_chat_service.runtime.cleanup()
+                except (WorkSessionUnavailable, WorkSessionHistoryUnavailable):
+                    logging.getLogger(__name__).warning(
+                        "Temporary chat cleanup unavailable; retained for later reconciliation"
+                    )
+                await asyncio.sleep(3600)
+
         try:
             async with runtime_lifespan(application):
+                if getattr(application.state, "side_chat_service", None) is not None:
+                    cleanup_task = asyncio.create_task(cleanup_side_chats())
                 yield
         finally:
+            if cleanup_task:
+                cleanup_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await cleanup_task
             await engine.dispose()
 
     app.router.lifespan_context = lifespan
@@ -121,6 +143,10 @@ def create_app(
         (agent for agent in agents if getattr(agent, "id", None) == "careeract-agent"), None
     )
     if career_agent is not None:
+        side_runtime = AgnoSideChatRuntime(
+            engine, app.state.agent_work_session_service, career_agent
+        )
+        app.state.side_chat_service = SideChatService(side_runtime)
         app.state.agent_history_reader = AgnoAgentHistoryReader(career_agent)
         session_repository.history = app.state.agent_history_reader
         project_repository.history = app.state.agent_history_reader
@@ -137,12 +163,13 @@ def create_app(
                 app.state.agent_work_session_service,
                 app.state.material_service,
             )
-            set_tools(build_agent_tools(context_service))
+            set_tools(build_agent_tools(context_service, side_runtime))
             career_agent.cache_callables = False
             career_agent.instructions = build_career_instructions(context_service)
             career_agent.pre_hooks = [
                 initialize_run_manifest,
                 build_scope_hook(app.state.agent_work_session_service),
+                side_runtime.scope_hook(),
             ]
             career_agent.post_hooks = [persist_run_manifest]
     app.state.settings = settings

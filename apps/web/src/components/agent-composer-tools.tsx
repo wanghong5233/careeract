@@ -16,11 +16,12 @@ export function AgentComposerTools({ readOnly, modelDisabled = false, modelId, o
   const [modelOpen, setModelOpen] = useState(false);
   const [model, setModel] = useState<RuntimeModels | null>(null);
   const [modelError, setModelError] = useState("");
+  const [modelRevision, setModelRevision] = useState(0);
   useEffect(() => {
     const controller = new AbortController();
-    void readRuntimeModel(AbortSignal.any([controller.signal, AbortSignal.timeout(20_000)])).then(value => { if (!controller.signal.aborted) setModel(value); }).catch((failure: unknown) => { if (!controller.signal.aborted) setModelError(failure instanceof Error ? failure.message : "模型信息读取失败。"); });
+    void readRuntimeModel(AbortSignal.any([controller.signal, AbortSignal.timeout(20_000)])).then(value => { if (!controller.signal.aborted) { setModel(value); setModelError(""); } }).catch((failure: unknown) => { if (!controller.signal.aborted) setModelError(failure instanceof Error ? failure.message : "模型信息读取失败。"); });
     return () => controller.abort();
-  }, []);
+  }, [modelRevision]);
   const selectedId = modelId ?? model?.id;
   const selected = model?.models.find(item => item.id === selectedId);
 
@@ -46,6 +47,7 @@ export function AgentComposerTools({ readOnly, modelDisabled = false, modelId, o
           <Menu.Popup className={styles.composerMenu}>
             <p className="px-3 py-2 text-xs text-muted-foreground">下一次运行使用 · 当前职业上下文保留</p>
             {modelError && <p role="alert" className="px-3 py-2 text-sm">{modelError}</p>}
+            {modelError && <Menu.Item className={styles.composerMenuItem} onClick={() => setModelRevision(value => value + 1)}>重新读取模型</Menu.Item>}
             <Menu.RadioGroup value={selectedId ?? ""} onValueChange={id => { if (id !== selectedId) onModelChange(id); setModelOpen(false); }}>
               {Array.from(new Set(model?.models.map(item => item.provider))).map(provider => <Menu.Group key={provider}>
                 <Menu.GroupLabel className="px-3 pt-2 text-xs text-muted-foreground">{provider}</Menu.GroupLabel>

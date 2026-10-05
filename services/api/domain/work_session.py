@@ -25,6 +25,8 @@ class AgentWorkSession:
     title_origin: str = "manual"
     title_generation_attempted: bool = False
     model_id: str | None = None
+    temporary_until: datetime | None = None
+    side_context: dict[str, str] | None = None
 
     def __post_init__(self) -> None:
         validate_session_id(self.session_id)

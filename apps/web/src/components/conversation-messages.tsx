@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { ArrowDown, Check, Copy } from "lucide-react";
+import { ArrowDown, Check, Copy, MessageSquarePlus } from "lucide-react";
 import { ActionBarPrimitive, MessagePrimitive, ThreadPrimitive, useAuiState } from "@assistant-ui/react";
 import { MarkdownText } from "@/components/markdown-text";
 import { TooltipIconButton } from "@/components/tooltip-icon-button";
 import { cn } from "@/lib/utils";
 import { formatRunDuration } from "@/lib/run-presentation";
+import { useMessageActions } from "@/components/message-actions";
 import styles from "./agent-space.module.css";
 
 export function ConversationMessages({ children }: { children?: ReactNode }) {
@@ -75,6 +76,10 @@ function PromptNavigation({ viewport }: { viewport: React.RefObject<HTMLDivEleme
 }
 
 export function ConversationAssistantMessage() {
+  const actions = useMessageActions();
+  const id = useAuiState(state => state.message.id);
+  const root = useRef<HTMLDivElement>(null);
+  const original = useAuiState(state => state.message.content.filter(part => part.type === "text").map(part => part.text).join("\n"));
   const duration = useAuiState(state => state.message.metadata.custom.runDurationSeconds);
   const startedAt = useAuiState(state => state.thread.messages.findLast(message => message.role === "user")?.createdAt?.getTime());
   const status = useAuiState(state => state.message.status);
@@ -85,11 +90,16 @@ export function ConversationAssistantMessage() {
   const incomplete = status?.type === "incomplete";
   const reason = incomplete ? status.reason : undefined;
   const label = runStatus === "INTERRUPTED" ? "运行中断 · 结果未知" : reason === "cancelled" ? "已取消" : reason === "error" ? "运行失败" : runStatus === "PAUSED" ? "等待继续" : ["RUNNING", "PENDING"].includes(String(runStatus)) ? "运行尚未结束" : "运行状态未确认";
-  return <MessagePrimitive.Root className={styles.assistantMessage}>
+  return <MessagePrimitive.Root ref={root} className={styles.assistantMessage}>
     <RunElapsed duration={duration} startedAt={startedAt} running={running} />
     {hasText && <MessagePrimitive.Content components={{ Text: MarkdownText }} />}
     {running && <p role="status" className={cn(styles.messageStatus, styles.messageStatusRunning)}><span aria-hidden="true" className={styles.streamingIndicator} />{hasText ? "正在生成…" : "正在等待回复…"}</p>}
     {incomplete && <p role="status" className={cn(styles.messageStatus, reason === "error" ? styles.messageStatusError : styles.messageStatusIncomplete)}>{label} · {noSavedReply ? "本次运行没有已保存的回复" : "请核对已显示内容"}</p>}
+    {actions.quote && hasText && runStatus === "COMPLETED" && <div className={styles.assistantActions}><TooltipIconButton tooltip="在侧聊中追问 · 可先选中文字" aria-label="在侧聊中追问" onClick={() => {
+      const selection = window.getSelection();
+      const quote = selection?.anchorNode && root.current?.contains(selection.anchorNode) && selection.focusNode && root.current.contains(selection.focusNode) ? selection.toString() : "";
+      actions.quote?.(id, quote || original.slice(0, 4000));
+    }}><MessageSquarePlus /></TooltipIconButton></div>}
   </MessagePrimitive.Root>;
 }
 

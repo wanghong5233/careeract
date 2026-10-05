@@ -42,6 +42,15 @@ text messages from the Agent runtime. Framework history, tool messages, and anot
 user's session are not exposed; session history is treated as career data and responses
 are not cached.
 
+`POST /api/v1/agent/side-chats` creates one temporary, user-owned side session from
+an exact saved assistant message and optional quote; the source project and context
+version are fixed at creation. `POST /api/v1/agent/side-chats/{session_id}/close`
+discards a side session only after its Agno Run is terminal, removes the temporary
+runtime session and product directory row, and is idempotent for an already missing
+row. Side sessions are excluded from the regular conversation directory, survive
+refresh, and are eligible for bounded server cleanup after 24 hours. They do not
+create a second message store or a persistent conversation-management surface.
+
 `/api/v1/memories` stores user-owned notes and rule candidates. A new item is always
 `candidate`; only an explicit `POST /api/v1/memories/{id}/confirm` with the current
 version can make a rule effective. `POST /api/v1/memories/{id}/retire` removes an item

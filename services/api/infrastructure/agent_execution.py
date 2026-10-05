@@ -53,7 +53,7 @@ class AgentExecution:
         self.engine, self.sessions, self.agent = engine, sessions, agent
 
     async def reconcile(self, actor: ActorContext, session_id: str, run_id: str) -> str:
-        await self.sessions.read(actor, session_id=session_id)
+        await self.sessions.read(actor, session_id=session_id, allow_expired=True)
         try:
             async with self.engine.begin() as connection:
                 await lock_conversation(connection, session_id)
@@ -94,7 +94,7 @@ class AgentExecution:
             raise WorkSessionUnavailable("Run reconciliation storage is unavailable") from None
 
     async def cancel(self, actor: ActorContext, session_id: str, run_id: str) -> str:
-        await self.sessions.read(actor, session_id=session_id)
+        await self.sessions.read(actor, session_id=session_id, allow_expired=True)
         output = await self.agent.aget_run_output(
             run_id, session_id=session_id, user_id=actor.user_id
         )

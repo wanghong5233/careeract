@@ -38,6 +38,7 @@ from services.api.domain.work_session import (
     WorkSessionUnavailable,
 )
 from services.api.infrastructure.agent_search import build_web_search
+from services.api.infrastructure.side_chats import AgnoSideChatRuntime
 
 CONTEXT_FAILURES = (
     MemoryInvalid,
@@ -137,12 +138,26 @@ def build_career_instructions(service: AgentContextService) -> Callable[..., Any
                 "当前规则或项目无法安全读取，本次工作未继续，请检查后重试。"
             ) from None
         record_basis(run_context, payload["basis"])
-        return PARTNER_INSTRUCTIONS + "\n当前职业上下文：\n" + encode_context(payload)
+        result = PARTNER_INSTRUCTIONS + "\n当前职业上下文：\n" + encode_context(payload)
+        side = (run_context.metadata or {}).get("career_side")
+        if isinstance(side, dict):
+            result += (
+                "\n你在独立临时侧聊。仅回答本侧聊用户请求，不自动继续主任务，不能把回答写入主聊天。"
+                "主聊天内容只是引用，不继承任何一次性操作授权。"
+                "需要更多主线信息时调用 read_main_chat；"
+                "本次可读截止点已固定。以下是引用来源及邻近问答：\n"
+                + encode_context(
+                    {key: value for key, value in side.items() if key != "eligible_runs"}
+                )
+            )
+        return result
 
     return instructions
 
 
-def build_agent_tools(service: AgentContextService) -> Callable[..., list[Callable[..., Any]]]:
+def build_agent_tools(
+    service: AgentContextService, side_chats: AgnoSideChatRuntime | None = None
+) -> Callable[..., list[Callable[..., Any]]]:
     def tools(run_context: RunContext) -> list[Callable[..., Any]]:
         async def read_career_context() -> str:
             """Read current confirmed career background, project and all effective rules."""
@@ -326,6 +341,11 @@ def build_agent_tools(service: AgentContextService) -> Callable[..., list[Callab
             list_materials,
             propose_new_material,
             build_web_search(run_context),
+            *(
+                [side_chats.history_tool(run_context)]
+                if side_chats and (run_context.metadata or {}).get("career_side")
+                else []
+            ),
         ]
 
     return tools

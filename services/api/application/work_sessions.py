@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from uuid import UUID
 
 from services.api.application.context import ActorContext
@@ -105,7 +106,11 @@ class AgentWorkSessionService:
         expected_version: UUID,
         model_id: str | None = None,
     ) -> AgentWorkSession:
-        await self.read(actor, session_id=session_id)
+        current = await self.read(actor, session_id=session_id)
+        if current.temporary_until is not None and (
+            change_project or archived is not None or title is not None
+        ):
+            raise WorkSessionInvalid("Temporary chat scope and lifecycle use side chat endpoints")
         if (
             (change_project or archived is not None or model_id is not None)
             and self.history is not None
@@ -141,7 +146,7 @@ class AgentWorkSessionService:
             validate_session_id(session_id)
         except ValueError:
             raise WorkSessionInvalid("Invalid agent session id") from None
-        if session_id.startswith("conversation:"):
+        if session_id.startswith(("conversation:", "side:")):
             raise WorkSessionInvalid("Use versioned conversation endpoints")
         session = await self.repository.associate(
             actor, session_id=session_id, project_id=project_id
@@ -150,7 +155,9 @@ class AgentWorkSessionService:
             raise WorkSessionNotFound("Agent work session does not exist")
         return session
 
-    async def read(self, actor: ActorContext, *, session_id: str) -> AgentWorkSession:
+    async def read(
+        self, actor: ActorContext, *, session_id: str, allow_expired: bool = False
+    ) -> AgentWorkSession:
         try:
             validate_session_id(session_id)
         except ValueError:
@@ -158,4 +165,10 @@ class AgentWorkSessionService:
         session = await self.repository.get(actor, session_id)
         if session is None:
             raise WorkSessionNotFound("Agent work session does not exist")
+        if (
+            not allow_expired
+            and session.temporary_until is not None
+            and session.temporary_until <= datetime.now(UTC)
+        ):
+            raise WorkSessionNotFound("Temporary chat has expired")
         return session

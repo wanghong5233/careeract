@@ -34,6 +34,8 @@ def work_session_from_row(row: RowMapping) -> AgentWorkSession:
         title_origin=row["title_origin"],
         title_generation_attempted=row["title_generation_attempted"],
         model_id=row["model_id"],
+        temporary_until=row["temporary_until"],
+        side_context=row["side_context"],
     )
 
 
@@ -132,7 +134,7 @@ class PostgresAgentWorkSessionRepository:
     ) -> WorkSessionPage:
         boundary = decode_cursor(cursor) if cursor else None
         parameters: dict[str, object] = {"user_id": actor.user_id, "limit": limit + 1}
-        condition = ""
+        condition = " AND temporary_until IS NULL"
         if boundary:
             parameters.update({"created_at": boundary[0], "session_id": boundary[1]})
             condition += " AND (created_at, session_id) < (:created_at, :session_id)"
