@@ -84,7 +84,7 @@ export function ConversationAssistantMessage() {
   const running = status?.type === "running";
   const incomplete = status?.type === "incomplete";
   const reason = incomplete ? status.reason : undefined;
-  const label = reason === "cancelled" ? "已取消" : reason === "error" ? "运行失败" : runStatus === "PAUSED" ? "等待继续" : ["RUNNING", "PENDING"].includes(String(runStatus)) ? "运行尚未结束" : "运行状态未确认";
+  const label = runStatus === "INTERRUPTED" ? "运行中断 · 结果未知" : reason === "cancelled" ? "已取消" : reason === "error" ? "运行失败" : runStatus === "PAUSED" ? "等待继续" : ["RUNNING", "PENDING"].includes(String(runStatus)) ? "运行尚未结束" : "运行状态未确认";
   return <MessagePrimitive.Root className={styles.assistantMessage}>
     <RunElapsed duration={duration} startedAt={startedAt} running={running} />
     {hasText && <MessagePrimitive.Content components={{ Text: MarkdownText }} />}

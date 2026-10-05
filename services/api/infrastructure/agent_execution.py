@@ -3,6 +3,8 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
+from agno.run.cancel import aget_active_runs
+from agno.run.status_persist import RunPersistOutcome
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.exc import TimeoutError as PoolTimeoutError
@@ -49,6 +51,47 @@ async def unlock_runtime(connection: AsyncConnection, name: str, value: str) -> 
 class AgentExecution:
     def __init__(self, engine: AsyncEngine, sessions: AgentWorkSessionService, agent: Any) -> None:
         self.engine, self.sessions, self.agent = engine, sessions, agent
+
+    async def reconcile(self, actor: ActorContext, session_id: str, run_id: str) -> str:
+        await self.sessions.read(actor, session_id=session_id)
+        try:
+            async with self.engine.begin() as connection:
+                await lock_conversation(connection, session_id)
+                if run_id in await aget_active_runs():
+                    raise WorkSessionConflict("Run is still active; stop or wait first")
+                output = await self.agent.aget_run_output(
+                    run_id, session_id=session_id, user_id=actor.user_id
+                )
+                if (
+                    output is None
+                    or output.session_id != session_id
+                    or output.user_id != actor.user_id
+                ):
+                    raise WorkSessionNotFound("Run does not exist")
+                status = getattr(output.status, "value", output.status) or "UNKNOWN"
+                if status in {"COMPLETED", "CANCELLED", "ERROR", "REGENERATED"}:
+                    return (
+                        "INTERRUPTED"
+                        if (output.metadata or {}).get("career_interrupted")
+                        else str(status)
+                    )
+                if status == "PAUSED":
+                    raise WorkSessionConflict("Paused run requires its own continuation")
+                result = await asyncio.to_thread(
+                    self.agent.db.update_run_in_session,
+                    session_id=session_id,
+                    run_id=run_id,
+                    user_id=actor.user_id,
+                    fields={
+                        "status": "ERROR",
+                        "metadata": {**(output.metadata or {}), "career_interrupted": True},
+                    },
+                )
+                if result != RunPersistOutcome.UPDATED:
+                    raise WorkSessionConflict("Run changed; read its current state")
+                return "INTERRUPTED"
+        except (DBAPIError, PoolTimeoutError):
+            raise WorkSessionUnavailable("Run reconciliation storage is unavailable") from None
 
     async def cancel(self, actor: ActorContext, session_id: str, run_id: str) -> str:
         await self.sessions.read(actor, session_id=session_id)

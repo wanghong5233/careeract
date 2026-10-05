@@ -11,7 +11,17 @@ export function ConversationHistory({ messages, runs, liveMessages, isRunning = 
   const displayed = useMemo(() => {
     if (!liveMessages) return converted;
     const saved = new Map(converted.map(message => [message.id, message]));
-    return liveMessages.map(message => ({ ...message, metadata: { ...message.metadata, custom: { ...saved.get(message.id)?.metadata?.custom, ...message.metadata?.custom } } }));
+    const combined = new Map(converted.map(message => [message.id, message]));
+    liveMessages.forEach(message => {
+      const persisted = saved.get(message.id);
+      const terminal = ["COMPLETED", "CANCELLED", "ERROR", "REGENERATED", "INTERRUPTED"].includes(String(persisted?.metadata?.custom?.runStatus));
+      combined.set(message.id, {
+        ...message,
+        ...(terminal ? { status: persisted?.status } : {}),
+        metadata: { ...message.metadata, custom: terminal ? { ...message.metadata?.custom, ...persisted?.metadata?.custom } : { ...persisted?.metadata?.custom, ...message.metadata?.custom } },
+      });
+    });
+    return Array.from(combined.values());
   }, [converted, liveMessages]);
   const runtime = useExternalStoreRuntime<ThreadMessageLike>({ messages: displayed, convertMessage: message => message, isRunning, onNew: async () => { throw new Error("消息视图只读。"); } });
   return <AssistantRuntimeProvider runtime={runtime}><ConversationMessages /></AssistantRuntimeProvider>;

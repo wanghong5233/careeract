@@ -111,6 +111,36 @@ test("saved timing stays visible while a subsequent reply streams", () => {
   assert.match(html, /正在生成/);
 });
 
+test("reconciled terminal history cannot revert to cached active state when the next reply streams", () => {
+  for (const [status, label] of [["INTERRUPTED", "运行中断 · 结果未知"], ["CANCELLED", "已取消"], ["ERROR", "运行失败"]]) {
+    const saved = syntheticMessage("prior", "assistant", "prior-run", status);
+    const stale = presentation.historyThreadMessages([{ ...saved, run_status: "RUNNING" }]);
+    const live = [...stale, { id: "new", role: "assistant", content: "合成流", status: { type: "running" } }];
+    const html = renderToStaticMarkup(React.createElement(history.ConversationHistory, { messages: [saved], liveMessages: live, isRunning: true }));
+    assert.match(html, new RegExp(label));
+    assert.match(html, /正在生成/);
+    assert.doesNotMatch(html, /运行尚未结束/);
+  }
+});
+
+test("saved pending history cannot replace a genuinely streaming reply", () => {
+  const saved = syntheticMessage("reply", "assistant", "run", "PENDING");
+  const live = [{ id: "reply", role: "assistant", content: "合成流", status: { type: "running" } }];
+  const html = renderToStaticMarkup(React.createElement(history.ConversationHistory, { messages: [saved], liveMessages: live, isRunning: true }));
+  assert.match(html, /正在生成/);
+  assert.doesNotMatch(html, /运行尚未结束/);
+});
+
+test("a runtime without hydrated old messages keeps saved history while the next turn streams", () => {
+  const saved = [syntheticMessage("old-user", "user", "old", "INTERRUPTED", "合成旧输入"), syntheticMessage("old-reply", "assistant", "old", "INTERRUPTED", "合成旧片段")];
+  const live = [{ id: "new-user", role: "user", content: "合成新输入" }, { id: "new-reply", role: "assistant", content: "合成新片段", status: { type: "running" } }];
+  const html = renderToStaticMarkup(React.createElement(history.ConversationHistory, { messages: saved, liveMessages: live, isRunning: true }));
+  assert.ok(html.indexOf("合成旧输入") < html.indexOf("合成新输入"));
+  assert.match(html, /合成旧片段/);
+  assert.match(html, /运行中断 · 结果未知/);
+  assert.match(html, /正在生成/);
+});
+
 test("live display distinguishes waiting, streaming and incomplete output without inventing completion", () => {
   const waiting = renderToStaticMarkup(React.createElement(history.ConversationHistory, { messages: [], liveMessages: [{ id: "user", role: "user", content: "合成请求" }], isRunning: true }));
   assert.match(waiting, /正在等待回复/);

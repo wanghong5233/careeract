@@ -15,14 +15,14 @@ export function historyMessageStatus(runStatus: string) {
 }
 
 export function activeConversationRun(runs: Array<{ run_id: string; status: string }> | undefined) {
-  return runs?.find(run => !["COMPLETED", "CANCELLED", "ERROR", "REGENERATED"].includes(run.status)) ?? null;
+  return runs?.find(run => !["COMPLETED", "CANCELLED", "ERROR", "REGENERATED", "INTERRUPTED"].includes(run.status)) ?? null;
 }
 
 export function unansweredRunStatuses(runs: Array<{ run_id: string; status: string }> | undefined, messages: Array<{ role: string; run_id: string | null }>) {
   const answered = new Set(messages.filter(message => message.role === "assistant").map(message => message.run_id));
   return (runs ?? []).filter(run => !answered.has(run.run_id) && !["COMPLETED", "REGENERATED", "RUNNING", "PENDING"].includes(run.status)).map(run => ({
     run_id: run.run_id,
-    label: run.status === "CANCELLED" ? "已取消" : run.status === "ERROR" ? "运行失败" : run.status === "PAUSED" ? "等待继续" : "运行状态未确认",
+    label: run.status === "INTERRUPTED" ? "运行中断 · 结果未知" : run.status === "CANCELLED" ? "已取消" : run.status === "ERROR" ? "运行失败" : run.status === "PAUSED" ? "等待继续" : "运行状态未确认",
   }));
 }
 
@@ -42,6 +42,13 @@ export async function cancelConversationRun(threadId: string, runId = activeRuns
     signal: AbortSignal.timeout(20_000),
   });
   if (!response.ok) throw new Error("停止结果未确认，请重新读取运行状态。");
+}
+
+export async function reconcileConversationRun(threadId: string, runId: string): Promise<void> {
+  const response = await fetch(`/api/agent/conversations/${encodeURIComponent(threadId)}/reconcile`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ run_id: runId }), signal: AbortSignal.timeout(20_000),
+  });
+  if (!response.ok) throw new Error(response.status === 409 ? "运行仍活动或状态已改变，不能解除；请停止或重新读取。" : "运行核对失败，状态未改变，请稍后重试。");
 }
 
 export function queueConversationSend(owner: string, id: string, text: string): void {

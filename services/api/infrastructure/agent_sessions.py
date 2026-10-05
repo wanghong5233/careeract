@@ -9,6 +9,12 @@ from services.api.domain.privacy import ensure_career_content
 from services.api.domain.work_session import WorkSessionHistoryUnavailable
 
 
+def presentation_status(run: Any) -> str:
+    if (getattr(run, "metadata", None) or {}).get("career_interrupted"):
+        return "INTERRUPTED"
+    return str(getattr(run.status, "value", run.status) or "UNKNOWN")
+
+
 class AgnoAgentHistoryReader:
     def __init__(self, agent: Any) -> None:
         self.agent = agent
@@ -22,7 +28,7 @@ class AgnoAgentHistoryReader:
             [
                 {
                     "run_id": run.run_id,
-                    "status": str(getattr(run.status, "value", run.status) or "UNKNOWN"),
+                    "status": presentation_status(run),
                 }
                 for run in (session.runs or [])
                 if getattr(run, "parent_run_id", None) is None
@@ -98,11 +104,7 @@ class AgnoAgentHistoryReader:
         message_runs = {
             message.id: (
                 run.run_id,
-                str(
-                    getattr(
-                        getattr(run, "status", None), "value", getattr(run, "status", "UNKNOWN")
-                    )
-                ),
+                presentation_status(run),
             )
             for run in session.runs or []
             if getattr(run, "parent_run_id", None) is None

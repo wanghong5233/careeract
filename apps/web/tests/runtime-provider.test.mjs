@@ -28,6 +28,8 @@ test("runtime history restores the active server run for stop", () => {
     { run_id: "running", status: "RUNNING" },
   ]), { run_id: "running", status: "RUNNING" });
   assert.equal(runtimeProvider.activeConversationRun([{ run_id: "cancelled", status: "CANCELLED" }]), null);
+  assert.equal(runtimeProvider.activeConversationRun([{ run_id: "orphan", status: "INTERRUPTED" }]), null);
+  assert.deepEqual(runtimeProvider.historyMessageStatus("INTERRUPTED"), { type: "incomplete", reason: "other" });
 });
 
 test("cancelled and failed runs without an assistant message remain visible after recovery", () => {

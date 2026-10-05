@@ -19,7 +19,7 @@ import { useProjectList } from "@/hooks/use-project-list";
 import { useAgentConversations } from "@/hooks/use-agent-conversations";
 import { useConversationHistory } from "@/hooks/use-conversation-history";
 import { cn } from "@/lib/utils";
-import { cancelConversationRun, queueConversationSend, takeConversationSend } from "@/lib/agent-runtime";
+import { cancelConversationRun, reconcileConversationRun, queueConversationSend, takeConversationSend } from "@/lib/agent-runtime";
 import { generateConversationTitle } from "@/lib/agent-conversations";
 import styles from "./agent-space.module.css";
 
@@ -269,6 +269,20 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
     finally { setBusy(false); }
   }
 
+  async function reconcileRun() {
+    if (!history.activeRun || stopBusy) return;
+    setStopBusy(true);
+    try {
+      await reconcileConversationRun(current.id, history.activeRun.run_id);
+      setFeedback("已核对保存状态。中断结果仍未知，未重发原任务；请检查已保存内容后决定下一步。");
+    } catch (error) {
+      setFeedback(error instanceof Error ? error.message : "运行核对失败，状态未改变。");
+    } finally {
+      setStopBusy(false);
+      void history.refresh();
+    }
+  }
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (current.archived) return;
@@ -434,7 +448,7 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
           {history.loading && <p role="status" className={styles.feedback}>正在读取历史…</p>}
           {history.error && <div className={styles.feedback}><p role="alert">{history.error}</p><Button variant="ghost" size="sm" onClick={history.refresh}>重新读取历史</Button></div>}
           {(runtimeHasMessages || history.history?.messages.length || history.history?.runs?.length || localRunning || sendBusy) && <ConversationHistory key={current.id} messages={history.history?.messages ?? []} runs={history.history?.runs} liveMessages={localRunning || sendBusy || !history.history ? runtimeMessages : undefined} isRunning={localRunning || sendBusy} />}
-          {history.activeRun && !localRunning && <div className={styles.feedback}><p role="status">{["RUNNING", "PENDING"].includes(history.activeRun.status) ? "服务端运行尚未结束，可停止或重新读取状态。" : "运行状态需要核对，请勿重复发送。"}</p><Button variant="ghost" size="sm" onClick={history.refresh}>重新读取运行状态</Button></div>}
+          {history.activeRun && !localRunning && <div className={styles.feedback}><p role="status">{["RUNNING", "PENDING"].includes(history.activeRun.status) ? "服务端运行尚未结束，可停止或重新读取状态。" : "运行状态需要核对，请勿重复发送。"}</p><Button variant="ghost" size="sm" onClick={history.refresh}>重新读取运行状态</Button><Button variant="ghost" size="sm" disabled={stopBusy} onClick={() => void reconcileRun()}>核对中断状态</Button><p>仅在确认没有执行进程后解除锁定；结果仍未知，不会重发。</p></div>}
           {history.history?.truncated && <p className={styles.feedback}>当前显示最近 100 条消息，更早内容仍保留。</p>}
           {!history.loading && !history.error && !history.history?.messages.length && !runtimeHasMessages && <div className={styles.welcome}><h1>{current.archived ? "已归档对话" : current.title}</h1></div>}
         </div>

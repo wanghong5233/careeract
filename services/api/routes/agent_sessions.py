@@ -129,6 +129,17 @@ async def cancel_run(
     return {"status": await execution.cancel(actor, session_id, body.run_id)}
 
 
+@router.post("/conversations/{session_id}/reconcile")
+async def reconcile_run(
+    session_id: str,
+    body: CancelRunBody,
+    request: Request,
+    actor: Annotated[ActorContext, Depends(get_actor)],
+) -> dict[str, str]:
+    execution = cast(AgentExecutionPort, request.app.state.agent_execution)
+    return {"status": await execution.reconcile(actor, session_id, body.run_id)}
+
+
 def serialize_session(session: AgentWorkSession) -> WorkSessionResponse:
     return WorkSessionResponse(
         session_id=session.session_id,

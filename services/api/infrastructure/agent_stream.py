@@ -43,6 +43,7 @@ class CareerAGUI:
         self.prefix = ""
         self.tags = ["AGUI"]
         self._base: Any = AGUI(agent=agent)
+        self._streams: set[asyncio.Task[None]] = set()
 
     def get_router(self, use_async: bool = True, **kwargs: object) -> APIRouter:
         router = cast(APIRouter, self._base.get_router())
@@ -70,7 +71,10 @@ class CareerAGUI:
                     await admission.__aexit__(None, None, None)
             encoder = EventEncoder()
 
-            async def events() -> AsyncIterator[str]:
+            queue: asyncio.Queue[str | None] = asyncio.Queue()
+            disconnected = False
+
+            async def produce() -> None:
                 try:
                     async with aclosing(
                         run_entity(
@@ -96,9 +100,34 @@ class CareerAGUI:
                                         type=EventType.RUN_ERROR,
                                         message="本次运行未完成，请重新读取已保存的状态。",
                                     )
-                            yield encoder.encode(event)
+                            if not disconnected:
+                                queue.put_nowait(encoder.encode(event))
                 finally:
-                    await asyncio.shield(admission.__aexit__(None, None, None))
+                    try:
+                        await asyncio.shield(admission.__aexit__(None, None, None))
+                    finally:
+                        queue.put_nowait(None)
+
+            task = asyncio.create_task(produce())
+            self._streams.add(task)
+
+            def completed(finished: asyncio.Task[None]) -> None:
+                self._streams.discard(finished)
+                if not finished.cancelled():
+                    finished.exception()
+
+            task.add_done_callback(completed)
+
+            async def events() -> AsyncIterator[str]:
+                nonlocal disconnected
+                try:
+                    while (block := await queue.get()) is not None:
+                        yield block
+                    await task
+                finally:
+                    disconnected = True
+                    while not queue.empty():
+                        queue.get_nowait()
 
             return StreamingResponse(
                 events(), media_type="text/event-stream", headers={"Cache-Control": "no-store"}
