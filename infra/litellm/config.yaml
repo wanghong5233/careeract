@@ -1,10 +1,16 @@
 model_list:
   - model_name: careeract-default
+    model_info:
+      provider: DashScope
+      display_name: Qwen Plus
     litellm_params:
       model: openai/qwen-plus
       api_base: os.environ/DASHSCOPE_BASE_URL
       api_key: os.environ/DASHSCOPE_API_KEY
   - model_name: careeract-openai
+    model_info:
+      provider: OpenAI
+      display_name: GPT-4o mini
     litellm_params:
       model: openai/gpt-4o-mini
       api_base: os.environ/OPENAI_BASE_URL

@@ -54,14 +54,27 @@ class CareerAGUI:
             execution: AgentExecution = request.app.state.agent_execution
             actor = ActorContext(request.state.user_id, run_input.run_id)
             admission = execution.accept(actor, run_input.thread_id, run_input.run_id)
-            await admission.__aenter__()
+            session = await admission.__aenter__()
+            runtime_agent = self.agent
+            prepared = False
+            try:
+                if session is not None:
+                    catalog = request.app.state.agent_models
+                    model = await catalog.require(
+                        session.model_id or request.app.state.settings.litellm_model
+                    )
+                    runtime_agent = catalog.agent_for(self.agent, model)
+                prepared = True
+            finally:
+                if not prepared:
+                    await admission.__aexit__(None, None, None)
             encoder = EventEncoder()
 
             async def events() -> AsyncIterator[str]:
                 try:
                     async with aclosing(
                         run_entity(
-                            BackgroundTextAgent(self.agent), run_input, user_id=actor.user_id
+                            BackgroundTextAgent(runtime_agent), run_input, user_id=actor.user_id
                         )
                     ) as stream:
                         async for event in stream:

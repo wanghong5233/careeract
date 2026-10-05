@@ -1,6 +1,8 @@
 import { isRestrictedResponse, restrictedContentMessage } from "@/lib/privacy";
 
-export type AgentConversation = { session_id: string; title: string; project_id: string | null; archived: boolean; version: string; created_at: string; updated_at: string; title_origin?: "default" | "manual" | "generated"; title_generation_attempted?: boolean };
+export type AgentConversation = { session_id: string; title: string; project_id: string | null; archived: boolean; version: string; created_at: string; updated_at: string; title_origin?: "default" | "manual" | "generated"; title_generation_attempted?: boolean; model_id?: string | null };
+export type RuntimeModel = { id: string; provider: string; model: string; label: string };
+export type RuntimeModels = { id: string; connection: string; models: RuntimeModel[] };
 export type ConversationPage = { items: AgentConversation[]; next_cursor: string | null };
 export type HistoryMessage = { id: string; role: "user" | "assistant"; content: string; created_at: number; run_id: string | null; run_status: string; run_duration_seconds?: number | null };
 export type ConversationHistory = { session: AgentConversation; messages: HistoryMessage[]; truncated: boolean; runs?: Array<{ run_id: string; status: string }> };
@@ -25,7 +27,7 @@ export function createConversation(id: string, title: string, projectId: string 
   return request("/api/agent/conversations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, title, project_id: projectId }), signal: AbortSignal.timeout(20_000) });
 }
 
-export function saveConversation(id: string, version: string, changes: { title?: string; project_id?: string | null; archived?: boolean }): Promise<AgentConversation> {
+export function saveConversation(id: string, version: string, changes: { title?: string; project_id?: string | null; archived?: boolean; model_id?: string }): Promise<AgentConversation> {
   return request(`/api/agent/conversations/${encodeURIComponent(id)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ version, ...changes }), signal: AbortSignal.timeout(20_000) });
 }
 
@@ -33,10 +35,10 @@ export function readConversationHistory(id: string, signal?: AbortSignal): Promi
   return request(`/api/agent/history?${new URLSearchParams({ session_id: id, limit: "100" })}`, { signal });
 }
 
-export function generateConversationTitle(session: AgentConversation, signal?: AbortSignal): Promise<AgentConversation> {
-  return request(`/api/agent/conversations/${encodeURIComponent(session.session_id)}/title`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ version: session.version }), signal });
+export function generateConversationTitle(session: Pick<AgentConversation, "session_id" | "version">, signal?: AbortSignal, retry = false): Promise<AgentConversation> {
+  return request(`/api/agent/conversations/${encodeURIComponent(session.session_id)}/title`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ version: session.version, retry }), signal });
 }
 
-export function readRuntimeModel(signal?: AbortSignal): Promise<{ id: string; connection: string }> {
+export function readRuntimeModel(signal?: AbortSignal): Promise<RuntimeModels> {
   return request("/api/agent/model", { signal });
 }

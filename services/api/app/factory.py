@@ -40,6 +40,7 @@ from services.api.domain.work_session import (
     WorkSessionUnavailable,
 )
 from services.api.infrastructure.agent_execution import AgentExecution
+from services.api.infrastructure.agent_models import LiteLLMModelCatalog
 from services.api.infrastructure.agent_runtime import build_agent_os
 from services.api.infrastructure.agent_sessions import AgnoAgentHistoryReader
 from services.api.infrastructure.agent_tools import (
@@ -111,6 +112,9 @@ def create_app(
     )
     session_repository = PostgresAgentWorkSessionRepository(engine)
     app.state.agent_work_session_service = AgentWorkSessionService(session_repository)
+    app.state.agent_models = LiteLLMModelCatalog(settings)
+    app.state.agent_work_session_service.models = app.state.agent_models
+    app.state.agent_work_session_service.default_model = settings.litellm_model
     app.state.agent_work_session_service.title_generator = AgnoConversationTitleGenerator(settings)
     agents = getattr(agent_os, "agents", None) or []
     career_agent = next(

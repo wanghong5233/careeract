@@ -31,11 +31,13 @@ class WorkSessionResponse(BaseModel):
     version: UUID
     title_origin: str
     title_generation_attempted: bool
+    model_id: str | None
 
 
 class GenerateTitleBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     version: UUID
+    retry: bool = False
 
 
 class WorkSessionPageResponse(BaseModel):
@@ -58,6 +60,7 @@ class UpdateConversationBody(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=120)
     archived: bool | None = None
     project_id: UUID | None = None
+    model_id: str | None = Field(default=None, min_length=1, max_length=128)
 
     @model_validator(mode="after")
     def require_changes(self) -> "UpdateConversationBody":
@@ -137,6 +140,7 @@ def serialize_session(session: AgentWorkSession) -> WorkSessionResponse:
         version=session.version,
         title_origin=session.title_origin,
         title_generation_attempted=session.title_generation_attempted,
+        model_id=session.model_id,
     )
 
 
@@ -166,7 +170,9 @@ async def generate_conversation_title(
 ) -> WorkSessionResponse:
     response.headers["Cache-Control"] = "no-store"
     return serialize_session(
-        await service.generate_title(actor, session_id=session_id, expected_version=body.version)
+        await service.generate_title(
+            actor, session_id=session_id, expected_version=body.version, retry=body.retry
+        )
     )
 
 
@@ -175,9 +181,15 @@ async def read_runtime_model(
     request: Request,
     response: Response,
     actor: Annotated[ActorContext, Depends(get_actor)],
-) -> dict[str, str]:
+    service: Annotated[AgentWorkSessionService, Depends(get_service)],
+) -> dict[str, object]:
     response.headers["Cache-Control"] = "no-store"
-    return {"id": request.app.state.settings.litellm_model, "connection": "LiteLLM"}
+    models = await service.runtime_models()
+    return {
+        "id": request.app.state.settings.litellm_model,
+        "connection": "LiteLLM",
+        "models": [asdict(model) for model in models],
+    }
 
 
 @router.post("/conversations", response_model=WorkSessionResponse, status_code=201)
@@ -224,6 +236,7 @@ async def update_conversation(
             project_id=body.project_id,
             change_project="project_id" in body.model_fields_set,
             expected_version=body.version,
+            model_id=body.model_id,
         )
     )
 

@@ -42,7 +42,7 @@ class AgentHistoryReader(Protocol):
 
 class AgentWorkSessionRepository(Protocol):
     async def claim_title(
-        self, actor: ActorContext, *, session_id: str, expected_version: UUID
+        self, actor: ActorContext, *, session_id: str, expected_version: UUID, retry: bool = False
     ) -> AgentWorkSession | None: ...
 
     async def save_generated_title(
@@ -54,7 +54,13 @@ class AgentWorkSessionRepository(Protocol):
     ) -> WorkSessionPage: ...
 
     async def create(
-        self, actor: ActorContext, *, session_id: str, title: str, project_id: UUID | None
+        self,
+        actor: ActorContext,
+        *,
+        session_id: str,
+        title: str,
+        project_id: UUID | None,
+        model_id: str | None = None,
     ) -> AgentWorkSession: ...
 
     async def update(
@@ -67,6 +73,7 @@ class AgentWorkSessionRepository(Protocol):
         project_id: UUID | None,
         change_project: bool,
         expected_version: UUID,
+        model_id: str | None = None,
     ) -> AgentWorkSession | None: ...
 
     async def get(self, actor: ActorContext, session_id: str) -> AgentWorkSession | None: ...

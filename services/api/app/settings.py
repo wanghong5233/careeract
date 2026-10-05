@@ -1,4 +1,5 @@
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import AnyHttpUrl, PositiveFloat, PostgresDsn, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -33,6 +34,7 @@ class Settings(DatabaseSettings):
     litellm_base_url: AnyHttpUrl = AnyHttpUrl("http://localhost:4000")
     litellm_api_key: SecretStr
     litellm_model: str = "careeract-default"
+    litellm_config_path: Path = Path(__file__).resolve().parents[3] / "infra/litellm/config.yaml"
     synthetic_materials_enabled: bool = False
 
     @field_validator("litellm_api_key")

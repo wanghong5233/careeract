@@ -1,6 +1,7 @@
 from uuid import UUID
 
 from services.api.application.context import ActorContext
+from services.api.application.ports.agent_models import AgentModelCatalog, RuntimeModel
 from services.api.application.ports.work_sessions import (
     AgentHistoryReader,
     AgentWorkSessionRepository,
@@ -23,14 +24,21 @@ class AgentWorkSessionService:
         self.repository = repository
         self.history: AgentHistoryReader | None = None
         self.title_generator: ConversationTitleGenerator | None = None
+        self.models: AgentModelCatalog | None = None
+        self.default_model: str | None = None
+
+    async def runtime_models(self) -> tuple[RuntimeModel, ...]:
+        if self.models is None:
+            raise WorkSessionUnavailable("Model selection is unavailable")
+        return await self.models.list()
 
     async def generate_title(
-        self, actor: ActorContext, *, session_id: str, expected_version: UUID
+        self, actor: ActorContext, *, session_id: str, expected_version: UUID, retry: bool = False
     ) -> AgentWorkSession:
         session = await self.read(actor, session_id=session_id)
         if session.version != expected_version:
             raise WorkSessionConflict("Conversation changed; reload before naming")
-        if session.title_origin != "default" or session.title_generation_attempted:
+        if session.title_origin != "default" or (session.title_generation_attempted and not retry):
             return session
         if self.history is None or self.title_generator is None:
             raise WorkSessionUnavailable("Conversation naming is unavailable")
@@ -46,7 +54,7 @@ class AgentWorkSessionService:
         if prompt is None:
             return session
         claimed = await self.repository.claim_title(
-            actor, session_id=session_id, expected_version=expected_version
+            actor, session_id=session_id, expected_version=expected_version, retry=retry
         )
         if claimed is None:
             raise WorkSessionConflict("Conversation changed; reload before naming")
@@ -82,6 +90,7 @@ class AgentWorkSessionService:
             session_id=f"conversation:{conversation_id}",
             title=self.validate_title(title),
             project_id=project_id,
+            model_id=self.default_model,
         )
 
     async def update(
@@ -94,15 +103,20 @@ class AgentWorkSessionService:
         project_id: UUID | None,
         change_project: bool,
         expected_version: UUID,
+        model_id: str | None = None,
     ) -> AgentWorkSession:
         await self.read(actor, session_id=session_id)
         if (
-            (change_project or archived is not None)
+            (change_project or archived is not None or model_id is not None)
             and self.history is not None
             and await self.history.has_active_run(session_id=session_id, user_id=actor.user_id)
         ):
             raise WorkSessionConflict("Wait for the active run to end")
-        if title is None and archived is None and not change_project:
+        if model_id is not None:
+            if self.models is None:
+                raise WorkSessionUnavailable("Model selection is unavailable")
+            await self.models.require(model_id)
+        if title is None and archived is None and not change_project and model_id is None:
             raise WorkSessionInvalid("No changes provided")
         if title is not None:
             title = self.validate_title(title)
@@ -114,6 +128,7 @@ class AgentWorkSessionService:
             project_id=project_id,
             change_project=change_project,
             expected_version=expected_version,
+            model_id=model_id,
         )
         if saved is None:
             raise WorkSessionConflict("Conversation changed; reload before saving")

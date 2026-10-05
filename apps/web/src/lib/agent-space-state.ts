@@ -1,7 +1,7 @@
 export type SpaceTab = { href: string; label: string };
 import type { AgentConversation } from "@/lib/agent-conversations";
 
-export type SpaceConversation = { id: string; projectId: string | null; title: string; draft: string; archived: boolean; tabs: SpaceTab[]; activeHref: string; panelHidden: boolean; version?: string; createId?: string };
+export type SpaceConversation = { id: string; projectId: string | null; title: string; draft: string; archived: boolean; tabs: SpaceTab[]; activeHref: string; panelHidden: boolean; version?: string; createId?: string; modelId?: string | null; titleOrigin?: string; titleGenerationAttempted?: boolean };
 export type SpaceState = { conversations: SpaceConversation[]; selectedId: string; navigation: boolean; panelWidth: number };
 export function newSpaceConversation(id: string, projectId: string | null = null): SpaceConversation {
   return { id, projectId, title: "新对话", draft: "", archived: false, tabs: [], activeHref: "/workspace", panelHidden: false };
@@ -24,6 +24,7 @@ export function mergeSpaceConversations(state: SpaceState, conversations: AgentC
     ...newSpaceConversation(item.session_id), ...local.get(item.session_id),
     id: item.session_id, title: item.title, projectId: item.project_id,
     archived: item.archived, version: item.version,
+    modelId: item.model_id, titleOrigin: item.title_origin, titleGenerationAttempted: item.title_generation_attempted,
   }));
   return { ...state, conversations: [...merged, ...state.conversations.filter(item => !remoteIds.has(item.id))] };
 }

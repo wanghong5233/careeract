@@ -10,6 +10,7 @@ COPY vendor ./vendor
 RUN uv sync --frozen --no-dev --package careeract-api
 
 COPY services ./services
+COPY infra/litellm/config.yaml ./infra/litellm/config.yaml
 
 RUN useradd --create-home --uid 10001 careeract
 

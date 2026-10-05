@@ -2,26 +2,27 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { Menu } from "@base-ui/react/menu";
-import { Popover } from "@base-ui/react/popover";
-import { ChevronDown, FileText, ImagePlus, Keyboard, Plus } from "lucide-react";
+import { Check, ChevronDown, FileText, ImagePlus, Keyboard, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { TooltipIconButton } from "@/components/tooltip-icon-button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useWorkspaceActions } from "@/components/workspace-actions";
-import { readRuntimeModel } from "@/lib/agent-conversations";
+import { readRuntimeModel, type RuntimeModels } from "@/lib/agent-conversations";
 import styles from "./agent-space.module.css";
 
-export function AgentComposerTools({ readOnly, children }: { readOnly: boolean; children: ReactNode }) {
+export function AgentComposerTools({ readOnly, modelDisabled = false, modelId, onModelChange, children }: { readOnly: boolean; modelDisabled?: boolean; modelId?: string | null; onModelChange: (id: string) => void; children: ReactNode }) {
   const { openContent } = useWorkspaceActions();
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
-  const [model, setModel] = useState<{ id: string; connection: string } | null>(null);
+  const [model, setModel] = useState<RuntimeModels | null>(null);
   const [modelError, setModelError] = useState("");
   useEffect(() => {
     const controller = new AbortController();
     void readRuntimeModel(AbortSignal.any([controller.signal, AbortSignal.timeout(20_000)])).then(value => { if (!controller.signal.aborted) setModel(value); }).catch((failure: unknown) => { if (!controller.signal.aborted) setModelError(failure instanceof Error ? failure.message : "模型信息读取失败。"); });
     return () => controller.abort();
   }, []);
+  const selectedId = modelId ?? model?.id;
+  const selected = model?.models.find(item => item.id === selectedId);
 
   return <div className={styles.composerTools}>
     <Menu.Root>
@@ -38,18 +39,25 @@ export function AgentComposerTools({ readOnly, children }: { readOnly: boolean; 
       </Menu.Portal>
     </Menu.Root>
     <div className={styles.composerTools}>
-    <Popover.Root open={modelOpen} onOpenChange={setModelOpen}>
-      <Popover.Trigger render={<Button type="button" variant="ghost" size="sm" disabled={readOnly} aria-label="选择模型" title={model ? `当前运行模型：${model.id}` : "查看模型连接状态"} className={styles.modelSelector} />}><span className="max-w-40 truncate">{model?.id ?? (modelError ? "模型读取失败" : "读取模型…")}</span><ChevronDown className="size-3" /></Popover.Trigger>
-      <Popover.Portal>
-        <Popover.Positioner side="top" align="end" sideOffset={8} className="z-50">
-          <Popover.Popup className={styles.modelPopover}>
-            <Popover.Title className="text-sm font-medium">{model?.id ?? "模型连接"}</Popover.Title>
-            <Popover.Description className="mt-2 text-sm leading-6 text-muted-foreground">{model ? `当前使用 ${model.connection} 的运行标识 ${model.id}。模型切换尚未接入。` : modelError || "正在读取服务端实际运行配置。"}</Popover.Description>
-            <Button type="button" variant="outline" size="sm" className="mt-4" onClick={() => { setModelOpen(false); openContent("/workspace/settings"); }}>设置与连接</Button>
-          </Popover.Popup>
-        </Popover.Positioner>
-      </Popover.Portal>
-    </Popover.Root>
+    <Menu.Root open={modelOpen} onOpenChange={setModelOpen}>
+      <Menu.Trigger render={<Button type="button" variant="ghost" size="sm" disabled={readOnly || modelDisabled} aria-label="选择模型" title={modelDisabled ? "运行或保存期间暂不可切换" : selected ? `${selected.provider} · ${selected.model}` : "读取实际模型配置"} className={styles.modelSelector} />}><span className="max-w-40 truncate">{selected?.label ?? (modelError ? "模型读取失败" : model ? "模型配置不可用" : "读取模型…")}</span><ChevronDown className="size-3" /></Menu.Trigger>
+      <Menu.Portal>
+        <Menu.Positioner side="top" align="end" sideOffset={8} className="z-50">
+          <Menu.Popup className={styles.composerMenu}>
+            <p className="px-3 py-2 text-xs text-muted-foreground">下一次运行使用 · 当前职业上下文保留</p>
+            {modelError && <p role="alert" className="px-3 py-2 text-sm">{modelError}</p>}
+            <Menu.RadioGroup value={selectedId ?? ""} onValueChange={id => { if (id !== selectedId) onModelChange(id); setModelOpen(false); }}>
+              {Array.from(new Set(model?.models.map(item => item.provider))).map(provider => <Menu.Group key={provider}>
+                <Menu.GroupLabel className="px-3 pt-2 text-xs text-muted-foreground">{provider}</Menu.GroupLabel>
+                {model?.models.filter(item => item.provider === provider).map(item => <Menu.RadioItem key={item.id} value={item.id} className={styles.composerMenuItem} title={item.model}>
+                  <span className="flex-1">{item.label}</span><Menu.RadioItemIndicator><Check className="size-4" /></Menu.RadioItemIndicator>
+                </Menu.RadioItem>)}
+              </Menu.Group>)}
+            </Menu.RadioGroup>
+          </Menu.Popup>
+        </Menu.Positioner>
+      </Menu.Portal>
+    </Menu.Root>
     {children}
     </div>
     <Dialog open={shortcutsOpen} onOpenChange={setShortcutsOpen}>

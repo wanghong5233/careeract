@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from services.api.app.factory import create_app
 from services.api.application.context import ActorContext
+from services.api.application.ports.agent_models import RuntimeModel
 from services.api.application.ports.work_sessions import AgentHistoryMessage
 from services.api.application.work_sessions import AgentWorkSessionService
 from services.api.domain.work_session import AgentWorkSession, WorkSessionUnavailable
@@ -126,7 +127,15 @@ async def test_title_api_ownership_single_attempt_manual_race_and_model_metadata
             return FastAPI()
 
     app = create_app(settings, lambda _settings: Runtime())
+    app.state.agent_models = AsyncMock()
+    app.state.agent_models.list.return_value = (
+        RuntimeModel(settings.litellm_model, "Synthetic", "synthetic", "Synthetic"),
+    )
+    app.state.agent_models.require.return_value = RuntimeModel(
+        "synthetic-alternate", "Synthetic", "alternate", "Alternate"
+    )
     service = app.state.agent_work_session_service
+    service.models = app.state.agent_models
     service.history = AsyncMock()
     service.history.read.return_value = (
         AgentHistoryMessage("prompt", "user", "合成面试准备", 1, "run", "COMPLETED"),
@@ -193,6 +202,14 @@ async def test_title_api_ownership_single_attempt_manual_race_and_model_metadata
             assert (await client.get("/api/v1/agent/model", headers=owner)).json() == {
                 "id": settings.litellm_model,
                 "connection": "LiteLLM",
+                "models": [
+                    {
+                        "id": settings.litellm_model,
+                        "provider": "Synthetic",
+                        "model": "synthetic",
+                        "label": "Synthetic",
+                    }
+                ],
             }
             assert (await client.get("/api/v1/agent/model")).status_code == 401
             second = (
@@ -216,6 +233,64 @@ async def test_title_api_ownership_single_attempt_manual_race_and_model_metadata
             )
             assert failed_again.status_code == 200
             assert service.title_generator.generate.await_count == 2
+            service.title_generator.generate.side_effect = None
+            service.title_generator.generate.return_value = "失败后重新生成的合成名称"
+            retry = await client.post(
+                f"/api/v1/agent/conversations/{second['session_id']}/title",
+                headers=owner,
+                json={"version": failed_again.json()["version"], "retry": True},
+            )
+            assert retry.status_code == 200 and retry.json()["title_origin"] == "generated"
+            assert service.title_generator.generate.await_count == 3
+            model_path = f"/api/v1/agent/conversations/{second['session_id']}"
+            initial_scope = (
+                await service.read(
+                    ActorContext("title-owner", "synthetic"), session_id=second["session_id"]
+                )
+            ).context_version
+            assert second["model_id"] == settings.litellm_model
+            assert (
+                await client.patch(
+                    model_path,
+                    headers=other,
+                    json={"version": retry.json()["version"], "model_id": "synthetic-alternate"},
+                )
+            ).status_code == 404
+            service.history.has_active_run.return_value = False
+            responses = await asyncio.gather(
+                *[
+                    client.patch(
+                        model_path,
+                        headers=owner,
+                        json={
+                            "version": retry.json()["version"],
+                            "model_id": "synthetic-alternate",
+                        },
+                    )
+                    for _ in range(2)
+                ]
+            )
+            assert sorted(response.status_code for response in responses) == [200, 409]
+            selected = next(
+                response.json() for response in responses if response.status_code == 200
+            )
+            assert selected["model_id"] == "synthetic-alternate"
+            assert (
+                await service.read(
+                    ActorContext("title-owner", "synthetic"), session_id=second["session_id"]
+                )
+            ).context_version == initial_scope
+            assert (await client.get(model_path, headers=owner)).json()["model_id"] == selected[
+                "model_id"
+            ]
+            service.history.has_active_run.return_value = True
+            assert (
+                await client.patch(
+                    model_path,
+                    headers=owner,
+                    json={"version": selected["version"], "model_id": settings.litellm_model},
+                )
+            ).status_code == 409
     finally:
         release.set()
         await engine.dispose()

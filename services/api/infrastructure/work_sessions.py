@@ -33,6 +33,7 @@ def work_session_from_row(row: RowMapping) -> AgentWorkSession:
         context_version=row["context_version"],
         title_origin=row["title_origin"],
         title_generation_attempted=row["title_generation_attempted"],
+        model_id=row["model_id"],
     )
 
 
@@ -68,14 +69,14 @@ class PostgresAgentWorkSessionRepository:
         self.history: AgentHistoryReader | None = None
 
     async def claim_title(
-        self, actor: ActorContext, *, session_id: str, expected_version: UUID
+        self, actor: ActorContext, *, session_id: str, expected_version: UUID, retry: bool = False
     ) -> AgentWorkSession | None:
         return await self._title_write(
             actor,
             session_id,
             expected_version,
             "title_generation_attempted=true",
-            "title_origin='default' AND NOT title_generation_attempted",
+            "title_origin='default'" + ("" if retry else " AND NOT title_generation_attempted"),
         )
 
     async def save_generated_title(
@@ -160,7 +161,13 @@ class PostgresAgentWorkSessionRepository:
             raise WorkSessionUnavailable("Conversation directory is unavailable") from None
 
     async def create(
-        self, actor: ActorContext, *, session_id: str, title: str, project_id: UUID | None
+        self,
+        actor: ActorContext,
+        *,
+        session_id: str,
+        title: str,
+        project_id: UUID | None,
+        model_id: str | None = None,
     ) -> AgentWorkSession:
         try:
             async with self.engine.begin() as connection:
@@ -180,15 +187,16 @@ class PostgresAgentWorkSessionRepository:
                     "title": title,
                     "project_id": project_id,
                     "title_origin": "default" if title == "新对话" else "manual",
+                    "model_id": model_id,
                 }
                 row = (
                     (
                         await connection.execute(
                             text(
                                 "INSERT INTO career.agent_work_sessions "
-                                "(session_id, user_id, title, project_id, title_origin) "
+                                "(session_id, user_id, title, project_id, title_origin, model_id) "
                                 "VALUES (:session_id, :user_id, :title, :project_id, "
-                                ":title_origin) "
+                                ":title_origin, :model_id) "
                                 "ON CONFLICT (session_id) DO NOTHING RETURNING *"
                             ),
                             parameters,
@@ -231,10 +239,11 @@ class PostgresAgentWorkSessionRepository:
         project_id: UUID | None,
         change_project: bool,
         expected_version: UUID,
+        model_id: str | None = None,
     ) -> AgentWorkSession | None:
         try:
             async with self.engine.begin() as connection:
-                if change_project or archived is not None:
+                if change_project or archived is not None or model_id is not None:
                     from services.api.infrastructure.agent_execution import lock_conversation
 
                     await lock_conversation(connection, session_id)
@@ -261,6 +270,7 @@ class PostgresAgentWorkSessionRepository:
                                 "title_origin=CASE WHEN CAST(:title AS TEXT) IS NOT NULL "
                                 "THEN 'manual' ELSE title_origin END, "
                                 "archived=COALESCE(:archived, archived), "
+                                "model_id=COALESCE(:model_id, model_id), "
                                 "project_id=CASE WHEN :change_project THEN :project_id "
                                 "ELSE project_id END, "
                                 "context_version=CASE WHEN :change_project "
@@ -275,6 +285,7 @@ class PostgresAgentWorkSessionRepository:
                                 "user_id": actor.user_id,
                                 "title": title,
                                 "archived": archived,
+                                "model_id": model_id,
                                 "project_id": project_id,
                                 "change_project": change_project,
                                 "version": uuid4(),

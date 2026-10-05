@@ -49,6 +49,34 @@ function spaceFixture() {
 
 const remote = (id, version = "v1") => ({ session_id: id, title: "合成对话", project_id: null, archived: false, version });
 
+test("model selection is accepted only after a successful versioned save and preserves drafts", async () => {
+  const space = spaceFixture();
+  const store = space.getSpaceStore("model-owner");
+  store.snapshot();
+  store.update(state => ({ ...state, selectedId: "one", conversations: [{ ...space.newSpaceConversation("one", null), version: "v1", modelId: "default", draft: "未发送合成输入" }] }));
+  let write;
+  const view = hooksFixture("hooks/use-agent-conversations.ts", {
+    "@/lib/agent-space-state": space,
+    "@/lib/agent-conversations": {
+      readConversations: async () => ({ items: [], next_cursor: null }),
+      saveConversation: (id, version, changes) => new Promise((resolve, reject) => { write = { id, version, changes, resolve, reject }; }),
+    },
+  }, { window: new EventTarget() });
+  const render = () => view.render("useAgentConversations", "model-owner");
+  const saving = render().persist("one", { model_id: "alternate" });
+  assert.equal(store.snapshot().conversations[0].modelId, "default");
+  assert.deepEqual(write.changes, { model_id: "alternate" });
+  write.reject(new Error("version conflict"));
+  await assert.rejects(saving, /version conflict/);
+  assert.equal(store.snapshot().conversations[0].modelId, "default");
+  const success = render().persist("one", { model_id: "alternate" });
+  write.resolve({ ...remote("one", "v2"), model_id: "alternate" });
+  await success;
+  assert.equal(store.snapshot().conversations[0].modelId, "alternate");
+  assert.equal(store.snapshot().conversations[0].draft, "未发送合成输入");
+  view.unmount();
+});
+
 test("server conversation metadata replaces local metadata while drafts and per-tab views survive", () => {
   const { newSpaceConversation, mergeSpaceConversations } = spaceFixture();
   const local = { ...newSpaceConversation("one", "old"), draft: "未发送", title: "旧名称", tabs: [{ href: "/workspace/background", label: "背景" }], activeHref: "/workspace/background", panelHidden: true };

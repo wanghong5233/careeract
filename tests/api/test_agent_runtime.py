@@ -163,3 +163,63 @@ async def test_cancel_stored_terminal_status_does_not_recancel() -> None:
         == "CANCELLED"
     )
     agent.acancel_run.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_stream_uses_admitted_model_and_releases_failed_preparation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import services.api.infrastructure.agent_stream as stream_module
+    from services.api.domain.work_session import WorkSessionInvalid
+
+    released: list[bool] = []
+
+    @asynccontextmanager
+    async def accept(*_: object) -> AsyncIterator[Any]:
+        try:
+            yield SimpleNamespace(model_id="selected-model")
+        finally:
+            released.append(True)
+
+    captured: list[Any] = []
+
+    async def events(agent: Any, *_: object, **__: object) -> AsyncIterator[Any]:
+        captured.append(agent.agent)
+        yield RunFinishedEvent(
+            type=EventType.RUN_FINISHED, thread_id="conversation:synthetic", run_id="run"
+        )
+
+    original, selected = AsyncMock(), AsyncMock()
+    original.aget_run_output.return_value = SimpleNamespace(status="COMPLETED")
+    catalog = AsyncMock()
+    catalog.agent_for = lambda agent, model: selected
+    app = FastAPI()
+    app.state.agent_execution = SimpleNamespace(accept=accept)
+    app.state.agent_models = catalog
+    app.state.settings = SimpleNamespace(litellm_model="default")
+
+    @app.middleware("http")
+    async def actor(request: Request, call_next: Any) -> Any:
+        request.state.user_id = "synthetic-owner"
+        return await call_next(request)
+
+    app.include_router(CareerAGUI(original).get_router())
+    monkeypatch.setattr(stream_module, "run_entity", events)
+    payload = {
+        "threadId": "conversation:synthetic",
+        "runId": "run",
+        "messages": [],
+        "tools": [],
+        "context": [],
+        "forwardedProps": {},
+    }
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        assert (await client.post("/agui", json=payload)).status_code == 200
+        assert captured == [selected] and released == [True]
+        catalog.require.assert_awaited_once_with("selected-model")
+        catalog.require.side_effect = WorkSessionInvalid("unsupported")
+        with pytest.raises(WorkSessionInvalid):
+            await client.post("/agui", json=payload)
+        assert released == [True, True] and captured == [selected]

@@ -20,6 +20,7 @@ import { useAgentConversations } from "@/hooks/use-agent-conversations";
 import { useConversationHistory } from "@/hooks/use-conversation-history";
 import { cn } from "@/lib/utils";
 import { cancelConversationRun, queueConversationSend, takeConversationSend } from "@/lib/agent-runtime";
+import { generateConversationTitle } from "@/lib/agent-conversations";
 import styles from "./agent-space.module.css";
 
 export function AgentHome({ owner, children }: { owner: string; children?: ReactNode }) {
@@ -187,11 +188,22 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
     finally { setConversationBusy(false); }
   }
 
-  async function changeConversation(id: string, changes: { project_id?: string | null; archived?: boolean }) {
+  async function changeConversation(id: string, changes: { project_id?: string | null; archived?: boolean; model_id?: string }) {
     if (conversationBusy || sendBusy) return;
     setConversationBusy(true); setFeedback("");
     try { await conversations.persist(id, changes); }
     catch (error) { setFeedback(error instanceof Error ? error.message : "未能保存对话，请重新读取核对。"); }
+    finally { setConversationBusy(false); }
+  }
+
+  async function retryTitle(item: SpaceConversation) {
+    if (conversationBusy || !item.version) return;
+    setConversationBusy(true); setFeedback("");
+    try {
+      const saved = await generateConversationTitle({ session_id: item.id, version: item.version }, AbortSignal.timeout(20_000), true);
+      conversations.accept(saved);
+      setFeedback(saved.title_origin === "default" ? "名称生成未成功，对话不受影响；可稍后再次生成。" : "对话名称已更新。");
+    } catch (error) { setFeedback(error instanceof Error ? error.message : "未能生成名称，对话不受影响。"); }
     finally { setConversationBusy(false); }
   }
 
@@ -433,7 +445,7 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
             <form onSubmit={submit} className={styles.composer}>
               <label htmlFor="career-agent-input" className="sr-only">消息</label>
               <textarea id="career-agent-input" ref={input} rows={1} maxLength={4000} readOnly={current.archived} value={current.draft} onChange={event => update({ draft: event.target.value })} onKeyDown={event => { if ((event.ctrlKey || event.metaKey) && event.key === "Enter" && !event.nativeEvent.isComposing) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} placeholder="发送消息…" />
-              <AgentComposerTools key={current.id} readOnly={current.archived}>
+              <AgentComposerTools key={current.id} readOnly={current.archived} modelId={current.modelId} modelDisabled={runtimeRunning || conversationBusy || sendBusy || history.loading || !!history.error} onModelChange={id => void changeConversation(current.id, { model_id: id })}>
                 <TooltipIconButton type="submit" variant="default" disabled={current.archived || conversationBusy || stopBusy || history.loading || !!history.error || (!runtimeRunning && (sendBusy || !current.draft.trim()))} tooltip={runtimeRunning ? "停止运行" : "发送 · Ctrl/⌘ Enter"} aria-label={runtimeRunning ? "停止运行" : "发送"} side="top" className="size-8 rounded-full">{runtimeRunning ? <Square className="size-3 fill-current" /> : <ArrowUp />}</TooltipIconButton>
               </AgentComposerTools>
             </form>
@@ -490,6 +502,13 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
   </div>;
 
   function renderConversation(item: SpaceConversation) {
-    return <div key={item.id} className={cn(styles.conversationRow, item.id === state.selectedId && styles.selected)}><button aria-current={item.id === state.selectedId ? "page" : undefined} onClick={() => select(item.id)} className={styles.conversationLink} title={item.title}><span className="truncate">{item.title}</span>{item.draft && <span className={styles.draftMark}>草稿</span>}</button><details className={styles.conversationMenu}><summary aria-label={`${item.title}的操作`} title="对话操作"><MoreHorizontal className="size-3.5" /></summary><div><button disabled={conversationBusy} onClick={event => { event.currentTarget.closest("details")?.removeAttribute("open"); setMobileNavigation(false); setEditingError(""); setEdit({ kind: "conversation", id: item.id, title: item.title }); }}>重命名</button><button disabled={conversationBusy} onClick={event => { event.currentTarget.closest("details")?.removeAttribute("open"); void changeConversation(item.id, { archived: !item.archived }); }}>{item.archived ? "恢复对话" : "归档对话"}</button></div></details></div>;
+    return <div key={item.id} className={cn(styles.conversationRow, item.id === state.selectedId && styles.selected)}>
+      <button aria-current={item.id === state.selectedId ? "page" : undefined} onClick={() => select(item.id)} className={styles.conversationLink} title={item.title}><span className="truncate">{item.title}</span>{item.draft && <span className={styles.draftMark}>草稿</span>}</button>
+      <details className={styles.conversationMenu}><summary aria-label={`${item.title}的操作`} title="对话操作"><MoreHorizontal className="size-3.5" /></summary><div>
+        <button disabled={conversationBusy} onClick={event => { event.currentTarget.closest("details")?.removeAttribute("open"); setMobileNavigation(false); setEditingError(""); setEdit({ kind: "conversation", id: item.id, title: item.title }); }}>重命名</button>
+        {item.titleOrigin === "default" && item.titleGenerationAttempted && <button disabled={conversationBusy} onClick={event => { event.currentTarget.closest("details")?.removeAttribute("open"); void retryTitle(item); }}>重新生成名称</button>}
+        <button disabled={conversationBusy} onClick={event => { event.currentTarget.closest("details")?.removeAttribute("open"); void changeConversation(item.id, { archived: !item.archived }); }}>{item.archived ? "恢复对话" : "归档对话"}</button>
+      </div></details>
+    </div>;
   }
 }
