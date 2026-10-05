@@ -9,7 +9,7 @@ export function loadSource(relative, dependencies = {}, globals = {}) {
   const source = readFileSync(filename, "utf8");
   const { outputText } = ts.transpileModule(source, {
     fileName: filename.pathname,
-    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
   });
   const loaded = { exports: {} };
   const importDependency = name => {

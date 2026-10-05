@@ -50,7 +50,7 @@ const MarkdownTextImpl: FC<MarkdownTextProps> = ({ components }) => {
   return (
     <MarkdownTextPrimitive
       remarkPlugins={[remarkGfm]}
-    className="aui-md break-words text-[15px] leading-[1.72]"
+      className="aui-md min-w-0 [overflow-wrap:anywhere] text-inherit leading-inherit"
       components={markdownComponents}
       defer
     />
@@ -67,7 +67,7 @@ const CodeHeader: FC<CodeHeaderProps> = ({ language, code }) => {
   };
 
   return (
-    <div className="aui-code-header-root border-border/50 bg-muted/50 mt-3 flex items-center justify-between rounded-t-xl border border-b-0 px-3.5 py-1.5 text-xs">
+    <div className="aui-code-header-root border-border/50 bg-muted mt-3 flex items-center justify-between rounded-t-2xl border border-b-0 px-4 py-2 text-xs">
       <span className="aui-code-header-language text-muted-foreground font-medium lowercase">
         {language}
       </span>
@@ -141,7 +141,7 @@ const defaultComponents = memoizeMarkdownComponents({
   p: ({ className, ...props }) => (
     <p
       className={cn(
-        "aui-md-p my-3 leading-[1.72] first:mt-0 last:mb-0",
+        "aui-md-p my-3 leading-inherit first:mt-0 last:mb-0",
         className,
       )}
       {...props}
@@ -159,7 +159,7 @@ const defaultComponents = memoizeMarkdownComponents({
   blockquote: ({ className, ...props }) => (
     <blockquote
       className={cn(
-        "aui-md-blockquote border-muted-foreground/30 bg-muted/30 text-muted-foreground my-4 border-s-2 py-1 ps-4",
+        "aui-md-blockquote border-muted-foreground/30 text-muted-foreground my-4 border-s-2 py-1 ps-4",
         className,
       )}
       {...props}
@@ -190,10 +190,10 @@ const defaultComponents = memoizeMarkdownComponents({
     />
   ),
   table: ({ className, ...props }) => (
-    <div className="aui-md-table-wrapper my-3 overflow-x-auto">
+    <div className="aui-md-table-wrapper my-4 max-w-full overflow-x-auto">
       <table
         className={cn(
-          "aui-md-table w-full border-separate border-spacing-0",
+          "aui-md-table w-full border-collapse",
           className,
         )}
         {...props}
@@ -203,7 +203,7 @@ const defaultComponents = memoizeMarkdownComponents({
   th: ({ className, ...props }) => (
     <th
       className={cn(
-        "aui-md-th bg-muted px-3 py-1.5 text-start font-medium first:rounded-ss-lg last:rounded-se-lg [[align=center]]:text-center [[align=right]]:text-right",
+        "aui-md-th border-border border-b px-3 py-2 text-start font-medium first:ps-0 [[align=center]]:text-center [[align=right]]:text-right",
         className,
       )}
       {...props}
@@ -212,7 +212,7 @@ const defaultComponents = memoizeMarkdownComponents({
   td: ({ className, ...props }) => (
     <td
       className={cn(
-        "aui-md-td border-muted-foreground/20 border-s border-b px-3 py-1.5 text-start last:border-e [[align=center]]:text-center [[align=right]]:text-right",
+        "aui-md-td border-border/50 border-b px-3 py-2 text-start first:ps-0 [[align=center]]:text-center [[align=right]]:text-right",
         className,
       )}
       {...props}
@@ -221,14 +221,14 @@ const defaultComponents = memoizeMarkdownComponents({
   tr: ({ className, ...props }) => (
     <tr
       className={cn(
-        "aui-md-tr m-0 border-b p-0 first:border-t [&:last-child>td:first-child]:rounded-es-lg [&:last-child>td:last-child]:rounded-ee-lg",
+        "aui-md-tr m-0 p-0 [&:last-child>td]:border-b-0",
         className,
       )}
       {...props}
     />
   ),
   li: ({ className, ...props }) => (
-    <li className={cn("aui-md-li leading-[1.72]", className)} {...props} />
+    <li className={cn("aui-md-li leading-inherit", className)} {...props} />
   ),
   strong: ({ className, ...props }) => (
     <strong
@@ -245,7 +245,7 @@ const defaultComponents = memoizeMarkdownComponents({
   pre: ({ className, ...props }) => (
     <pre
       className={cn(
-        "aui-md-pre border-border/50 bg-muted/30 overflow-x-auto rounded-t-none rounded-b-xl border border-t-0 p-3.5 font-mono text-[13px] leading-[1.6]",
+        "aui-md-pre border-border/50 bg-muted max-w-full overflow-x-auto rounded-t-none rounded-b-2xl border border-t-0 px-4 pb-4 pt-2 font-mono text-[13px] leading-[1.6] [overflow-wrap:normal]",
         className,
       )}
       {...props}

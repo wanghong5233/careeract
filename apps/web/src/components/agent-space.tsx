@@ -2,15 +2,14 @@
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type FormEvent, type ReactNode } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Archive, ArrowUp, BookOpen, ChevronDown, FileText, Folder, ListTree, MoreHorizontal, PanelLeft, PanelRight, Plus, Search, SquarePen, X } from "lucide-react";
-import { MessagePrimitive, ThreadPrimitive, useAui, useAuiState } from "@assistant-ui/react";
+import { Archive, ArrowUp, BookOpen, ChevronDown, FileText, Folder, ListTree, MoreHorizontal, PanelLeft, PanelRight, Plus, Search, Square, SquarePen, X } from "lucide-react";
+import { useAui, useAuiState } from "@assistant-ui/react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AccountButton } from "@/components/workspace-account";
 import { AgentComposerTools } from "@/components/agent-composer-tools";
 import { AgentProjectPicker } from "@/components/agent-project-picker";
 import { ConversationHistory } from "@/components/conversation-history";
-import { MarkdownText } from "@/components/markdown-text";
 import { TooltipIconButton } from "@/components/tooltip-icon-button";
 import { useWorkspaceActions } from "@/components/workspace-actions";
 import { navigationHref, workspaceSections } from "@/components/workspace-sections";
@@ -22,29 +21,6 @@ import { useConversationHistory } from "@/hooks/use-conversation-history";
 import { cn } from "@/lib/utils";
 import { cancelConversationRun, queueConversationSend, takeConversationSend } from "@/lib/agent-runtime";
 import styles from "./agent-space.module.css";
-
-function LiveConversationMessages() {
-  return <ThreadPrimitive.Root className={cn(styles.messageThread, "mx-auto w-full max-w-[704px] space-y-6 py-6")}>
-    <ThreadPrimitive.Messages components={{ UserMessage: LiveUserMessage, AssistantMessage: LiveAssistantMessage }} />
-  </ThreadPrimitive.Root>;
-}
-
-function LiveUserMessage() {
-  return <MessagePrimitive.Root className={styles.userMessage}><MessagePrimitive.Content /></MessagePrimitive.Root>;
-}
-
-function LiveAssistantMessage() {
-  const status = useAuiState(state => state.message.status);
-  const incomplete = status?.type === "incomplete";
-  const running = status?.type === "running";
-  const incompleteReason = incomplete ? status.reason : undefined;
-  const statusText = incompleteReason === "cancelled" ? "本次运行已取消，已显示当前保存内容。" : incompleteReason === "error" ? "本次运行失败，已显示当前保存内容。" : "本次运行未完成，已显示当前保存内容。";
-  return <MessagePrimitive.Root className={styles.assistantMessage}>
-    <MessagePrimitive.Content components={{ Text: MarkdownText }} />
-    {running && <p role="status" aria-live="polite" className={cn(styles.messageStatus, styles.messageStatusRunning)}><span aria-hidden="true" className={styles.streamingIndicator} />正在生成</p>}
-    {incomplete && <p role="status" className={cn(styles.messageStatus, incompleteReason === "error" ? styles.messageStatusError : styles.messageStatusIncomplete)}>{statusText}</p>}
-  </MessagePrimitive.Root>;
-}
 
 export function AgentHome({ owner, children }: { owner: string; children?: ReactNode }) {
   const { openCapabilities, openAccount, registerAgent, registerContent, registerContentDescription } = useWorkspaceActions();
@@ -61,7 +37,8 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
   const aui = useAui();
   const localRunning = useAuiState(runtime => runtime.thread.isRunning);
   const runtimeRunning = localRunning || !!history.activeRun;
-  const runtimeHasMessages = useAuiState(runtime => runtime.thread.messages.length > 0);
+  const runtimeMessages = useAuiState(runtime => runtime.thread.messages);
+  const runtimeHasMessages = runtimeMessages.length > 0;
   const [conversationBusy, setConversationBusy] = useState(false);
   const [sendBusy, setSendBusy] = useState(false);
   const [stopBusy, setStopBusy] = useState(false);
@@ -444,10 +421,11 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
         <div className={styles.startArea}>
           {history.loading && <p role="status" className={styles.feedback}>正在读取历史…</p>}
           {history.error && <div className={styles.feedback}><p role="alert">{history.error}</p><Button variant="ghost" size="sm" onClick={history.refresh}>重新读取历史</Button></div>}
-          {!localRunning && !sendBusy && history.history ? <ConversationHistory messages={history.history.messages} runs={history.history.runs} /> : <LiveConversationMessages />}
+          {(runtimeHasMessages || history.history?.messages.length || history.history?.runs?.length || localRunning || sendBusy) && <ConversationHistory key={current.id} messages={history.history?.messages ?? []} runs={history.history?.runs} liveMessages={localRunning || sendBusy || !history.history ? runtimeMessages : undefined} isRunning={localRunning || sendBusy} />}
           {history.activeRun && !localRunning && <div className={styles.feedback}><p role="status">{["RUNNING", "PENDING"].includes(history.activeRun.status) ? "服务端运行尚未结束，可停止或重新读取状态。" : "运行状态需要核对，请勿重复发送。"}</p><Button variant="ghost" size="sm" onClick={history.refresh}>重新读取运行状态</Button></div>}
           {history.history?.truncated && <p className={styles.feedback}>当前显示最近 100 条消息，更早内容仍保留。</p>}
           {!history.loading && !history.error && !history.history?.messages.length && !runtimeHasMessages && <div className={styles.welcome}><h1>{current.archived ? "已归档对话" : current.title}</h1></div>}
+        </div>
           <div className={styles.composerArea}>
             <div className={styles.composerProject}>
               <AgentProjectPicker key={current.id} projects={projects} projectId={current.projectId} readOnly={current.archived || conversationBusy || runtimeRunning} loading={projectLoading} error={projectError} hasMore={!!projectCursor} onRefresh={() => void refreshProjects()} onLoadMore={() => void loadMoreProjects()} onChange={projectId => void changeConversation(current.id, { project_id: projectId })} onCreate={() => { setEditingError(""); setEdit({ kind: "create", id: crypto.randomUUID(), title: "" }); }} />
@@ -456,14 +434,13 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
               <label htmlFor="career-agent-input" className="sr-only">消息</label>
               <textarea id="career-agent-input" ref={input} rows={1} maxLength={4000} readOnly={current.archived} value={current.draft} onChange={event => update({ draft: event.target.value })} onKeyDown={event => { if ((event.ctrlKey || event.metaKey) && event.key === "Enter" && !event.nativeEvent.isComposing) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} placeholder="发送消息…" />
               <AgentComposerTools key={current.id} readOnly={current.archived}>
-                <TooltipIconButton type="submit" variant="default" disabled={current.archived || conversationBusy || stopBusy || history.loading || !!history.error || (!runtimeRunning && (sendBusy || !current.draft.trim()))} tooltip={runtimeRunning ? "停止运行" : "发送 · Ctrl/⌘ Enter"} aria-label={runtimeRunning ? "停止运行" : "发送"} side="top" className="size-8 rounded-full">{runtimeRunning ? <SquarePen className="rotate-45" /> : <ArrowUp />}</TooltipIconButton>
+                <TooltipIconButton type="submit" variant="default" disabled={current.archived || conversationBusy || stopBusy || history.loading || !!history.error || (!runtimeRunning && (sendBusy || !current.draft.trim()))} tooltip={runtimeRunning ? "停止运行" : "发送 · Ctrl/⌘ Enter"} aria-label={runtimeRunning ? "停止运行" : "发送"} side="top" className="size-8 rounded-full">{runtimeRunning ? <Square className="size-3 fill-current" /> : <ArrowUp />}</TooltipIconButton>
               </AgentComposerTools>
             </form>
           {feedback && <p role="status" className={styles.feedback}>{feedback}</p>}
           {!store.storageAvailable() && <p role="alert" className={styles.feedback}>此浏览器无法保留草稿，请勿关闭页面。</p>}
           {current.archived && <p className={styles.feedback}>已归档。<button disabled={conversationBusy} className="underline underline-offset-4" onClick={() => void changeConversation(current.id, { archived: false })}>恢复对话</button></p>}
           </div>
-        </div>
       </main>
       {(routeOpen || contextOpen) && <>{panelOpen && <div role="separator" aria-label="调整内容区宽度" aria-orientation="vertical" tabIndex={0} aria-valuemin={30} aria-valuemax={65} aria-valuenow={state.panelWidth} className={styles.resizeHandle} onKeyDown={event => { if (event.key === "ArrowLeft" || event.key === "ArrowRight") { event.preventDefault(); store.update(previous => ({ ...previous, panelWidth: Math.min(65, Math.max(30, previous.panelWidth + (event.key === "ArrowLeft" ? 2 : -2))) })); } }} onPointerDown={event => event.currentTarget.setPointerCapture(event.pointerId)} onPointerMove={event => { if (!event.currentTarget.hasPointerCapture(event.pointerId)) return; const bounds = space.current?.getBoundingClientRect(); if (bounds) store.update(previous => ({ ...previous, panelWidth: Math.min(65, Math.max(30, (bounds.right - event.clientX) / bounds.width * 100)) })); }} onPointerUp={event => event.currentTarget.releasePointerCapture(event.pointerId)} />}
       <aside className={cn(styles.content, !panelOpen && styles.hiddenContent)} aria-label="内容工作区"><div className={styles.tabBar}><Button variant="ghost" size="icon" className="md:hidden shrink-0" aria-label="打开项目导航" aria-expanded={mobileNavigation} onClick={() => setMobileNavigation(true)}><PanelLeft /></Button><div role="tablist" aria-label="打开的内容" className={styles.tabList} onKeyDown={event => { if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return; const buttons = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')); const selected = buttons.indexOf(document.activeElement as HTMLButtonElement); if (selected < 0) return; event.preventDefault(); const next = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1 : (selected + (event.key === "ArrowRight" ? 1 : -1) + buttons.length) % buttons.length; buttons[next]?.focus(); buttons[next]?.click(); }}>{visibleTabs.map(tab => <div key={tab.href} className={cn(styles.tab, !contextOpen && tab.href === currentHref && styles.activeTab)}><button role="tab" tabIndex={!contextOpen && tab.href === currentHref ? 0 : -1} aria-selected={!contextOpen && tab.href === currentHref} aria-controls="space-content" id={`tab-${tab.href}`} title={tab.label} onClick={() => openRoute(tab.href)}><FileText className="size-3.5" /><span className="truncate">{tab.label}</span></button><button title={`关闭${tab.label}`} aria-label={`关闭${tab.label}标签`} onClick={() => closeTab(tab.href)}><X className="size-3" /></button></div>)}{contextOpen && <div className={cn(styles.tab, styles.activeTab)}><button role="tab" aria-selected aria-controls="space-content" id="tab-context"><ListTree className="size-3.5" />引用范围</button><button aria-label="关闭引用范围标签" onClick={() => setContextOpen(false)}><X className="size-3" /></button></div>}</div><Button variant="ghost" size="icon" title="收起并保留内容" aria-label="收起内容区并保留标签" onClick={hideContent}><PanelRight /></Button></div>

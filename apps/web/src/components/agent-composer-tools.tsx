@@ -31,12 +31,12 @@ export function AgentComposerTools({ readOnly, children }: { readOnly: boolean; 
     </Menu.Root>
     <div className={styles.composerTools}>
     <Popover.Root open={modelOpen} onOpenChange={setModelOpen}>
-      <Popover.Trigger render={<Button type="button" variant="ghost" size="sm" disabled={readOnly} aria-label="选择模型" className={styles.modelSelector} />}>模型<ChevronDown className="size-3" /></Popover.Trigger>
+      <Popover.Trigger render={<Button type="button" variant="ghost" size="sm" disabled={readOnly} aria-label="选择模型" title="查看默认连接与模型切换状态" className={styles.modelSelector} />}>默认模型<ChevronDown className="size-3" /></Popover.Trigger>
       <Popover.Portal>
         <Popover.Positioner side="top" align="end" sideOffset={8} className="z-50">
           <Popover.Popup className={styles.modelPopover}>
-            <Popover.Title className="text-sm font-medium">模型选择尚未接入</Popover.Title>
-            <Popover.Description className="mt-2 text-sm leading-6 text-muted-foreground">暂无可用模型连接。</Popover.Description>
+            <Popover.Title className="text-sm font-medium">模型切换尚未接入</Popover.Title>
+            <Popover.Description className="mt-2 text-sm leading-6 text-muted-foreground">文本运行使用服务端默认连接，当前不能在此选择供应商或模型。</Popover.Description>
             <Button type="button" variant="outline" size="sm" className="mt-4" onClick={() => { setModelOpen(false); openContent("/workspace/settings"); }}>设置与连接</Button>
           </Popover.Popup>
         </Popover.Positioner>
