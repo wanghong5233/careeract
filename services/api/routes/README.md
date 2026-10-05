@@ -51,6 +51,14 @@ row. Side sessions are excluded from the regular conversation directory, survive
 refresh, and are eligible for bounded server cleanup after 24 hours. They do not
 create a second message store or a persistent conversation-management surface.
 
+`POST /api/v1/agent/conversations/{session_id}/branch` creates a regular independent
+conversation from a saved message boundary. `before` branches retain terminal
+exchanges before the latest edited user message; `after` branches retain that completed
+assistant answer and prior exchanges. The source directory and any material or
+external side effects remain unchanged; active or non-terminal source Runs are
+rejected. The framework Session is copied only through the bounded adapter, rather
+than exposing a general-purpose rollback tree.
+
 `/api/v1/memories` stores user-owned notes and rule candidates. A new item is always
 `candidate`; only an explicit `POST /api/v1/memories/{id}/confirm` with the current
 version can make a rule effective. `POST /api/v1/memories/{id}/retire` removes an item

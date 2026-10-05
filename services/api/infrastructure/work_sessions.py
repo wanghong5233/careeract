@@ -36,6 +36,7 @@ def work_session_from_row(row: RowMapping) -> AgentWorkSession:
         model_id=row["model_id"],
         temporary_until=row["temporary_until"],
         side_context=row["side_context"],
+        branch_context=row["branch_context"],
     )
 
 

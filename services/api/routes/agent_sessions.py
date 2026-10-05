@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from services.api.application.context import ActorContext
+from services.api.application.conversation_branches import ConversationBranchService
 from services.api.application.ports.agent_runtime import AgentExecutionPort
 from services.api.application.ports.work_sessions import AgentHistoryReader
 from services.api.application.side_chats import SideChatService
@@ -35,6 +36,7 @@ class WorkSessionResponse(BaseModel):
     model_id: str | None
     temporary_until: str | None = None
     side_context: dict[str, str] | None = None
+    branch_context: dict[str, str] | None = None
 
 
 class GenerateTitleBody(BaseModel):
@@ -54,6 +56,16 @@ class CreateConversationBody(BaseModel):
     id: UUID
     title: str = Field(default="新对话", min_length=1, max_length=120)
     project_id: UUID | None = None
+
+
+class CreateBranchBody(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    id: UUID
+    version: UUID
+    message_id: str = Field(min_length=1, max_length=128)
+    mode: str = Field(pattern="^(before|after)$")
+    title: str = Field(default="分支对话", min_length=1, max_length=120)
 
 
 class UpdateConversationBody(BaseModel):
@@ -192,6 +204,7 @@ def serialize_session(session: AgentWorkSession) -> WorkSessionResponse:
         model_id=session.model_id,
         temporary_until=session.temporary_until.isoformat() if session.temporary_until else None,
         side_context=session.side_context,
+        branch_context=session.branch_context,
     )
 
 
@@ -254,6 +267,38 @@ async def create_conversation(
     return serialize_session(
         await service.create(
             actor, conversation_id=body.id, title=body.title, project_id=body.project_id
+        )
+    )
+
+
+@router.post(
+    "/conversations/{session_id}/branch", response_model=WorkSessionResponse, status_code=201
+)
+async def branch_conversation(
+    session_id: str,
+    body: CreateBranchBody,
+    request: Request,
+    response: Response,
+    actor: Annotated[ActorContext, Depends(get_actor)],
+) -> WorkSessionResponse:
+    response.headers["Cache-Control"] = "no-store"
+    service = cast(
+        ConversationBranchService | None,
+        getattr(request.app.state, "conversation_branch_service", None),
+    )
+    if service is None:
+        from services.api.domain.work_session import WorkSessionHistoryUnavailable
+
+        raise WorkSessionHistoryUnavailable("Conversation branching is unavailable")
+    return serialize_session(
+        await service.create(
+            actor,
+            source_id=session_id,
+            identifier=body.id,
+            message_id=body.message_id,
+            mode=body.mode,
+            title=body.title,
+            expected_version=body.version,
         )
     )
 

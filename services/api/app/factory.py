@@ -9,6 +9,7 @@ from fastapi.exceptions import RequestValidationError
 
 from services.api.app.settings import Settings
 from services.api.application.agent_context import AgentContextService
+from services.api.application.conversation_branches import ConversationBranchService
 from services.api.application.materials import MaterialService
 from services.api.application.memories import MemoryService
 from services.api.application.profiles import ProfileService
@@ -54,6 +55,7 @@ from services.api.infrastructure.agent_tools import (
     persist_run_manifest,
 )
 from services.api.infrastructure.authentication import JwtAuthenticationMiddleware
+from services.api.infrastructure.conversation_branches import AgnoConversationBranches
 from services.api.infrastructure.conversation_titles import AgnoConversationTitleGenerator
 from services.api.infrastructure.database import create_engine
 from services.api.infrastructure.materials import PostgresMaterialRepository
@@ -152,6 +154,9 @@ def create_app(
         project_repository.history = app.state.agent_history_reader
         app.state.agent_execution = AgentExecution(
             engine, app.state.agent_work_session_service, career_agent
+        )
+        app.state.conversation_branch_service = ConversationBranchService(
+            AgnoConversationBranches(engine, app.state.agent_work_session_service, career_agent)
         )
         app.state.agent_work_session_service.history = app.state.agent_history_reader
         set_tools = getattr(career_agent, "set_tools", None)

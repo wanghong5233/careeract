@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { ArrowDown, Check, Copy, MessageSquarePlus } from "lucide-react";
+import { ArrowDown, Check, Copy, GitBranch, MessageSquarePlus, Pencil } from "lucide-react";
 import { ActionBarPrimitive, MessagePrimitive, ThreadPrimitive, useAuiState } from "@assistant-ui/react";
 import { MarkdownText } from "@/components/markdown-text";
 import { TooltipIconButton } from "@/components/tooltip-icon-button";
@@ -30,12 +30,15 @@ export function ConversationMessages({ children }: { children?: ReactNode }) {
 }
 
 export function ConversationUserMessage() {
+  const actions = useMessageActions();
   const id = useAuiState(state => state.message.id);
+  const original = useAuiState(state => state.message.content.filter(part => part.type === "text").map(part => part.text).join("\n"));
   const copied = useAuiState(state => state.message.isCopied);
   return <MessagePrimitive.Root className={styles.userTurn} data-prompt-id={id}>
     <div className={styles.userMessage}><MessagePrimitive.Content /></div>
     <ActionBarPrimitive.Root className={styles.userActions}>
       <ActionBarPrimitive.Copy asChild><TooltipIconButton tooltip={copied ? "已复制" : "复制消息"} aria-label={copied ? "已复制" : "复制消息"}>{copied ? <Check /> : <Copy />}</TooltipIconButton></ActionBarPrimitive.Copy>
+      {actions.edit && actions.editId === id && <TooltipIconButton tooltip="编辑并另建分支" aria-label="编辑并另建分支" onClick={() => actions.edit?.(id, original)}><Pencil /></TooltipIconButton>}
       <span role="status" className="sr-only">{copied ? "消息已复制" : ""}</span>
     </ActionBarPrimitive.Root>
   </MessagePrimitive.Root>;
@@ -100,6 +103,7 @@ export function ConversationAssistantMessage() {
       const quote = selection?.anchorNode && root.current?.contains(selection.anchorNode) && selection.focusNode && root.current.contains(selection.focusNode) ? selection.toString() : "";
       actions.quote?.(id, quote || original.slice(0, 4000));
     }}><MessageSquarePlus /></TooltipIconButton></div>}
+    {actions.branch && hasText && runStatus === "COMPLETED" && <div className={styles.assistantActions}><TooltipIconButton tooltip="从此处创建独立分支" aria-label="从此处创建独立分支" onClick={() => actions.branch?.(id)}><GitBranch /></TooltipIconButton></div>}
   </MessagePrimitive.Root>;
 }
 

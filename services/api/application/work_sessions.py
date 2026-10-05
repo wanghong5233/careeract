@@ -84,7 +84,12 @@ class AgentWorkSessionService:
         return title
 
     async def create(
-        self, actor: ActorContext, *, conversation_id: UUID, title: str, project_id: UUID | None
+        self,
+        actor: ActorContext,
+        *,
+        conversation_id: UUID,
+        title: str,
+        project_id: UUID | None,
     ) -> AgentWorkSession:
         return await self.repository.create(
             actor,

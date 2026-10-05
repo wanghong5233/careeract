@@ -1,6 +1,6 @@
 import { isRestrictedResponse, restrictedContentMessage } from "@/lib/privacy";
 
-export type AgentConversation = { session_id: string; title: string; project_id: string | null; archived: boolean; version: string; created_at: string; updated_at: string; title_origin?: "default" | "manual" | "generated"; title_generation_attempted?: boolean; model_id?: string | null };
+export type AgentConversation = { session_id: string; title: string; project_id: string | null; archived: boolean; version: string; created_at: string; updated_at: string; title_origin?: "default" | "manual" | "generated"; title_generation_attempted?: boolean; model_id?: string | null; branch_context?: { source_id: string; message_id: string; mode: "before" | "after" } | null };
 export type RuntimeModel = { id: string; provider: string; model: string; label: string };
 export type RuntimeModels = { id: string; connection: string; models: RuntimeModel[] };
 export type ConversationPage = { items: AgentConversation[]; next_cursor: string | null };
@@ -50,4 +50,8 @@ export function createSideChat(id: string, tabId: string, sourceId: string, mess
 
 export function closeSideChat(id: string): Promise<{ status: string }> {
   return request(`/api/agent/side-chats/${encodeURIComponent(id)}/close`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}", signal: AbortSignal.timeout(20_000) });
+}
+
+export function createConversationBranch(sourceId: string, body: { id: string; version: string; message_id: string; mode: "before" | "after"; title: string }): Promise<AgentConversation> {
+  return request(`/api/agent/conversations/${encodeURIComponent(sourceId)}/branch`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(20_000) });
 }
