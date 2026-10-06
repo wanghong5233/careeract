@@ -37,7 +37,7 @@ export function AgentContextBasis() {
     <div className="mt-3 max-h-40 space-y-2 overflow-y-auto" aria-label="本次工作依据">
       {basis.references.length === 0 && <p className="text-muted-foreground">本次未读取已保存的职业背景或规则。</p>}
       {basis.references.map(reference => <p key={`${reference.type}-${reference.id}-${reference.version}`} className="break-words leading-5"><span>{reference.title}</span><span className="ml-2 text-muted-foreground" title={reference.version}>版本 {reference.version.slice(0, 8)}</span></p>)}
-      {basis.proposals.map(proposal => <p key={proposal.id} className="break-words leading-5">提议：{proposal.title} · <Link href="/workspace/assistant" className="underline">在背景与规则核对</Link></p>)}
+      {basis.proposals.map(proposal => <p key={proposal.id} className="break-words leading-5">提议：{proposal.title} · <Link href="/assistant" className="underline">在背景与规则核对</Link></p>)}
     </div>
   </details>;
 }

@@ -76,7 +76,7 @@ export function WorkspaceProjects() {
       setTitle("");
       setPurpose("");
       window.dispatchEvent(new Event("careeract:projects-changed"));
-      router.push(`/workspace/projects/${project.id}`);
+      router.push(`/projects/${project.id}`);
     } catch (error: unknown) {
       setSaveError(error instanceof Error ? error.message : "尚不能确认保存结果，请核对项目。");
     } finally {
@@ -97,7 +97,7 @@ export function WorkspaceProjects() {
       <div><h2 className="text-sm font-medium">留下一项值得持续推进的目标</h2><p className="mt-1 text-xs leading-5 text-muted-foreground">只需标题与意图；详细计划可以交给 Agent 形成。</p></div>
       <label className="block space-y-2 text-sm"><span>项目标题</span><input autoFocus required maxLength={200} disabled={saving} value={title} onChange={event => setTitle(event.target.value)} className={inputClass} /></label>
       <label className="block space-y-2 text-sm"><span>想推进什么</span><Textarea rows={3} maxLength={4000} disabled={saving} value={purpose} onChange={event => setPurpose(event.target.value)} /></label>
-      {saveError && <Failure message={saveError}><Link href={`/workspace/projects/${draftId}`} className="underline underline-offset-4">核对这个项目</Link><p className="text-xs text-muted-foreground">输入未丢失；用同一份内容重试不会重复创建。</p></Failure>}
+      {saveError && <Failure message={saveError}><Link href={`/projects/${draftId}`} className="underline underline-offset-4">核对这个项目</Link><p className="text-xs text-muted-foreground">输入未丢失；用同一份内容重试不会重复创建。</p></Failure>}
       <div className="flex flex-wrap justify-end gap-2">
         <Button type="button" variant="ghost" disabled={saving} onClick={() => {
           const discard = () => { setDraftId(null); setTitle(""); setPurpose(""); setSaveError(""); };
@@ -109,7 +109,7 @@ export function WorkspaceProjects() {
     </form>}
     {loadError && <Failure message={loadError}><Button variant="outline" size="sm" onClick={() => { setLoadError(""); setLoading(true); setAttempt(value => value + 1); }}>重新读取</Button></Failure>}
     {projects.length > 0 && <div className="mt-5 divide-y rounded-xl border">
-      {projects.map(project => <Link key={project.id} href={`/workspace/projects/${project.id}`} className="group block p-5 outline-none hover:bg-muted/30 focus-visible:ring-2 focus-visible:ring-ring">
+        {projects.map(project => <Link key={project.id} href={`/projects/${project.id}`} className="group block p-5 outline-none hover:bg-muted/30 focus-visible:ring-2 focus-visible:ring-ring">
         <div className="flex items-start justify-between gap-3"><h2 className="min-w-0 break-words text-base font-medium">{project.title}</h2><span className="shrink-0 text-xs text-muted-foreground">{projectStatusLabels[project.status]}</span></div>
         <p className="mt-2 line-clamp-3 whitespace-pre-wrap break-words text-sm leading-6 text-muted-foreground">{project.purpose || "目标待澄清"}</p>
         <div className="mt-4 flex items-center justify-between text-xs text-muted-foreground"><span>最近更新 {new Date(project.updated_at).toLocaleDateString("zh-CN")}</span><span className="inline-flex items-center gap-1">继续项目<ArrowUpRight className="size-3" /></span></div>
@@ -133,7 +133,7 @@ export function WorkspaceProjectDetail({ projectId }: { projectId: string }) {
     return () => controller.abort();
   }, [projectId, attempt]);
   return <>
-    <Link href="/workspace/projects" className="mb-6 inline-flex items-center gap-2 text-xs text-muted-foreground underline underline-offset-4"><ArrowLeft className="size-3" />全部项目</Link>
+    <Link href="/projects" className="mb-6 inline-flex items-center gap-2 text-xs text-muted-foreground underline underline-offset-4"><ArrowLeft className="size-3" />全部项目</Link>
     {error ? <Failure message={error}><Button variant="outline" size="sm" onClick={() => { setError(""); setAttempt(value => value + 1); }}>重新读取</Button></Failure>
       : project ? <ProjectWork key={project.id} initial={project} />
         : <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />正在恢复项目…</p>}
@@ -216,7 +216,7 @@ function ProjectWork({ initial }: { initial: CareerProject }) {
       </form>}
       {notice && <p role="status" className="mt-4 text-sm">{notice}</p>}
     </section>
-    <section><h2 className="text-sm font-medium">共同工作</h2><p className="mt-3 text-sm leading-6 text-muted-foreground">先围绕目标讨论。项目关联任务、材料与成果将在下一步接入，对话目前不会自动写入项目。</p><div className="mt-4 flex flex-wrap gap-4">{[["tasks", "任务工作面"], ["library", "资料与成果"], ["plan", "阶段计划"]].map(([path, label]) => <Link key={path} href={`/workspace/${path}`} className="text-xs underline underline-offset-4">{label}</Link>)}</div></section>
+    <section><h2 className="text-sm font-medium">共同工作</h2><p className="mt-3 text-sm leading-6 text-muted-foreground">先围绕目标讨论。项目关联任务、材料与成果将在下一步接入，对话目前不会自动写入项目。</p><div className="mt-4 flex flex-wrap gap-4">{[["tasks", "任务工作面"], ["library", "资料与成果"], ["plan", "阶段计划"]].map(([path, label]) => <Link key={path} href={`/${path}`} className="text-xs underline underline-offset-4">{label}</Link>)}</div></section>
     {sessionError && <p role="alert" className="text-sm text-destructive">{sessionError}</p>}
   </div>;
 }

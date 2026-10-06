@@ -109,19 +109,45 @@ test("completed replies have no incomplete status footer", () => {
   assert.doesNotMatch(html, /请核对已显示内容|运行失败|已取消|运行状态未确认/);
 });
 
-test("main answers expose a single branch action and only answer content is quote selectable", () => {
+test("answer toolbar keeps copying and timestamps separate from completed-only branch and feedback actions", () => {
   const messages = [syntheticMessage("input", "user", "run", "COMPLETED"), syntheticMessage("reply", "assistant", "run", "COMPLETED")];
   const html = renderToStaticMarkup(React.createElement(history.ConversationHistory, { messages, onQuote() {}, onBranch() {}, onAddToConversation() {} }));
   assert.equal((html.match(/class="assistantActions"/g) ?? []).length, 1);
-  assert.match(html, /从此处创建独立分支/);
+  assert.match(html, /分支到新聊天/);
+  assert.match(html, /aria-label="复制回答"/);
+  assert.match(html, /<time[^>]*dateTime="1970-01-01T00:00:01.000Z"/);
+  assert.doesNotMatch(html, /回答有帮助|回答需要改进/);
   assert.doesNotMatch(html, /在侧聊中打开|在侧聊中追问/);
   assert.equal((html.match(/data-aui-quote-selectable="true"/g) ?? []).length, 1);
   const readonly = renderToStaticMarkup(React.createElement(history.ConversationHistory, { messages }));
   assert.doesNotMatch(readonly, /data-aui-quote-selectable="true"/);
+  assert.match(readonly, /aria-label="复制回答"/);
+  assert.doesNotMatch(readonly, /分支到新聊天/);
+  const withFeedback = renderToStaticMarkup(React.createElement(history.ConversationHistory, { messages, onFeedback() {} }));
+  assert.match(withFeedback, /aria-label="回答有帮助"/);
+  assert.match(withFeedback, /aria-label="回答需要改进"/);
   for (const status of ["RUNNING", "CANCELLED", "ERROR", "UNKNOWN"]) {
-    const incomplete = renderToStaticMarkup(React.createElement(history.ConversationHistory, { messages: [syntheticMessage("reply", "assistant", "run", status)], onBranch() {} }));
-    assert.doesNotMatch(incomplete, /class="assistantActions"/);
+    const incomplete = renderToStaticMarkup(React.createElement(history.ConversationHistory, { messages: [syntheticMessage("reply", "assistant", "run", status)], onBranch() {}, onFeedback() {} }));
+    assert.doesNotMatch(incomplete, /分支到新聊天|回答有帮助|回答需要改进/);
+    assert.match(incomplete, /aria-label="复制回答"/);
   }
+});
+
+test("message time uses real saved or supplied live timestamps and never fills missing dates with now", () => {
+  const format = loadSource("lib/run-presentation.ts").formatMessageTimestamp;
+  const timestamp = Date.parse("2026-10-04T09:32:00Z");
+  assert.deepEqual(format(timestamp, "Asia/Shanghai"), {
+    dateTime: "2026-10-04T09:32:00.000Z", label: "星期日 17:32", title: "2026年10月4日星期日 17:32",
+  });
+  for (const value of [undefined, null, 0, -1, NaN, Infinity, "10", 1e20]) assert.equal(format(value), null);
+  const saved = { ...syntheticMessage("reply", "assistant", "run", "COMPLETED"), created_at: timestamp / 1000 };
+  const html = renderToStaticMarkup(React.createElement(history.ConversationHistory, { messages: [saved] }));
+  assert.match(html, /dateTime="2026-10-04T09:32:00.000Z"/);
+  const missing = renderToStaticMarkup(React.createElement(history.ConversationHistory, { messages: [{ ...saved, created_at: 0 }] }));
+  assert.doesNotMatch(missing, /<time /);
+  const live = [{ id: "live", role: "assistant", content: "合成回答", createdAt: new Date(timestamp) }];
+  assert.equal(presentation.groupLiveAssistantMessages(live)[0].metadata.custom.messageCreatedAt, timestamp);
+  assert.equal(presentation.groupLiveAssistantMessages([{ ...live[0], createdAt: undefined }])[0].metadata.custom.messageCreatedAt, undefined);
 });
 
 test("live and saved replies use identical Markdown and message presentation", () => {
@@ -280,6 +306,7 @@ test("live display distinguishes waiting, streaming and incomplete output withou
   const streaming = renderToStaticMarkup(React.createElement(history.ConversationHistory, { messages: [], liveMessages: [{ id: "reply", role: "assistant", content: "合成部分回复", status: { type: "running" } }], isRunning: true }));
   assert.match(streaming, /正在生成/);
   assert.doesNotMatch(streaming, /已取消|运行失败|运行状态未确认/);
+  assert.doesNotMatch(streaming, /aria-label="复制回答"|分支到新聊天|回答有帮助|回答需要改进/);
   const interrupted = renderToStaticMarkup(React.createElement(history.ConversationHistory, { messages: [], liveMessages: [{ id: "reply", role: "assistant", content: "合成部分回复", status: { type: "incomplete", reason: "other" } }] }));
   assert.match(interrupted, /运行状态未确认/);
   assert.doesNotMatch(interrupted, /正在生成|已完成/);

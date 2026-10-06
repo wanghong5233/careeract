@@ -46,11 +46,11 @@ export function useSideChat(owner: string, sourceId: string, persisted: boolean,
   return { store, state, busy, error, open, replacement, clearReplacement: () => setReplacement(null) };
 }
 
-export function SideChatPanel({ controller, mainCheckpoint }: { controller: ReturnType<typeof useSideChat>; mainCheckpoint: string | null }) {
+export function SideChatPanel({ controller, mainCheckpoint, hidden = false }: { controller: ReturnType<typeof useSideChat>; mainCheckpoint: string | null; hidden?: boolean }) {
   const { state, store, replacement } = controller;
   const chat = state.chat;
   if (!chat) return null;
-  return <aside className={styles.sideChat} style={{ display: state.hidden ? "none" : undefined }} aria-label="临时侧聊">
+  return <aside className={styles.sideChat} style={{ display: state.hidden || hidden ? "none" : undefined }} aria-label="临时侧聊">
     <RuntimeProvider key={chat.session_id} agentThreadId={chat.session_id}><SideChatContent chat={chat} store={store} mainCheckpoint={mainCheckpoint} replacement={replacement} clearReplacement={controller.clearReplacement} /></RuntimeProvider>
   </aside>;
 }

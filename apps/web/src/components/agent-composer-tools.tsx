@@ -33,7 +33,7 @@ export function AgentComposerTools({ readOnly, modelDisabled = false, modelId, o
           <Menu.Popup className={styles.composerMenu}>
             <Menu.Item disabled className={styles.composerMenuItem}><ImagePlus /><span>上传图片</span><span className={styles.menuStatus}>尚未接入</span></Menu.Item>
             <Menu.Separator className="my-1 border-t" />
-            <Menu.Item className={styles.composerMenuItem} onClick={() => openContent("/workspace/library")}><FileText />查看资料与成果</Menu.Item>
+            <Menu.Item className={styles.composerMenuItem} onClick={() => openContent("/library")}><FileText />查看资料与成果</Menu.Item>
             <Menu.Item className={styles.composerMenuItem} onClick={() => setShortcutsOpen(true)}><Keyboard />快捷键</Menu.Item>
           </Menu.Popup>
         </Menu.Positioner>

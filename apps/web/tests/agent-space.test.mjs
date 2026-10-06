@@ -18,7 +18,7 @@ test("new conversation leaves the current content and preserves previous drafts"
   const previous = { ...newSpaceConversation("old", "project"), draft: "kept", tabs: [{ href: "/workspace/background", label: "背景" }], activeHref: "/workspace/background" };
   const result = beginSpaceConversation({ conversations: [previous], selectedId: "old", navigation: true, panelWidth: 50 }, "next");
   assert.equal(result.selectedId, "next");
-  assert.equal(result.conversations[0].activeHref, "/workspace");
+  assert.equal(result.conversations[0].activeHref, "/");
   assert.equal(result.conversations[0].panelHidden, true);
   assert.equal(result.conversations[0].projectId, null);
   assert.deepEqual(result.conversations[1], previous);
@@ -28,7 +28,7 @@ test("blank conversation reuse is scoped to the project and resets the old route
   const { beginSpaceConversation, newSpaceConversation } = stateFixture();
   const state = { conversations: [{ ...newSpaceConversation("blank", "one"), activeHref: "/workspace/background" }], selectedId: "blank", navigation: true, panelWidth: 50 };
   assert.equal(beginSpaceConversation(state, "other", "one").selectedId, "blank");
-  assert.equal(beginSpaceConversation(state, "other", "one").conversations[0].activeHref, "/workspace");
+  assert.equal(beginSpaceConversation(state, "other", "one").conversations[0].activeHref, "/");
   assert.equal(beginSpaceConversation(state, "other", "two").conversations.length, 2);
 });
 
@@ -40,7 +40,7 @@ test("project deletion detaches conversations and keeps draft, archive state and
   assert.equal(result.conversations[0].projectId, null);
   assert.equal(result.conversations[0].draft, "kept");
   assert.equal(result.conversations[0].archived, true);
-  assert.equal(result.conversations[0].activeHref, "/workspace");
+  assert.equal(result.conversations[0].activeHref, "/");
   assert.deepEqual(result.conversations[0].tabs, [material]);
   assert.equal(state.conversations[0].projectId, "project");
 });
@@ -136,4 +136,33 @@ test("latest request cancels its predecessor and rejects late responses after ch
   requests.cancel();
   assert.equal(latest.signal.aborted, true);
   assert.equal(requests.isCurrent(latest), false);
+});
+
+test("legacy workspace views migrate to root routes without losing archived drafts or query parameters", () => {
+  const first = stateFixture();
+  const saved = { ...first.newSpaceConversation("archived", "project"), archived: true, draft: "keep draft", activeHref: "/workspace/library?material=synthetic#review", tabs: [{ href: "/workspace/library?material=synthetic#review", label: "材料" }] };
+  const stored = new Map([["careeract-space:legacy", JSON.stringify({ conversations: [saved], selectedId: saved.id, navigation: true, panelWidth: 50 })]]);
+  const migrated = stateFixture(stored).getSpaceStore("legacy").snapshot();
+  assert.equal(migrated.selectedId, saved.id);
+  assert.equal(migrated.conversations[0].activeHref, "/library?material=synthetic#review");
+  assert.equal(migrated.conversations[0].tabs[0].href, "/library?material=synthetic#review");
+  assert.equal(migrated.conversations[0].draft, saved.draft);
+  assert.equal(migrated.conversations[0].archived, true);
+  assert.equal(migrated.conversations[0].projectId, saved.projectId);
+});
+
+test("stored scheme-relative routes and legacy double slashes cannot navigate outside the product", () => {
+  for (const href of ["//evil.example", "/workspace//evil.example", "/\\evil.example", "/\n/evil.example"]) {
+    const first = stateFixture();
+    const saved = { ...first.newSpaceConversation("invalid"), activeHref: href, tabs: [{ href, label: "unsafe" }] };
+    const stored = new Map([["careeract-space:invalid", JSON.stringify({ conversations: [saved], selectedId: saved.id, navigation: true, panelWidth: 50 })]]);
+    assert.equal(stateFixture(stored).getSpaceStore("invalid").snapshot().selectedId, "new");
+  }
+});
+
+test("old workspace links redirect once and preserve all query values", async () => {
+  const route = loadSource("app/workspace/[[...path]]/page.tsx", { "next/navigation": { redirect: href => { throw new Error(href); } } }).default;
+  await assert.rejects(route({ params: Promise.resolve({}), searchParams: Promise.resolve({}) }), { message: "/" });
+  await assert.rejects(route({ params: Promise.resolve({ path: ["library"] }), searchParams: Promise.resolve({ material: "synthetic", view: ["diff", "history"] }) }), { message: "/library?material=synthetic&view=diff&view=history" });
+  await assert.rejects(route({ params: Promise.resolve({ path: ["projects", "synthetic-project"] }), searchParams: Promise.resolve({}) }), { message: "/projects/synthetic-project" });
 });

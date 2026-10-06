@@ -38,7 +38,7 @@ export type WorkspaceNavItem = {
 export const workspaceGroups = ["Agent", "职业积累", "求职行动", "准备与决策", "系统"];
 
 export function navigationHref(key: WorkspaceSection) {
-  return key === "overview" ? "/workspace" : `/workspace/${key}`;
+  return key === "overview" ? "/" : `/${key}`;
 }
 
 export const workspaceSections: WorkspaceNavItem[] = [

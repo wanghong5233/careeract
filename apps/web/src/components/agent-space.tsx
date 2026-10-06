@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type FormEvent, type ReactNode } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Archive, ArchiveRestore, ArrowUp, BookOpen, ChevronDown, FileText, Folder, ListChecks, ListTree, MessageSquarePlus, MoreHorizontal, PanelLeft, PanelRight, Pin, PinOff, Plus, RotateCcw, Search, Square, SquarePen, Trash2, X } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowUp, BookOpen, ChevronDown, FileText, Folder, ListTree, MessageSquarePlus, MoreHorizontal, PanelLeft, PanelRight, Pin, PinOff, Plus, RotateCcw, Search, Square, SquarePen, Trash2, X } from "lucide-react";
 import { useAui, useAuiState } from "@assistant-ui/react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -40,7 +40,7 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
   const history = useConversationHistory(current.id, !!current.version);
   const mainCheckpoint = history.history?.messages.findLast(message => message.run_status === "COMPLETED")?.id ?? null;
   const sideChat = useSideChat(owner, current.id, !!current.version, mainCheckpoint);
-  const sideOpen = !!sideChat.state.chat && !sideChat.state.hidden;
+  const sideOpen = !current.archived && !!sideChat.state.chat && !sideChat.state.hidden;
   const aui = useAui();
   const localRunning = useAuiState(runtime => runtime.thread.isRunning);
   const runtimeRunning = localRunning || !!history.activeRun;
@@ -48,7 +48,7 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
   const runtimeHasMessages = runtimeMessages.length > 0;
   const [conversationBusy, setConversationBusy] = useState(false);
   const [messageEdit, setMessageEdit] = useState<{ conversationId: string; id: string; text: string } | null>(null);
-  const activeMessageEdit = messageEdit?.conversationId === current.id ? messageEdit : null;
+  const activeMessageEdit = !current.archived && messageEdit?.conversationId === current.id ? messageEdit : null;
   const branchRequest = useRef<{ key: string; id: string } | null>(null);
   const branchLock = useRef(false);
   const [sendBusy, setSendBusy] = useState(false);
@@ -88,10 +88,10 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
   const project = projects.find(item => item.id === current.projectId);
   const projectLabel = project?.title ?? (current.projectId ? "项目暂不可用" : "个人 Agent");
   const activeSection = workspaceSections.find(item => navigationHref(item.key) === pathname);
-  const routeProject = projects.find(item => pathname === `/workspace/projects/${item.id}`);
+  const routeProject = projects.find(item => pathname === `/projects/${item.id}` || pathname === `/workspace/projects/${item.id}`);
   const tabLabel = routeProject?.title ?? activeSection?.label ?? "职业项目";
   const tabs = current.tabs;
-  const routeOpen = pathname !== "/workspace";
+  const routeOpen = pathname !== "/" && pathname !== "/workspace";
   const visibleTabs = routeOpen && !tabs.some(tab => tab.href === currentHref)
     ? [...tabs, { href: currentHref, label: tabLabel }] : tabs;
   const panelOpen = sideOpen || contextOpen || (routeOpen && !current.panelHidden);
@@ -101,11 +101,12 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
   useEffect(() => {
     const replace = (event: Event) => {
       const detail = (event as CustomEvent<{ sourceId: string; messageId?: string; quote?: string }>).detail;
-      if (detail.sourceId === current.id) void sideChat.open(detail.messageId, detail.quote);
+      const selected = store.snapshot().conversations.find(item => item.id === detail.sourceId);
+      if (!selected?.archived && detail.sourceId === current.id) void sideChat.open(detail.messageId, detail.quote);
     };
     window.addEventListener("careeract:side-replace", replace);
     return () => window.removeEventListener("careeract:side-replace", replace);
-  }, [current.id, sideChat]);
+  }, [current.id, store, sideChat]);
 
   useEffect(() => {
     if (wasRunning.current && !localRunning) void history.refresh();
@@ -166,14 +167,14 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
 
   useEffect(() => {
     const sendPending = () => {
-      if (!current.version || history.loading || history.error || history.activeRun) return;
+      if (store.snapshot().conversations.find(item => item.id === current.id)?.archived || !current.version || history.loading || history.error || history.activeRun) return;
       const text = takeConversationSend(owner, current.id);
       if (text) void sendText(text, current.id);
     };
     sendPending();
     window.addEventListener("careeract:send-ready", sendPending);
     return () => window.removeEventListener("careeract:send-ready", sendPending);
-  }, [current.id, current.version, history.loading, history.error, history.activeRun, owner, sendText]);
+  }, [current.id, current.version, history.loading, history.error, history.activeRun, owner, store, sendText]);
 
   function update(patch: Partial<SpaceConversation>) {
     setFeedback("");
@@ -208,10 +209,10 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
       setLeaveAction(() => () => start(projectId, true));
       return;
     }
-    pendingNavigation.current = "/workspace";
+    pendingNavigation.current = "/";
     store.update(previous => beginSpaceConversation(previous, crypto.randomUUID(), projectId));
     const id = store.snapshot().selectedId;
-    router.push("/workspace");
+    router.push("/");
     if (projectId) setCollapsed(previous => previous.filter(id => id !== projectId));
     setContextOpen(false); setRecentExpanded(true); setMobileNavigation(false); setFeedback(""); requestAnimationFrame(() => input.current?.focus());
     setConversationBusy(true);
@@ -233,7 +234,7 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
       if (changes.archived !== undefined) {
         if (changes.archived && store.snapshot().selectedId === id) {
           store.update(previous => beginSpaceConversation(previous, crypto.randomUUID()));
-          pendingNavigation.current = "/workspace"; router.push("/workspace"); setContextOpen(false);
+          pendingNavigation.current = "/"; router.push("/"); setContextOpen(false);
         }
         if (!changes.archived) setRecentExpanded(true);
         setFeedback(changes.archived ? "对话已归档，可在侧栏归档列表中恢复。" : "对话已恢复。");
@@ -248,7 +249,7 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
     if (!deletingConversations.length || conversationBusy || conversationDeleteCheck) return;
     setConversationBusy(true); setConversationDeleteError("");
     const result = await deleteConversationSelection(deletingConversations, conversations.remove);
-    if (store.snapshot().selectedId !== state.selectedId) { pendingNavigation.current = "/workspace"; router.push("/workspace"); }
+    if (store.snapshot().selectedId !== state.selectedId) { pendingNavigation.current = "/"; router.push("/"); }
     setDeletingConversations(result.remaining);
     setSelectedConversations(previous => previous.filter(id => result.remaining.some(item => item.id === id)));
     if (result.error) {
@@ -271,7 +272,7 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
     } catch (error) {
       if (error instanceof ConversationRequestError && error.status === 404) {
         conversations.forget(deletingConversation.id);
-        if (deletingConversation.id === state.selectedId) router.push("/workspace");
+        if (deletingConversation.id === state.selectedId) router.push("/");
         setDeletingConversations(previous => previous.slice(1));
         setSelectedConversations(previous => previous.filter(id => id !== deletingConversation.id));
         setConversationDeleteCheck(false); setConversationDeleteError("已核对：该对话已不存在，其余尚未删除。");
@@ -310,9 +311,9 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
       if (draft) queueConversationSend(owner, saved.session_id, draft.trim());
       setMessageEdit(null);
       branchRequest.current = null;
-      pendingNavigation.current = "/workspace";
+      pendingNavigation.current = "/";
       store.update(previous => ({ ...previous, selectedId: saved.session_id, conversations: previous.conversations.map(item => item.id === saved.session_id ? { ...item, draft } : item) }));
-      router.push("/workspace");
+      router.push("/");
       requestAnimationFrame(() => input.current?.focus());
     } catch (error) { setFeedback(error instanceof Error ? error.message : "分支创建未确认，原对话保持不变。"); }
     finally { branchLock.current = false; setConversationBusy(false); }
@@ -329,9 +330,10 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
       return;
     }
     const selected = state.conversations.find(item => item.id === id)!;
-    pendingNavigation.current = selected.activeHref;
-    store.update(previous => ({ ...previous, selectedId: id }));
-    router.push(selected.activeHref);
+    const destination = selected.archived ? "/" : selected.activeHref;
+    pendingNavigation.current = destination;
+    store.update(previous => ({ ...previous, selectedId: id, conversations: previous.conversations.map(item => item.id === id && item.archived ? { ...item, panelHidden: true } : item) }));
+    router.push(destination);
     setContextOpen(false); setMobileNavigation(false); setFeedback("");
   }
 
@@ -355,7 +357,7 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
       return;
     }
     const remaining = visibleTabs.filter(tab => tab.href !== href);
-    const destination = remaining.at(-1)?.href ?? "/workspace";
+    const destination = remaining.at(-1)?.href ?? "/";
     if (currentHref === href) pendingNavigation.current = destination;
     store.update(previous => ({ ...previous, conversations: previous.conversations.map(item => item.id === previous.selectedId ? { ...item, tabs: remaining, activeHref: currentHref === href ? destination : item.activeHref } : item) }));
     if (currentHref === href) router.push(destination);
@@ -443,7 +445,7 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
   }
 
   function finishDelete(id: string) {
-    const destination = pathname === `/workspace/projects/${id}` ? "/workspace" : currentHref;
+    const destination = (pathname === `/projects/${id}` || pathname === `/workspace/projects/${id}`) ? "/" : currentHref;
     if (destination !== currentHref) pendingNavigation.current = destination;
     store.update(previous => removeSpaceProject(previous, id));
     setProjects(previous => previous.filter(item => item.id !== id));
@@ -520,35 +522,35 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
       <div className={styles.navigationHeader}><span className="text-sm font-semibold tracking-tight">CareerAct</span><Button ref={mobile ? undefined : collapseNavigation} variant="ghost" size="icon" className="hidden md:inline-flex" title="收起侧栏" aria-label="收起侧栏" aria-expanded onClick={toggleNavigation}><PanelLeft /></Button><Button variant="ghost" size="icon" className="md:hidden" aria-label="关闭项目导航" onClick={() => setMobileNavigation(false)}><X /></Button></div>
       <button className={styles.navButton} onClick={() => start()}><SquarePen />新对话</button>
       <button className={styles.navButton} onClick={showCapabilities}><Search />搜索能力<kbd className="ml-auto text-[10px] text-muted-foreground">Ctrl / ⌘ K</kbd></button>
-      <button className={cn(styles.navButton, pathname === "/workspace/background" && panelOpen && !contextOpen && styles.selected)} aria-current={pathname === "/workspace/background" && panelOpen && !contextOpen ? "page" : undefined} onClick={() => openRoute("/workspace/background")}><BookOpen />职业背景</button>
-      <button className={cn(styles.navButton, pathname === "/workspace/library" && panelOpen && !contextOpen && styles.selected)} aria-current={pathname === "/workspace/library" && panelOpen && !contextOpen ? "page" : undefined} onClick={() => openRoute("/workspace/library")}><FileText />资料与成果</button>
+      <button className={cn(styles.navButton, pathname === "/background" && panelOpen && !contextOpen && styles.selected)} aria-current={pathname === "/background" && panelOpen && !contextOpen ? "page" : undefined} onClick={() => openRoute("/background")}><BookOpen />职业背景</button>
+      <button className={cn(styles.navButton, pathname === "/library" && panelOpen && !contextOpen && styles.selected)} aria-current={pathname === "/library" && panelOpen && !contextOpen ? "page" : undefined} onClick={() => openRoute("/library")}><FileText />资料与成果</button>
       <div className={styles.navigationList}>
-      <div className={styles.selectionControls}>
-        {selectingConversations ? <>
+      {selectingConversations && <div className={styles.selectionControls}>
           <span role="status">已选 {selectedItems.length} 段</span>
           <TooltipIconButton tooltip="删除选中对话" aria-label="删除选中对话" className="size-7" disabled={!selectedItems.length || conversationBusy || (runtimeRunning && selectedItems.some(item => item.id === current.id))} onClick={() => requestConversationDelete(selectedItems)}><Trash2 /></TooltipIconButton>
           <TooltipIconButton tooltip="取消选择" aria-label="取消选择" className="size-7" disabled={conversationBusy} onClick={() => { setSelectedConversations([]); setSelectingConversations(false); selectionAnchor.current = null; }}><X /></TooltipIconButton>
-        </> : <TooltipIconButton tooltip="选择对话 · Ctrl/⌘ 加选 · Shift 连选" aria-label="选择对话" className="size-7" onClick={() => setSelectingConversations(true)}><ListChecks /></TooltipIconButton>}
-      </div>
+      </div>}
       {!!pinnedConversations.length && <section aria-label="置顶对话"><div className={styles.sectionHeading}>置顶</div>{pinnedConversations.map(renderConversation)}</section>}
       <div className={styles.sectionHeading}><span>项目</span><Button variant="ghost" size="icon" title="新建项目" aria-label="新建项目" onClick={() => { setMobileNavigation(false); setEditingError(""); setEdit({ kind: "create", id: crypto.randomUUID(), title: "" }); }}><Plus className="size-3.5" /></Button></div>
       {projectLoading && <p role="status" className="px-2 py-3 text-xs text-muted-foreground">正在读取项目…</p>}
       {projectError && <div className="px-2 py-3 text-xs"><p role="alert" className="leading-5 text-destructive">{projectError}</p><Button variant="ghost" size="sm" onClick={refreshProjects}>重新读取</Button></div>}
       {!projectLoading && !projectError && !projects.length && <p className="px-2 py-2 text-xs text-muted-foreground">暂无项目</p>}
       {projects.map(item => <section key={item.id} className="mb-2">
-        <div className="relative flex items-center">
+        <div className={cn(styles.sidebarActionRow, styles.projectRow)}>
           <button className={cn(styles.navButton, "min-w-0 flex-1")} aria-expanded={!collapsed.includes(item.id)} onClick={() => setCollapsed(previous => previous.includes(item.id) ? previous.filter(id => id !== item.id) : [...previous, item.id])}>
             <Folder /><span className="truncate" title={item.title}>{item.title}</span><ChevronDown className={cn("ml-auto !size-3", collapsed.includes(item.id) && "-rotate-90")} />
           </button>
-          <Button variant="ghost" size="icon" className="size-7 shrink-0" title="新对话" aria-label={`在${item.title}中新建对话`} onClick={() => start(item.id)}><Plus className="size-3.5" /></Button>
+          <div className={styles.sidebarActions}>
           <details className={styles.conversationMenu}>
             <summary aria-label={`${item.title}的项目操作`} title="项目操作"><MoreHorizontal className="size-3.5" /></summary>
             <div>
-              <button onClick={event => { event.currentTarget.closest("details")?.removeAttribute("open"); openRoute(`/workspace/projects/${item.id}`); }}>项目详情</button>
+              <button onClick={event => { event.currentTarget.closest("details")?.removeAttribute("open"); openRoute(`/projects/${item.id}`); }}>项目详情</button>
               <button onClick={event => { event.currentTarget.closest("details")?.removeAttribute("open"); setMobileNavigation(false); setEditingError(""); setEdit({ kind: "project", id: item.id, title: item.title }); }}>重命名</button>
               <button className="text-destructive" onClick={event => { event.currentTarget.closest("details")?.removeAttribute("open"); requestDelete(item); }}>删除项目</button>
             </div>
           </details>
+          <TooltipIconButton tooltip="新对话" aria-label={`在${item.title}中新建对话`} className="size-7" side="right" onClick={() => start(item.id)}><SquarePen className="size-3.5" /></TooltipIconButton>
+          </div>
         </div>
         {!collapsed.includes(item.id) && listedConversations.filter(conversation => conversation.projectId === item.id).map(renderConversation)}
       </section>)}
@@ -556,7 +558,10 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
       {conversations.loading && <p role="status" className="px-2 py-2 text-xs text-muted-foreground">正在读取对话…</p>}
       {conversations.error && <div className="px-2 py-2 text-xs"><p role="alert" className="text-destructive">{conversations.error}</p><Button variant="ghost" size="sm" onClick={conversations.refresh}>重新读取对话</Button></div>}
       <Collapsible open={recentExpanded} onOpenChange={setRecentExpanded}>
-        <CollapsibleTrigger className={styles.conversationSection} aria-label="最近"><ChevronDown />最近</CollapsibleTrigger>
+        <div className={cn(styles.sidebarActionRow, styles.conversationSectionRow)}>
+          <CollapsibleTrigger className={styles.conversationSection} aria-label="最近"><ChevronDown />最近</CollapsibleTrigger>
+          <div className={styles.sidebarActions}><TooltipIconButton tooltip="新对话" aria-label="在最近中新建对话" className="size-7" side="right" onClick={() => start()}><SquarePen className="size-3.5" /></TooltipIconButton></div>
+        </div>
         <CollapsibleContent>
           {recentConversations.map(renderConversation)}
           {!conversations.loading && !conversations.error && !recentConversations.length && <p className="px-2 py-2 text-xs text-muted-foreground">暂无最近对话</p>}
@@ -582,8 +587,8 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
       <TooltipIconButton ref={expandNavigation} className="size-9" side="right" tooltip="展开侧栏" aria-label="展开侧栏" aria-expanded={false} onClick={toggleNavigation}><PanelLeft /></TooltipIconButton>
       <TooltipIconButton className="size-9" side="right" tooltip="新对话" aria-label="新对话" onClick={() => start()}><SquarePen /></TooltipIconButton>
       <TooltipIconButton className="size-9" side="right" tooltip="搜索能力 · Ctrl/⌘ K" aria-label="搜索能力" onClick={showCapabilities}><Search /></TooltipIconButton>
-      <TooltipIconButton className="size-9" side="right" tooltip="职业背景" aria-label="职业背景" onClick={() => openRoute("/workspace/background")}><BookOpen /></TooltipIconButton>
-      <TooltipIconButton className="size-9" side="right" tooltip="资料与成果" aria-label="资料与成果" onClick={() => openRoute("/workspace/library")}><FileText /></TooltipIconButton>
+      <TooltipIconButton className="size-9" side="right" tooltip="职业背景" aria-label="职业背景" onClick={() => openRoute("/background")}><BookOpen /></TooltipIconButton>
+      <TooltipIconButton className="size-9" side="right" tooltip="资料与成果" aria-label="资料与成果" onClick={() => openRoute("/library")}><FileText /></TooltipIconButton>
       <div className="mt-auto"><AccountButton compact onClick={openAccount} /></div>
     </aside>
     {renderNavigation()}
@@ -596,22 +601,22 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
             <span className={styles.conversationTitle} title={current.title}>{current.title}</span>
           </div>
           <TooltipIconButton className="size-9" tooltip="查看背景与引用" aria-label="查看上下文" aria-pressed={contextOpen} onClick={() => setContextOpen(value => !value)}><ListTree /></TooltipIconButton>
-          <TooltipIconButton className="size-9" disabled={!current.version || sideChat.busy} tooltip={sideChat.state.chat ? "打开临时侧聊" : "新建临时侧聊"} aria-label="打开临时侧聊" onClick={() => void sideChat.open()}><MessageSquarePlus /></TooltipIconButton>
+          <TooltipIconButton className="size-9" disabled={current.archived || !current.version || sideChat.busy} tooltip={current.archived ? "已归档对话不可开启侧聊" : sideChat.state.chat ? "打开临时侧聊" : "新建临时侧聊"} aria-label="打开临时侧聊" onClick={() => void sideChat.open()}><MessageSquarePlus /></TooltipIconButton>
           <TooltipIconButton className="size-9" disabled={!panelOpen && !routeOpen && !current.tabs.length} tooltip={panelOpen ? "收起内容区" : "展开内容区"} aria-label={panelOpen ? "收起内容区" : "展开内容区"} aria-expanded={panelOpen} onClick={() => { if (panelOpen) hideContent(); else if (routeOpen) update({ panelHidden: false }); else if (current.tabs.length) openRoute(current.tabs.at(-1)!.href); }}><PanelRight /></TooltipIconButton>
         </header>
         <div className={styles.startArea}>
-          {current.archived && <p className={styles.feedback}>这段对话已归档，历史和草稿保留。<Button variant="link" size="sm" disabled={conversationBusy} onClick={() => void changeConversation(current.id, { archived: false })}>恢复对话</Button></p>}
+          {current.archived && <p role="status" className={styles.archiveNotice}><Archive className="size-4" />已归档 · 仅查看历史</p>}
           {history.history?.session.branch_context && <p className={styles.feedback}>独立分支 · 原对话保留<Button variant="link" size="sm" disabled={runtimeRunning || conversationBusy} onClick={() => select(history.history!.session.branch_context!.source_id)}>查看来源对话</Button></p>}
           {history.loading && <p role="status" className={styles.feedback}>正在读取历史…</p>}
           {history.error && <div className={styles.feedback}><p role="alert">{history.error}</p><Button variant="ghost" size="sm" onClick={history.refresh}>重新读取历史</Button></div>}
-          {(runtimeHasMessages || history.history?.messages.length || history.history?.runs?.length || localRunning || sendBusy) && <ConversationHistory key={current.id} messages={history.history?.messages ?? []} runs={history.history?.runs} liveMessages={localRunning || sendBusy || !history.history ? runtimeMessages : undefined} isRunning={localRunning || sendBusy} onQuote={(id, quote) => void sideChat.open(id, quote)} onAddToConversation={current.archived ? undefined : text => { const draft = current.draft ? `${current.draft}\n\n${text}` : text; if (draft.length > 4000) { setFeedback("引用与草稿超过 4000 字，请精简后再添加；草稿已保留。"); return; } setContextOpen(false); store.update(previous => ({ ...previous, conversations: previous.conversations.map(item => item.id === current.id ? { ...item, draft } : item) })); requestAnimationFrame(() => input.current?.focus()); }} onEdit={runtimeRunning || conversationBusy || current.archived ? undefined : (id, text) => { setFeedback(""); setMessageEdit({ conversationId: current.id, id, text }); }} editing={activeMessageEdit ? { ...activeMessageEdit, busy: conversationBusy || runtimeRunning, error: feedback, onChange: text => setMessageEdit(previous => previous ? { ...previous, text } : null), onCancel: () => { setMessageEdit(null); setFeedback(""); requestAnimationFrame(() => input.current?.focus()); }, onSubmit: () => void createBranch(activeMessageEdit.id, "before", activeMessageEdit.text) } : undefined} onBranch={runtimeRunning || conversationBusy || current.archived || activeMessageEdit ? undefined : id => void createBranch(id, "after")} />}
+          {(runtimeHasMessages || history.history?.messages.length || history.history?.runs?.length || localRunning || sendBusy) && <ConversationHistory key={current.id} messages={history.history?.messages ?? []} runs={history.history?.runs} liveMessages={localRunning || sendBusy || !history.history ? runtimeMessages : undefined} isRunning={localRunning || sendBusy} onQuote={current.archived ? undefined : (id, quote) => void sideChat.open(id, quote)} onAddToConversation={current.archived ? undefined : text => { const draft = current.draft ? `${current.draft}\n\n${text}` : text; if (draft.length > 4000) { setFeedback("引用与草稿超过 4000 字，请精简后再添加；草稿已保留。"); return; } setContextOpen(false); store.update(previous => ({ ...previous, conversations: previous.conversations.map(item => item.id === current.id ? { ...item, draft } : item) })); requestAnimationFrame(() => input.current?.focus()); }} onEdit={runtimeRunning || conversationBusy || current.archived ? undefined : (id, text) => { setFeedback(""); setMessageEdit({ conversationId: current.id, id, text }); }} editing={activeMessageEdit ? { ...activeMessageEdit, busy: conversationBusy || runtimeRunning, error: feedback, onChange: text => setMessageEdit(previous => previous ? { ...previous, text } : null), onCancel: () => { setMessageEdit(null); setFeedback(""); requestAnimationFrame(() => input.current?.focus()); }, onSubmit: () => void createBranch(activeMessageEdit.id, "before", activeMessageEdit.text) } : undefined} onBranch={runtimeRunning || conversationBusy || current.archived || activeMessageEdit ? undefined : id => void createBranch(id, "after")} />}
           {sideChat.error && <p role="alert" className={styles.feedback}>{sideChat.error}</p>}
           {history.activeRun && !localRunning && <div className={styles.feedback}><p role="status">{["RUNNING", "PENDING"].includes(history.activeRun.status) ? "服务端运行尚未结束，可停止或重新读取状态。" : "运行状态需要核对，请勿重复发送。"}</p><Button variant="ghost" size="sm" onClick={history.refresh}>重新读取运行状态</Button><Button variant="ghost" size="sm" disabled={stopBusy} onClick={() => void reconcileRun()}>核对中断状态</Button><p>仅在确认没有执行进程后解除锁定；结果仍未知，不会重发。</p></div>}
           {history.history?.truncated && <p className={styles.feedback}>当前显示最近 100 条消息，更早内容仍保留。</p>}
           {!history.loading && !history.error && !history.history?.messages.length && !runtimeHasMessages && <div className={styles.welcome}><h1>{current.archived ? "已归档对话" : current.title}</h1></div>}
         </div>
           <div className={styles.composerArea}>
-            <div className={styles.composerProject}>
+            {current.archived ? <div className={styles.archiveFooter}><span>历史和草稿已保留</span><Button variant="outline" size="sm" disabled={conversationBusy} onClick={() => void changeConversation(current.id, { archived: false })}><ArchiveRestore className="size-4" />恢复并继续对话</Button></div> : <><div className={styles.composerProject}>
               <AgentProjectPicker key={current.id} projects={projects} projectId={current.projectId} readOnly={current.archived || conversationBusy || runtimeRunning} loading={projectLoading} error={projectError} hasMore={!!projectCursor} onRefresh={() => void refreshProjects()} onLoadMore={() => void loadMoreProjects()} onChange={projectId => void changeConversation(current.id, { project_id: projectId })} onCreate={() => { setEditingError(""); setEdit({ kind: "create", id: crypto.randomUUID(), title: "" }); }} />
             </div>
             <form onSubmit={submit} className={styles.composer}>
@@ -620,12 +625,12 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
               <AgentComposerTools key={current.id} readOnly={current.archived} modelId={current.modelId} modelDisabled={runtimeRunning || conversationBusy || sendBusy || history.loading || !!history.error} onModelChange={id => void changeConversation(current.id, { model_id: id })}>
                 <TooltipIconButton type="submit" variant="default" disabled={current.archived || (!!activeMessageEdit && !runtimeRunning) || conversationBusy || stopBusy || history.loading || !!history.error || (!runtimeRunning && (sendBusy || !current.draft.trim()))} tooltip={runtimeRunning ? "停止运行" : "发送 · Ctrl/⌘ Enter"} aria-label={runtimeRunning ? "停止运行" : "发送"} side="top" className="size-8 rounded-full">{runtimeRunning ? <Square className="size-3 fill-current" /> : <ArrowUp />}</TooltipIconButton>
               </AgentComposerTools>
-            </form>
+            </form></>}
           {feedback && <p role="status" className={styles.feedback}>{feedback}</p>}
           {!store.storageAvailable() && <p role="alert" className={styles.feedback}>此浏览器无法保留草稿，请勿关闭页面。</p>}
           </div>
       </main>
-      <SideChatPanel controller={sideChat} mainCheckpoint={sideChat.state.chat?.side_context.source_id === current.id ? mainCheckpoint : null} />
+      <SideChatPanel controller={sideChat} hidden={current.archived} mainCheckpoint={sideChat.state.chat?.side_context.source_id === current.id ? mainCheckpoint : null} />
       {(routeOpen || contextOpen) && <>{panelOpen && <div role="separator" aria-label="调整内容区宽度" aria-orientation="vertical" tabIndex={0} aria-valuemin={30} aria-valuemax={65} aria-valuenow={state.panelWidth} className={styles.resizeHandle} onKeyDown={event => { if (event.key === "ArrowLeft" || event.key === "ArrowRight") { event.preventDefault(); store.update(previous => ({ ...previous, panelWidth: Math.min(65, Math.max(30, previous.panelWidth + (event.key === "ArrowLeft" ? 2 : -2))) })); } }} onPointerDown={event => event.currentTarget.setPointerCapture(event.pointerId)} onPointerMove={event => { if (!event.currentTarget.hasPointerCapture(event.pointerId)) return; const bounds = space.current?.getBoundingClientRect(); if (bounds) store.update(previous => ({ ...previous, panelWidth: Math.min(65, Math.max(30, (bounds.right - event.clientX) / bounds.width * 100)) })); }} onPointerUp={event => event.currentTarget.releasePointerCapture(event.pointerId)} />}
       <aside className={cn(styles.content, !panelOpen && styles.hiddenContent)} aria-label="内容工作区"><div className={styles.tabBar}><Button variant="ghost" size="icon" className="md:hidden shrink-0" aria-label="打开项目导航" aria-expanded={mobileNavigation} onClick={() => setMobileNavigation(true)}><PanelLeft /></Button><div role="tablist" aria-label="打开的内容" className={styles.tabList} onKeyDown={event => { if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return; const buttons = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')); const selected = buttons.indexOf(document.activeElement as HTMLButtonElement); if (selected < 0) return; event.preventDefault(); const next = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1 : (selected + (event.key === "ArrowRight" ? 1 : -1) + buttons.length) % buttons.length; buttons[next]?.focus(); buttons[next]?.click(); }}>{visibleTabs.map(tab => <div key={tab.href} className={cn(styles.tab, !contextOpen && tab.href === currentHref && styles.activeTab)}><button role="tab" tabIndex={!contextOpen && tab.href === currentHref ? 0 : -1} aria-selected={!contextOpen && tab.href === currentHref} aria-controls="space-content" id={`tab-${tab.href}`} title={tab.label} onClick={() => openRoute(tab.href)}><FileText className="size-3.5" /><span className="truncate">{tab.label}</span></button><button title={`关闭${tab.label}`} aria-label={`关闭${tab.label}标签`} onClick={() => closeTab(tab.href)}><X className="size-3" /></button></div>)}{contextOpen && <div className={cn(styles.tab, styles.activeTab)}><button role="tab" aria-selected aria-controls="space-content" id="tab-context"><ListTree className="size-3.5" />引用范围</button><button aria-label="关闭引用范围标签" onClick={() => setContextOpen(false)}><X className="size-3" /></button></div>}</div><Button variant="ghost" size="icon" title="收起并保留内容" aria-label="收起内容区并保留标签" onClick={hideContent}><PanelRight /></Button></div>
         <div id="space-content" role="tabpanel" aria-labelledby={contextOpen ? "tab-context" : `tab-${currentHref}`} className={styles.surface}>
@@ -634,17 +639,17 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
             <section>
               <h3>个人背景与长期规则</h3>
               <p>不同对话和项目共用同一份已确认背景与通用规则，Agent 按需读取相关内容。</p>
-              <div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" onClick={() => openRoute("/workspace/background")}>职业背景</Button><Button variant="outline" size="sm" onClick={() => openRoute("/workspace/assistant")}>规则与笔记</Button></div>
+              <div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" onClick={() => openRoute("/background")}>职业背景</Button><Button variant="outline" size="sm" onClick={() => openRoute("/assistant")}>规则与笔记</Button></div>
             </section>
             <section>
               <h3>项目补充 · {projectLabel}</h3>
               <p>{project ? project.purpose || "尚未填写项目目标。" : current.projectId ? "暂时无法读取关联项目，请核对项目列表。" : "仍可使用个人背景与长期规则。关联项目后，额外使用该项目的目标和规则。"}</p>
-              {project && <Button variant="outline" size="sm" onClick={() => openRoute(`/workspace/projects/${project.id}`)}>项目详情</Button>}
+              {project && <Button variant="outline" size="sm" onClick={() => openRoute(`/projects/${project.id}`)}>项目详情</Button>}
             </section>
             <section>
               <h3>本次引用</h3>
               <p>{history.history?.messages.length ? "历史引用需按当次工作记录核对。" : "此对话尚无已保存的运行消息。"}打开内容标签不会自动把正文发送给模型。</p>
-              <Button variant="outline" size="sm" onClick={() => openRoute("/workspace/library")}>查看资料与成果</Button>
+              <Button variant="outline" size="sm" onClick={() => openRoute("/library")}>查看资料与成果</Button>
             </section>
           </article>}
           <div className={cn(styles.routeContent, contextOpen && styles.hiddenContent)}>{children}</div>

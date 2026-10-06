@@ -20,10 +20,12 @@ test("saved message view exposes only the latest input for editing and retains c
   ];
   const edit = () => {};
   const branch = () => {};
-  const result = view.ConversationHistory({ messages, runs: [{ run_id: "two", status: "CANCELLED" }], onEdit: edit, onBranch: branch });
+  const feedback = () => {};
+  const result = view.ConversationHistory({ messages, runs: [{ run_id: "two", status: "CANCELLED" }], onEdit: edit, onBranch: branch, onFeedback: feedback });
   assert.equal(result.props.value.editId, "latest");
   assert.equal(result.props.value.edit, edit);
   assert.equal(result.props.value.branch, branch);
+  assert.equal(result.props.value.feedback, feedback);
   assert.equal(displayed.at(-1).status.reason, "cancelled");
   assert.equal(displayed[0].content, "原始问题\n第二行");
   assert.equal(messages.length, 3);

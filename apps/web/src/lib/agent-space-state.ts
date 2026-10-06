@@ -4,7 +4,16 @@ import type { AgentConversation } from "@/lib/agent-conversations";
 export type SpaceConversation = { id: string; projectId: string | null; title: string; draft: string; archived: boolean; pinned?: boolean; createdAt?: string; tabs: SpaceTab[]; activeHref: string; panelHidden: boolean; version?: string; createId?: string; modelId?: string | null; titleOrigin?: string; titleGenerationAttempted?: boolean };
 export type SpaceState = { conversations: SpaceConversation[]; selectedId: string; navigation: boolean; panelWidth: number; recentExpanded?: boolean; archiveExpanded?: boolean };
 export function newSpaceConversation(id: string, projectId: string | null = null): SpaceConversation {
-  return { id, projectId, title: "新对话", draft: "", archived: false, tabs: [], activeHref: "/workspace", panelHidden: false };
+  return { id, projectId, title: "新对话", draft: "", archived: false, tabs: [], activeHref: "/", panelHidden: false };
+}
+
+function canonicalHref(href: string): string {
+  if (/^\/workspace(?:[/?#]|$)/.test(href)) return href.slice("/workspace".length).replace(/^(?=[?#]|$)/, "/");
+  return href;
+}
+
+function validHref(value: unknown): value is string {
+  return typeof value === "string" && value.startsWith("/") && !value.startsWith("//") && !/[\\\s\u0000-\u001f]/.test(value);
 }
 
 export function beginSpaceConversation(state: SpaceState, id: string, projectId: string | null = null): SpaceState {
@@ -38,15 +47,18 @@ export function mergeSpaceConversations(state: SpaceState, conversations: AgentC
 const initialState: SpaceState = { conversations: [newSpaceConversation("new")], selectedId: "new", navigation: true, panelWidth: 50, recentExpanded: true, archiveExpanded: false };
 
 export function removeSpaceProject(state: SpaceState, projectId: string): SpaceState {
-  const href = `/workspace/projects/${projectId}`;
+  const href = `/projects/${projectId}`;
   return {
     ...state,
     conversations: state.conversations.map(item => ({
       ...item,
       projectId: item.projectId === projectId ? null : item.projectId,
-      tabs: item.tabs.filter(tab => tab.href.split(/[?#]/)[0] !== href),
-      activeHref: item.activeHref.split(/[?#]/)[0] === href ? "/workspace" : item.activeHref,
-      panelHidden: item.activeHref.split(/[?#]/)[0] === href ? true : item.panelHidden,
+      tabs: item.tabs.filter(tab => {
+        const tabHref = canonicalHref(tab.href).split(/[?#]/)[0];
+        return tabHref !== href;
+      }),
+      activeHref: canonicalHref(item.activeHref).split(/[?#]/)[0] === href ? "/" : canonicalHref(item.activeHref),
+      panelHidden: canonicalHref(item.activeHref).split(/[?#]/)[0] === href ? true : item.panelHidden,
     })),
   };
 }
@@ -54,7 +66,7 @@ const stores = new Map<string, ReturnType<typeof createStore>>();
 const storagePrefix = "careeract-space:";
 
 function validTabs(value: unknown): value is SpaceTab[] {
-  return Array.isArray(value) && value.every(tab => tab && typeof tab.href === "string" && tab.href.startsWith("/workspace/") && !tab.href.includes("\\") && typeof tab.label === "string");
+  return Array.isArray(value) && value.every(tab => tab && validHref(tab.href) && validHref(canonicalHref(tab.href)) && typeof tab.label === "string");
 }
 
 function isSpaceState(value: unknown): value is SpaceState & { tabs?: SpaceTab[] } {
@@ -73,7 +85,7 @@ function isSpaceState(value: unknown): value is SpaceState & { tabs?: SpaceTab[]
       && (item.version === undefined || typeof item.version === "string")
       && (item.createId === undefined || typeof item.createId === "string")
       && (item.tabs === undefined || validTabs(item.tabs))
-      && (item.activeHref === undefined || item.activeHref === "/workspace" || (typeof item.activeHref === "string" && item.activeHref.startsWith("/workspace/") && !item.activeHref.includes("\\")))
+      && (item.activeHref === undefined || (validHref(item.activeHref) && validHref(canonicalHref(item.activeHref))))
       && (item.panelHidden === undefined || typeof item.panelHidden === "boolean"))
     && state.conversations.some(item => item.id === state.selectedId)
     && (state.tabs === undefined || validTabs(state.tabs));
@@ -96,7 +108,7 @@ function createStore(owner: string) {
           if (isSpaceState(parsed)) snapshot = {
             selectedId: parsed.selectedId, navigation: parsed.navigation, panelWidth: parsed.panelWidth,
             recentExpanded: parsed.recentExpanded ?? true, archiveExpanded: parsed.archiveExpanded ?? false,
-            conversations: parsed.conversations.map(item => ({ ...newSpaceConversation(item.id, item.projectId), ...item, tabs: item.tabs ?? (item.id === parsed.selectedId ? parsed.tabs ?? [] : []) })),
+            conversations: parsed.conversations.map(item => ({ ...newSpaceConversation(item.id, item.projectId), ...item, activeHref: canonicalHref(item.activeHref ?? "/"), tabs: (item.tabs ?? (item.id === parsed.selectedId ? parsed.tabs ?? [] : [])).map(tab => ({ ...tab, href: canonicalHref(tab.href) })) })),
           };
         } catch { storageAvailable = false; }
       }

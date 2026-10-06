@@ -3,6 +3,7 @@
 import { isRestrictedResponse, restrictedContentMessage } from "@/lib/privacy";
 
 import { useEffect, useState, type FormEvent } from "react";
+import Link from "next/link";
 import { CheckCircle2, LoaderCircle, Pencil, Plus, RotateCcw, Save, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -44,7 +45,7 @@ export function ProfileEditor() {
           <div className="space-y-4">
             <p>{loadError}</p>
             <Button variant="outline" onClick={() => { setLoadError(""); setLoadAttempt(loadAttempt + 1); }}>重新读取</Button>
-            <a href="/sign-in" className="ml-4 text-sm underline">前往登录</a>
+            <Link href="/sign-in" className="ml-4 text-sm underline">前往登录</Link>
           </div>
         ) : <p className="flex items-center gap-2 text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />正在读取你的职业档案…</p>}
       </div>

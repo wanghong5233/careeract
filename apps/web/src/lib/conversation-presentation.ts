@@ -17,7 +17,7 @@ export function historyThreadMessages(messages: HistoryMessage[], runs?: Array<{
     const showDuration = !message.run_id || !timedRuns.has(message.run_id);
     converted.push({
       id: message.id, role: message.role, content: message.content, createdAt: new Date(message.created_at * 1000),
-      ...(message.role === "assistant" ? { status: historyMessageStatus(message.run_status), metadata: { custom: { runStatus: message.run_status, runId: message.run_id, runDurationSeconds: showDuration ? message.run_duration_seconds : undefined, runProcess: message.process, noSavedReply: message.content ? undefined : true } } } : {}),
+      ...(message.role === "assistant" ? { status: historyMessageStatus(message.run_status), metadata: { custom: { messageCreatedAt: message.created_at > 0 ? message.created_at * 1000 : undefined, runStatus: message.run_status, runId: message.run_id, runDurationSeconds: showDuration ? message.run_duration_seconds : undefined, runProcess: message.process, noSavedReply: message.content ? undefined : true } } } : {}),
     });
     if (message.role === "assistant" && message.run_id) timedRuns.add(message.run_id);
     const run = message.run_id ? pending.get(message.run_id) : undefined;
@@ -53,7 +53,7 @@ export function groupLiveAssistantMessages(messages: readonly ThreadMessageLike[
         process.push({ id: part.toolCallId ?? `tool-${process.length}`, kind: "tool", label: part.toolName, status: projected?.status ?? (final.status?.type === "running" ? "RUNNING" : final.status?.type === "incomplete" && final.status.reason === "cancelled" ? "CANCELLED" : "UNKNOWN"), duration_seconds: projected?.duration_seconds });
       }
     }
-    result.push({ ...final, content: finalText, metadata: { ...final.metadata, custom: { ...final.metadata?.custom, runProcess: Array.from(new Map(process.map(item => [item.id, item])).values()) } } });
+    result.push({ ...final, content: finalText, metadata: { ...final.metadata, custom: { ...final.metadata?.custom, messageCreatedAt: final.metadata?.custom?.messageCreatedAt ?? final.createdAt?.getTime(), runProcess: Array.from(new Map(process.map(item => [item.id, item])).values()) } } });
     turn = [];
   };
   for (const message of messages) {

@@ -31,8 +31,8 @@ export default function SignInPage() {
         setError(result.error.status === 429 ? "操作过于频繁，请稍后再试。" : isSignUp ? "注册失败，请检查填写内容；已有账户请直接登录。" : "登录失败，请核对邮箱和密码后重试。");
         return;
       }
-      const returnTo = new URLSearchParams(window.location.search).get("returnTo") ?? "/workspace";
-      const destination = !returnTo.includes("\\") && (returnTo === "/workspace" || returnTo.startsWith("/workspace/") || returnTo.startsWith("/workspace?")) ? returnTo : "/workspace";
+      const returnTo = new URLSearchParams(window.location.search).get("returnTo") ?? "/";
+      const destination = returnTo.startsWith("/") && !returnTo.startsWith("//") && !/[\\\s\u0000-\u001f]/.test(returnTo) ? returnTo : "/";
       router.replace(destination);
       router.refresh();
     } catch { setError("无法连接服务，请检查网络后重试。"); }

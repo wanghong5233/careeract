@@ -88,7 +88,7 @@ function WorkspaceFrameContent({ children, owner }: { children: ReactNode; owner
   }, []);
 
   return <WorkspaceActionsContext.Provider value={actions}>
-    <AgentHome owner={owner}>{pathname === "/workspace" ? null : children}</AgentHome>
+    <AgentHome owner={owner}>{pathname === "/" || pathname === "/workspace" ? null : children}</AgentHome>
     <CapabilitySearch open={capabilitiesOpen} onOpenChange={setCapabilitiesOpen} />
     <WorkspaceAccount open={accountOpen} onOpenChange={setAccountOpen} />
   </WorkspaceActionsContext.Provider>;

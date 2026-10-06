@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { ArrowDown, Check, ChevronRight, Copy, GitBranch, Pencil, Wrench } from "lucide-react";
+import { ArrowDown, Check, ChevronRight, Copy, GitFork, Pencil, ThumbsDown, ThumbsUp, Wrench } from "lucide-react";
 import { ActionBarPrimitive, MessagePrimitive, SelectionToolbarPrimitive, ThreadPrimitive, useAuiState } from "@assistant-ui/react";
 import { MarkdownText } from "@/components/markdown-text";
 import { TooltipIconButton } from "@/components/tooltip-icon-button";
@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import type { RunActivity } from "@/lib/agent-conversations";
 import { cn } from "@/lib/utils";
-import { formatRunDuration } from "@/lib/run-presentation";
+import { formatMessageTimestamp, formatRunDuration } from "@/lib/run-presentation";
 import { useMessageActions, type MessageEdit } from "@/components/message-actions";
 import styles from "./agent-space.module.css";
 
@@ -125,6 +125,9 @@ export function ConversationAssistantMessage() {
   const actions = useMessageActions();
   const id = useAuiState(state => state.message.id);
   const duration = useAuiState(state => state.message.metadata.custom.runDurationSeconds);
+  const copied = useAuiState(state => state.message.isCopied);
+  const timestamp = useAuiState(state => state.message.metadata.custom.messageCreatedAt);
+  const messageTime = formatMessageTimestamp(timestamp);
   const process = useAuiState(state => state.message.metadata.custom.runProcess as RunActivity[] | undefined);
   const startedAt = useAuiState(state => state.thread.messages.findLast(message => message.role === "user")?.createdAt?.getTime());
   const status = useAuiState(state => state.message.status);
@@ -140,9 +143,16 @@ export function ConversationAssistantMessage() {
     {hasText && <div data-aui-quote-selectable={actions.addToConversation ? "true" : "false"}><MessagePrimitive.Content components={{ Text: MarkdownText }} /></div>}
     {running && <p role="status" className={cn(styles.messageStatus, styles.messageStatusRunning)}><span aria-hidden="true" className={styles.streamingIndicator} />{hasText ? "正在生成…" : "正在等待回复…"}</p>}
     {incomplete && <p role="status" className={cn(styles.messageStatus, reason === "error" ? styles.messageStatusError : styles.messageStatusIncomplete)}>{label} · {noSavedReply ? "本次运行没有已保存的回复" : "请核对已显示内容"}</p>}
-    {actions.branch && hasText && runStatus === "COMPLETED" && <div className={styles.assistantActions}>
-      <TooltipIconButton tooltip="从此处创建独立分支" aria-label="从此处创建独立分支" onClick={() => actions.branch?.(id)}><GitBranch /></TooltipIconButton>
-    </div>}
+    {hasText && !running && <ActionBarPrimitive.Root className={styles.assistantActions}>
+      <ActionBarPrimitive.Copy asChild><TooltipIconButton tooltip={copied ? "已复制" : "复制回答"} aria-label={copied ? "已复制" : "复制回答"} side="top">{copied ? <Check /> : <Copy />}</TooltipIconButton></ActionBarPrimitive.Copy>
+      {actions.feedback && runStatus === "COMPLETED" && <>
+        <TooltipIconButton tooltip="回答有帮助" aria-label="回答有帮助" side="top" onClick={() => actions.feedback?.(id, "positive")}><ThumbsUp /></TooltipIconButton>
+        <TooltipIconButton tooltip="回答需要改进" aria-label="回答需要改进" side="top" onClick={() => actions.feedback?.(id, "negative")}><ThumbsDown /></TooltipIconButton>
+      </>}
+      {actions.branch && runStatus === "COMPLETED" && <TooltipIconButton tooltip="分支到新聊天" aria-label="分支到新聊天" side="top" onClick={() => actions.branch?.(id)}><GitFork /></TooltipIconButton>}
+      {messageTime && <time className={styles.messageTime} dateTime={messageTime.dateTime} title={messageTime.title}>{messageTime.label}</time>}
+      <span role="status" className="sr-only">{copied ? "回答已复制" : ""}</span>
+    </ActionBarPrimitive.Root>}
   </MessagePrimitive.Root>;
 }
 
