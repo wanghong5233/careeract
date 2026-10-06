@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { createLatestRequest } from "@/lib/latest-request";
-import { getSpaceStore, mergeSpaceConversations } from "@/lib/agent-space-state";
-import { createConversation, readConversations, saveConversation, type AgentConversation } from "@/lib/agent-conversations";
+import { getSpaceStore, mergeSpaceConversations, removeSpaceConversation } from "@/lib/agent-space-state";
+import { createConversation, deleteConversation, readConversations, saveConversation, type AgentConversation } from "@/lib/agent-conversations";
 
 export function useAgentConversations(owner: string) {
   const store = getSpaceStore(owner);
@@ -18,7 +18,14 @@ export function useAgentConversations(owner: string) {
     try {
       const page = await readConversations(nextCursor, AbortSignal.any([controller.signal, AbortSignal.timeout(20_000)]));
       if (!requests.isCurrent(controller)) return;
-      store.update(state => mergeSpaceConversations(state, page.items));
+      store.update(state => {
+        let merged = mergeSpaceConversations(state, page.items);
+        if (!nextCursor && !page.next_cursor) {
+          const ids = new Set(page.items.map(item => item.session_id));
+          state.conversations.filter(item => item.version && !ids.has(item.id)).forEach(item => { merged = removeSpaceConversation(merged, item.id); });
+        }
+        return merged;
+      });
       setCursor(page.next_cursor);
     } catch (failure) {
       if (requests.isCurrent(controller)) setError(failure instanceof Error ? failure.message : "对话读取失败，请重试。");
@@ -68,5 +75,15 @@ export function useAgentConversations(owner: string) {
     return saved;
   }
 
-  return { loading, error, cursor, accept, persist, refresh: () => load(), loadMore: () => cursor ? load(cursor) : Promise.resolve() };
+  async function remove(id: string, version?: string) {
+    if (version) await deleteConversation(id, version);
+    forget(id);
+  }
+
+  function forget(id: string) {
+    requests.cancel(); setLoading(false);
+    store.update(state => removeSpaceConversation(state, id));
+  }
+
+  return { loading, error, cursor, accept, persist, remove, forget, refresh: () => load(), loadMore: () => cursor ? load(cursor) : Promise.resolve() };
 }

@@ -45,6 +45,19 @@ test("project deletion detaches conversations and keeps draft, archive state and
   assert.equal(state.conversations[0].projectId, "project");
 });
 
+test("conversation removal clears only the selected chat and opens a blank without losing other drafts", () => {
+  const { removeSpaceConversation, newSpaceConversation } = stateFixture();
+  const kept = { ...newSpaceConversation("kept"), draft: "保留草稿", archived: true };
+  const state = { conversations: [newSpaceConversation("deleted"), kept], selectedId: "deleted", navigation: true, panelWidth: 50 };
+  const result = removeSpaceConversation(state, "deleted");
+  assert.equal(result.conversations.length, 2);
+  assert.equal(result.conversations[0].draft, "");
+  assert.equal(result.conversations[0].id, result.selectedId);
+  assert.deepEqual(result.conversations[1], kept);
+  assert.equal(removeSpaceConversation({ ...state, selectedId: "kept" }, "deleted").selectedId, "kept");
+  assert.equal(state.conversations.length, 2);
+});
+
 test("draft storage restores across module reload and isolates owners and tabs", () => {
   const stored = new Map();
   const first = stateFixture(stored);

@@ -5,24 +5,25 @@ import { AssistantRuntimeProvider, useExternalStoreRuntime, type ThreadMessageLi
 import { ConversationMessages } from "@/components/conversation-messages";
 import { MessageActionsContext, type MessageEdit } from "@/components/message-actions";
 import type { HistoryMessage } from "@/lib/agent-conversations";
-import { historyThreadMessages } from "@/lib/conversation-presentation";
+import { historyThreadMessages, groupLiveAssistantMessages } from "@/lib/conversation-presentation";
 
 export function ConversationHistory({ messages, runs, liveMessages, isRunning = false, onQuote, onAddToConversation, onEdit, editing, onBranch }: { messages: HistoryMessage[]; runs?: Array<{ run_id: string; status: string }>; liveMessages?: readonly ThreadMessageLike[]; isRunning?: boolean; onQuote?: (id: string, text: string) => void; onAddToConversation?: (text: string) => void; onEdit?: (id: string, text: string) => void; editing?: MessageEdit; onBranch?: (id: string) => void }) {
   const converted = useMemo(() => historyThreadMessages(messages, runs), [messages, runs]);
   const displayed = useMemo(() => {
     if (!liveMessages) return converted;
+    const groupedLive = groupLiveAssistantMessages(liveMessages);
     const saved = new Map(converted.map(message => [message.id, message]));
     const combined = new Map(converted.map(message => [message.id, message]));
     const text = (message: ThreadMessageLike) => typeof message.content === "string" ? message.content : (message.content ?? []).filter(part => part.type === "text").map(part => part.text).join("\n");
     let restoredPrefix = 0;
-    while (restoredPrefix < converted.length && restoredPrefix < liveMessages.length) {
-      const restored = liveMessages[restoredPrefix];
+    while (restoredPrefix < converted.length && restoredPrefix < groupedLive.length) {
+      const restored = groupedLive[restoredPrefix];
       const canonical = converted[restoredPrefix];
       if (restored.role !== canonical.role || restored.status?.type === "running" || text(restored) !== text(canonical)) break;
       restoredPrefix++;
     }
     if (!converted.slice(0, restoredPrefix).some(message => message.role === "assistant")) restoredPrefix = 0;
-    liveMessages.forEach((incoming, index) => {
+    groupedLive.forEach((incoming, index) => {
       const message = index < restoredPrefix ? { ...incoming, id: converted[index].id } : incoming;
       const persisted = saved.get(message.id);
       const terminal = ["COMPLETED", "CANCELLED", "ERROR", "REGENERATED", "INTERRUPTED"].includes(String(persisted?.metadata?.custom?.runStatus));

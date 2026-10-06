@@ -12,3 +12,8 @@ export async function PATCH(request: NextRequest, context: Context): Promise<Res
   const { id } = await context.params;
   return forwardConversationRequest(request, `/api/v1/agent/conversations/${encodeURIComponent(id)}`, "PATCH");
 }
+
+export async function DELETE(request: NextRequest, context: Context): Promise<Response> {
+  const { id } = await context.params;
+  return forwardConversationRequest(request, `/api/v1/agent/conversations/${encodeURIComponent(id)}`, "DELETE");
+}

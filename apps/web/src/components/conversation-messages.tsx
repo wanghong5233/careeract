@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { ArrowDown, Check, Copy, GitBranch, Pencil } from "lucide-react";
+import { ArrowDown, Check, ChevronRight, Copy, GitBranch, Pencil, Wrench } from "lucide-react";
 import { ActionBarPrimitive, MessagePrimitive, SelectionToolbarPrimitive, ThreadPrimitive, useAuiState } from "@assistant-ui/react";
 import { MarkdownText } from "@/components/markdown-text";
 import { TooltipIconButton } from "@/components/tooltip-icon-button";
 import { Button } from "@/components/ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import type { RunActivity } from "@/lib/agent-conversations";
 import { cn } from "@/lib/utils";
 import { formatRunDuration } from "@/lib/run-presentation";
 import { useMessageActions, type MessageEdit } from "@/components/message-actions";
@@ -123,6 +125,7 @@ export function ConversationAssistantMessage() {
   const actions = useMessageActions();
   const id = useAuiState(state => state.message.id);
   const duration = useAuiState(state => state.message.metadata.custom.runDurationSeconds);
+  const process = useAuiState(state => state.message.metadata.custom.runProcess as RunActivity[] | undefined);
   const startedAt = useAuiState(state => state.thread.messages.findLast(message => message.role === "user")?.createdAt?.getTime());
   const status = useAuiState(state => state.message.status);
   const runStatus = useAuiState(state => state.message.metadata.custom.runStatus);
@@ -133,7 +136,7 @@ export function ConversationAssistantMessage() {
   const reason = incomplete ? status.reason : undefined;
   const label = runStatus === "INTERRUPTED" ? "运行中断 · 结果未知" : reason === "cancelled" ? "已取消" : reason === "error" ? "运行失败" : runStatus === "PAUSED" ? "等待继续" : ["RUNNING", "PENDING"].includes(String(runStatus)) ? "运行尚未结束" : "运行状态未确认";
   return <MessagePrimitive.Root className={styles.assistantMessage} data-message-id={id} data-aui-quote-selectable="false">
-    <RunElapsed duration={duration} startedAt={startedAt} running={running} />
+    {process?.length ? <RunProcess process={process} duration={duration} startedAt={startedAt} running={running} /> : <RunElapsed duration={duration} startedAt={startedAt} running={running} />}
     {hasText && <div data-aui-quote-selectable={actions.addToConversation ? "true" : "false"}><MessagePrimitive.Content components={{ Text: MarkdownText }} /></div>}
     {running && <p role="status" className={cn(styles.messageStatus, styles.messageStatusRunning)}><span aria-hidden="true" className={styles.streamingIndicator} />{hasText ? "正在生成…" : "正在等待回复…"}</p>}
     {incomplete && <p role="status" className={cn(styles.messageStatus, reason === "error" ? styles.messageStatusError : styles.messageStatusIncomplete)}>{label} · {noSavedReply ? "本次运行没有已保存的回复" : "请核对已显示内容"}</p>}
@@ -141,6 +144,24 @@ export function ConversationAssistantMessage() {
       <TooltipIconButton tooltip="从此处创建独立分支" aria-label="从此处创建独立分支" onClick={() => actions.branch?.(id)}><GitBranch /></TooltipIconButton>
     </div>}
   </MessagePrimitive.Root>;
+}
+
+export function RunProcess({ process, duration, startedAt, running }: { process: RunActivity[]; duration?: unknown; startedAt?: number; running?: boolean }) {
+  const labels: Record<string, string> = { RUNNING: "进行中", PENDING: "等待中", COMPLETED: "已完成", ERROR: "失败", REJECTED: "未执行", CANCELLED: "已取消", PAUSED: "等待确认", UNKNOWN: "结果未确认" };
+  return <Collapsible className={styles.runProcess}>
+    <CollapsibleTrigger className={styles.processTrigger} aria-label="运行过程">
+      <RunElapsed duration={duration} startedAt={startedAt} running={running} />
+      {!running && formatRunDuration(duration) === null && <span>运行过程</span>}
+      {running && startedAt === undefined && <span>运行过程</span>}
+      <ChevronRight aria-hidden="true" />
+    </CollapsibleTrigger>
+    <CollapsibleContent className={styles.processContent}>
+      {process.map(item => item.kind === "message" ? <p key={item.id} className={styles.processMessage}>{item.content}</p> : <div key={item.id} className={styles.processTool}>
+        <Wrench aria-hidden="true" /><span>{item.label ?? "工具调用"}</span><span className={item.status === "ERROR" ? styles.messageStatusError : undefined}>{labels[item.status ?? "UNKNOWN"] ?? labels.UNKNOWN}</span>
+        {formatRunDuration(item.duration_seconds) !== null && <span>{formatRunDuration(item.duration_seconds)}</span>}
+      </div>)}
+    </CollapsibleContent>
+  </Collapsible>;
 }
 
 export function RunElapsed({ duration, startedAt, running = false }: { duration?: unknown; startedAt?: number; running?: boolean }) {

@@ -56,6 +56,7 @@ from services.api.infrastructure.agent_tools import (
 )
 from services.api.infrastructure.authentication import JwtAuthenticationMiddleware
 from services.api.infrastructure.conversation_branches import AgnoConversationBranches
+from services.api.infrastructure.conversation_deletion import AgnoConversationDeletion
 from services.api.infrastructure.conversation_titles import AgnoConversationTitleGenerator
 from services.api.infrastructure.database import create_engine
 from services.api.infrastructure.materials import PostgresMaterialRepository
@@ -159,6 +160,9 @@ def create_app(
             AgnoConversationBranches(engine, app.state.agent_work_session_service, career_agent)
         )
         app.state.agent_work_session_service.history = app.state.agent_history_reader
+        app.state.agent_work_session_service.deletion = AgnoConversationDeletion(
+            engine, career_agent, app.state.agent_history_reader
+        )
         set_tools = getattr(career_agent, "set_tools", None)
         if callable(set_tools):
             context_service = AgentContextService(

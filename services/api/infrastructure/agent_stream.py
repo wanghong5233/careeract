@@ -9,12 +9,13 @@ from ag_ui.encoder import EventEncoder
 from agno.agent import Agent
 from agno.os.interfaces.agui import AGUI
 from agno.os.interfaces.agui.router import run_entity
-from agno.run.agent import run_output_event_from_dict
+from agno.run.agent import RunEvent, run_output_event_from_dict
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
 from services.api.application.context import ActorContext
 from services.api.infrastructure.agent_execution import AgentExecution
+from services.api.infrastructure.run_process import tool_activity
 
 
 class BackgroundTextAgent:
@@ -28,7 +29,20 @@ class BackgroundTextAgent:
                 async for block in stream:
                     for line in block.splitlines():
                         if line.startswith("data:"):
-                            yield run_output_event_from_dict(json.loads(line[5:]))
+                            event = run_output_event_from_dict(json.loads(line[5:]))
+                            name = str(getattr(event.event, "value", event.event))
+                            if name.startswith("Reasoning"):
+                                continue
+                            tool = getattr(event, "tool", None)
+                            if tool is not None:
+                                activity = tool_activity(tool, "RUNNING")
+                                tool.tool_name = str(activity["label"])
+                                tool.tool_args = {}
+                                if event.event == RunEvent.tool_call_completed.value:
+                                    tool.result = json.dumps(activity, ensure_ascii=False)
+                                else:
+                                    tool.result = None
+                            yield event
 
         return events()
 

@@ -17,6 +17,13 @@ export function beginSpaceConversation(state: SpaceState, id: string, projectId:
   };
 }
 
+export function removeSpaceConversation(state: SpaceState, id: string): SpaceState {
+  const conversations = state.conversations.filter(item => item.id !== id);
+  if (state.selectedId !== id) return { ...state, conversations };
+  const blank = newSpaceConversation(crypto.randomUUID());
+  return { ...state, conversations: [blank, ...conversations], selectedId: blank.id };
+}
+
 export function mergeSpaceConversations(state: SpaceState, conversations: AgentConversation[]): SpaceState {
   const local = new Map(state.conversations.map(item => [item.id, item]));
   const remoteIds = new Set(conversations.map(item => item.session_id));

@@ -42,6 +42,22 @@ text messages from the Agent runtime. Framework history, tool messages, and anot
 user's session are not exposed; session history is treated as career data and responses
 are not cached.
 
+History now separates the final assistant response from its optional `process`:
+public progress messages and safe tool labels/status/duration projected from the
+same Agno Run. No raw reasoning, system messages, tool arguments or results are
+returned. Missing final text retains the actual Run status and saved process.
+The projection and privacy boundaries are defined in the
+[runtime topic](../../../docs/topics/agent-runtime/README.md#运行过程展示边界).
+
+`DELETE /api/v1/agent/conversations/{session_id}` requires JSON `{version}` and
+returns 200 `{status: "deleted"}` only after framework deletion is verified and
+the directory row is removed. Other-owned/missing conversations return 404;
+stale versions, active/unreconciled Runs or open related side chats return 409.
+Unconfirmed framework deletion returns 503 and must be reconciled before retrying.
+Temporary side sessions use their existing close endpoint. Retention and
+cross-connection limitations are defined in the
+[runtime topic](../../../docs/topics/agent-runtime/README.md#对话删除).
+
 `POST /api/v1/agent/side-chats` creates one temporary, user-owned side session from
 an exact saved assistant message and optional quote; the source project and context
 version are fixed at creation. `POST /api/v1/agent/side-chats/{session_id}/close`

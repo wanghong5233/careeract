@@ -15,6 +15,7 @@ class AgentHistoryMessage:
     run_id: str | None = None
     run_status: str = "UNKNOWN"
     run_duration_seconds: float | None = None
+    process: tuple[dict[str, object], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,3 +86,9 @@ class AgentWorkSessionRepository(Protocol):
 
 class ConversationTitleGenerator(Protocol):
     async def generate(self, prompt: str) -> str: ...
+
+
+class ConversationDeletion(Protocol):
+    async def delete(
+        self, actor: ActorContext, *, session_id: str, expected_version: UUID
+    ) -> None: ...

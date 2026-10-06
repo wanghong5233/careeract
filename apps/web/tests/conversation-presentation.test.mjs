@@ -43,6 +43,7 @@ const markdown = loadSource("components/markdown-text.tsx", {
   "@/lib/utils": utils,
 });
 const components = loadSource("components/conversation-messages.tsx", {
+  "@/components/ui/collapsible": loadSource("components/ui/collapsible.tsx"),
   "@/components/message-actions": { useMessageActions: () => React.useContext(messageActions) },
   "@/components/ui/button": { Button: props => React.createElement("button", { type: props.type, disabled: props.disabled, onClick: props.onClick }, props.children) },
   "@/components/markdown-text": markdown, "@/components/tooltip-icon-button": tooltip,
@@ -185,6 +186,7 @@ test("navigation jumps immediately during a run so streaming follow does not int
     const jumps = [];
     const target = { dataset: { promptId: "first" }, scrollIntoView: options => jumps.push(options) };
     const view = loadSource("components/conversation-messages.tsx", {
+      "@/components/ui/collapsible": {},
       react: { useRef: () => ({ current: { querySelectorAll: () => [target] } }), useState: () => [null, () => {}], useEffect() {} },
       "@assistant-ui/react": { ThreadPrimitive: { Root: "root", Viewport: "viewport", Messages: "messages", ViewportFooter: "footer", ScrollToBottom: "bottom" }, useAuiState: selector => selector({ thread: { isRunning: running, messages: ["first", "second"].map(id => ({ id, role: "user", content: [{ type: "text", text: id }] })) } }) },
       "@/components/message-actions": { useMessageActions: () => ({}) },
@@ -204,6 +206,31 @@ test("saved timing stays visible while a subsequent reply streams", () => {
   const html = renderToStaticMarkup(React.createElement(history.ConversationHistory, { messages: [message], liveMessages: live, isRunning: true }));
   assert.match(html, /用时 5秒/);
   assert.match(html, /正在生成/);
+});
+
+test("live tool process separates commentary and final answer without exposing tool payloads", () => {
+  const input = { id: "input", role: "user", content: "合成问题" };
+  const tool = { type: "tool-call", toolCallId: "tool", toolName: "检索公开网页", args: { private: "hidden" }, argsText: "hidden", result: { status: "COMPLETED", duration_seconds: 2.4 } };
+  const grouped = presentation.groupLiveAssistantMessages([input, { id: "progress", role: "assistant", content: [{ type: "text", text: "正在检索" }, tool] }, { id: "final", role: "assistant", content: "合成回答", status: { type: "complete", reason: "stop" } }]);
+  assert.equal(grouped.length, 2);
+  assert.equal(grouped[1].id, "final");
+  assert.equal(grouped[1].content, "合成回答");
+  assert.deepEqual(grouped[1].metadata.custom.runProcess, [{ id: "progress", kind: "message", content: "正在检索" }, { id: "tool", kind: "tool", label: "检索公开网页", status: "COMPLETED", duration_seconds: 2.4 }]);
+  assert.doesNotMatch(JSON.stringify(grouped), /hidden|private/);
+  const cancelled = presentation.groupLiveAssistantMessages([input, { id: "pending", role: "assistant", content: [{ ...tool, result: undefined }], status: { type: "incomplete", reason: "cancelled" } }]);
+  assert.equal(cancelled[1].metadata.custom.runProcess[0].status, "CANCELLED");
+});
+
+test("saved process has a real accessible disclosure and cancelled process stays cancelled", () => {
+  const message = { ...syntheticMessage("reply", "assistant", "run", "CANCELLED"), run_duration_seconds: 3, process: [{ id: "tool", kind: "tool", label: "检索公开网页", status: "CANCELLED" }] };
+  const html = renderToStaticMarkup(React.createElement(history.ConversationHistory, { messages: [message] }));
+  assert.match(html, /aria-label="运行过程"/);
+  assert.match(html, /aria-expanded="false"/);
+  assert.match(html, /用时 3秒/);
+  assert.match(html, /已取消/);
+  assert.doesNotMatch(html, /已完成/);
+  const empty = renderToStaticMarkup(React.createElement(history.ConversationHistory, { messages: [syntheticMessage("reply", "assistant", "run", "COMPLETED")] }));
+  assert.doesNotMatch(empty, /aria-label="运行过程"/);
 });
 
 test("reconciled terminal history cannot revert to cached active state when the next reply streams", () => {

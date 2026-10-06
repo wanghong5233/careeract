@@ -45,6 +45,11 @@ class GenerateTitleBody(BaseModel):
     retry: bool = False
 
 
+class DeleteConversationBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    version: UUID
+
+
 class WorkSessionPageResponse(BaseModel):
     items: list[WorkSessionResponse]
     next_cursor: str | None
@@ -93,6 +98,7 @@ class HistoryMessageResponse(BaseModel):
     run_id: str | None
     run_status: str
     run_duration_seconds: float | None = None
+    process: list[dict[str, object]] = Field(default_factory=list)
 
 
 class HistoryResponse(BaseModel):
@@ -335,6 +341,19 @@ async def update_conversation(
             model_id=body.model_id,
         )
     )
+
+
+@router.delete("/conversations/{session_id}")
+async def delete_conversation(
+    session_id: str,
+    body: DeleteConversationBody,
+    response: Response,
+    service: Annotated[AgentWorkSessionService, Depends(get_service)],
+    actor: Annotated[ActorContext, Depends(get_actor)],
+) -> dict[str, str]:
+    response.headers["Cache-Control"] = "no-store"
+    await service.delete(actor, session_id=session_id, expected_version=body.version)
+    return {"status": "deleted"}
 
 
 @router.put("/session", response_model=WorkSessionResponse)

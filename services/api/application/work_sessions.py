@@ -6,6 +6,7 @@ from services.api.application.ports.agent_models import AgentModelCatalog, Runti
 from services.api.application.ports.work_sessions import (
     AgentHistoryReader,
     AgentWorkSessionRepository,
+    ConversationDeletion,
     ConversationTitleGenerator,
     WorkSessionPage,
 )
@@ -27,6 +28,15 @@ class AgentWorkSessionService:
         self.title_generator: ConversationTitleGenerator | None = None
         self.models: AgentModelCatalog | None = None
         self.default_model: str | None = None
+        self.deletion: ConversationDeletion | None = None
+
+    async def delete(self, actor: ActorContext, *, session_id: str, expected_version: UUID) -> None:
+        current = await self.read(actor, session_id=session_id)
+        if current.temporary_until is not None:
+            raise WorkSessionInvalid("Use temporary chat close")
+        if self.deletion is None:
+            raise WorkSessionUnavailable("Conversation deletion is unavailable")
+        await self.deletion.delete(actor, session_id=session_id, expected_version=expected_version)
 
     async def runtime_models(self) -> tuple[RuntimeModel, ...]:
         if self.models is None:

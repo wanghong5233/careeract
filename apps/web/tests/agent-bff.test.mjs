@@ -5,6 +5,37 @@ import { loadSource } from "./load-source.mjs";
 const origin = "https://careeract.example";
 const projectId = "14c9947b-49cf-4ea3-8eaf-bbe2ea5d13f3";
 
+test("conversation deletion BFF preserves version, authentication and uncertain results without retry", async () => {
+  const calls = [];
+  const helper = loadSource("app/api/agent/conversations/_helpers.ts", {
+    "@/app/api/projects/_helpers": {
+      authenticate: async () => ({ token: "synthetic-token" }),
+      hasTrustedOrigin: request => request.headers.get("Origin") === origin,
+      readJsonBody: request => request.text(),
+      failure: status => Response.json({ error: "synthetic" }, { status }),
+    },
+    "@/lib/server-env": { serverEnv: { apiBaseUrl: "https://api.example" } },
+  }, { fetch: async (url, options) => { calls.push({ url, options }); return Response.json({ error: "unconfirmed" }, { status: 503 }); } });
+  const route = loadSource("app/api/agent/conversations/[id]/route.ts", {
+    "../_helpers": helper,
+  });
+  const request = trusted => new Request(`${origin}/api/agent/conversations/conversation:synthetic`, {
+    method: "DELETE", headers: { Origin: trusted ? origin : "https://other.example", "Content-Type": "application/json" },
+    body: JSON.stringify({ version: "synthetic-version" }),
+  });
+  const context = { params: Promise.resolve({ id: "conversation:synthetic" }) };
+  assert.equal((await route.DELETE(request(false), context)).status, 403);
+  assert.equal(calls.length, 0);
+  const response = await route.DELETE(request(true), context);
+  assert.equal(response.status, 503);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].options.method, "DELETE");
+  assert.equal(calls[0].options.headers.Authorization, "Bearer synthetic-token");
+  assert.deepEqual(JSON.parse(calls[0].options.body), { version: "synthetic-version" });
+  assert.match(new URL(calls[0].url).pathname, /conversation%3Asynthetic$/);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+});
+
 function fixture(route, { session = { user: { id: "owner" } }, token = "test-token", upstream = () => Response.json({ items: [] }) } = {}) {
   const calls = [];
   const handler = loadSource(`app/api/agent/${route}/route.ts`, {

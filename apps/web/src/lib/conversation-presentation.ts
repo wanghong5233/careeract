@@ -1,5 +1,5 @@
 import type { ThreadMessageLike } from "@assistant-ui/react";
-import type { HistoryMessage } from "@/lib/agent-conversations";
+import type { HistoryMessage, RunActivity } from "@/lib/agent-conversations";
 import { historyMessageStatus, unansweredRunStatuses } from "@/lib/agent-runtime";
 
 export function historyThreadMessages(messages: HistoryMessage[], runs?: Array<{ run_id: string; status: string }>): ThreadMessageLike[] {
@@ -17,7 +17,7 @@ export function historyThreadMessages(messages: HistoryMessage[], runs?: Array<{
     const showDuration = !message.run_id || !timedRuns.has(message.run_id);
     converted.push({
       id: message.id, role: message.role, content: message.content, createdAt: new Date(message.created_at * 1000),
-      ...(message.role === "assistant" ? { status: historyMessageStatus(message.run_status), metadata: { custom: { runStatus: message.run_status, runId: message.run_id, runDurationSeconds: showDuration ? message.run_duration_seconds : undefined } } } : {}),
+      ...(message.role === "assistant" ? { status: historyMessageStatus(message.run_status), metadata: { custom: { runStatus: message.run_status, runId: message.run_id, runDurationSeconds: showDuration ? message.run_duration_seconds : undefined, runProcess: message.process, noSavedReply: message.content ? undefined : true } } } : {}),
     });
     if (message.role === "assistant" && message.run_id) timedRuns.add(message.run_id);
     const run = message.run_id ? pending.get(message.run_id) : undefined;
@@ -28,4 +28,38 @@ export function historyThreadMessages(messages: HistoryMessage[], runs?: Array<{
   });
   pending.forEach(run => converted.push(statusMessage(run)));
   return converted;
+}
+
+export function groupLiveAssistantMessages(messages: readonly ThreadMessageLike[]): ThreadMessageLike[] {
+  const result: ThreadMessageLike[] = [];
+  let turn: ThreadMessageLike[] = [];
+  const flush = () => {
+    if (!turn.length) return;
+    const final = turn.at(-1)!;
+    const process: RunActivity[] = [];
+    let finalText = "";
+    for (const message of turn) {
+      const parts = typeof message.content === "string" ? [{ type: "text" as const, text: message.content }] : message.content ?? [];
+      const text = parts.filter(part => part.type === "text").map(part => part.text).join("\n");
+      const hasTools = parts.some(part => part.type === "tool-call");
+      const saved = message.metadata?.custom?.runProcess;
+      if (Array.isArray(saved)) process.push(...saved as RunActivity[]);
+      if (message !== final || hasTools) {
+        if (text) process.push({ id: message.id ?? `process-${process.length}`, kind: "message", content: text });
+      } else finalText = text;
+      for (const part of parts) {
+        if (part.type !== "tool-call") continue;
+        const projected = part.result && typeof part.result === "object" ? part.result as Partial<RunActivity> : undefined;
+        process.push({ id: part.toolCallId ?? `tool-${process.length}`, kind: "tool", label: part.toolName, status: projected?.status ?? (final.status?.type === "running" ? "RUNNING" : final.status?.type === "incomplete" && final.status.reason === "cancelled" ? "CANCELLED" : "UNKNOWN"), duration_seconds: projected?.duration_seconds });
+      }
+    }
+    result.push({ ...final, content: finalText, metadata: { ...final.metadata, custom: { ...final.metadata?.custom, runProcess: Array.from(new Map(process.map(item => [item.id, item])).values()) } } });
+    turn = [];
+  };
+  for (const message of messages) {
+    if (message.role === "assistant") turn.push(message);
+    else { flush(); result.push(message); }
+  }
+  flush();
+  return result;
 }

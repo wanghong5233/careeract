@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { authenticate, failure, hasTrustedOrigin, readJsonBody } from "@/app/api/projects/_helpers";
 import { serverEnv } from "@/lib/server-env";
 
-export async function forwardConversationRequest(request: NextRequest, path: string, method: "GET" | "POST" | "PATCH"): Promise<Response> {
+export async function forwardConversationRequest(request: NextRequest, path: string, method: "GET" | "POST" | "PATCH" | "DELETE"): Promise<Response> {
   const requestId = crypto.randomUUID();
   if (method !== "GET" && !hasTrustedOrigin(request)) return failure(403, "forbidden", "请求来源无效。", requestId);
   const auth = await authenticate(request, requestId);

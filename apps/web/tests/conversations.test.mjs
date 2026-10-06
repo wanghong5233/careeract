@@ -49,6 +49,43 @@ function spaceFixture() {
 
 const remote = (id, version = "v1") => ({ session_id: id, title: "合成对话", project_id: null, archived: false, version });
 
+test("deletion cancels late directory responses and complete refresh removes missing saved chats only", async () => {
+  const space = spaceFixture();
+  const store = space.getSpaceStore("delete-owner");
+  store.snapshot();
+  store.update(state => ({ ...state, selectedId: "gone", conversations: [
+    { ...space.newSpaceConversation("gone", null), version: "v1", draft: "待删除" },
+    { ...space.newSpaceConversation("kept", null), version: "v1", draft: "保留" },
+    { ...space.newSpaceConversation("local", null), draft: "未保存草稿" },
+  ] }));
+  const calls = [];
+  const deletions = [];
+  const view = hooksFixture("hooks/use-agent-conversations.ts", {
+    "@/lib/agent-space-state": space,
+    "@/lib/agent-conversations": {
+      readConversations: (cursor, signal) => new Promise(resolve => calls.push({ cursor, signal, resolve })),
+      deleteConversation: async (id, version) => deletions.push({ id, version }),
+    },
+  }, { window: new EventTarget() });
+  const render = () => view.render("useAgentConversations", "delete-owner");
+  await render().remove("gone", "v1");
+  calls[0].resolve({ items: [remote("gone"), remote("kept")], next_cursor: null });
+  await settle();
+  assert.deepEqual(deletions, [{ id: "gone", version: "v1" }]);
+  assert.equal(calls[0].signal.aborted, true);
+  assert.ok(!store.snapshot().conversations.some(item => item.id === "gone"));
+  const partial = render().refresh();
+  calls[1].resolve({ items: [], next_cursor: "page-two" });
+  await partial;
+  assert.ok(store.snapshot().conversations.some(item => item.id === "kept"));
+  const complete = render().refresh();
+  calls[2].resolve({ items: [], next_cursor: null });
+  await complete;
+  assert.ok(!store.snapshot().conversations.some(item => item.id === "kept"));
+  assert.equal(store.snapshot().conversations.find(item => item.id === "local").draft, "未保存草稿");
+  view.unmount();
+});
+
 test("model selection is accepted only after a successful versioned save and preserves drafts", async () => {
   const space = spaceFixture();
   const store = space.getSpaceStore("model-owner");
@@ -58,7 +95,7 @@ test("model selection is accepted only after a successful versioned save and pre
   const view = hooksFixture("hooks/use-agent-conversations.ts", {
     "@/lib/agent-space-state": space,
     "@/lib/agent-conversations": {
-      readConversations: async () => ({ items: [], next_cursor: null }),
+      readConversations: async () => ({ items: [{ ...remote("one"), model_id: "default" }], next_cursor: null }),
       saveConversation: (id, version, changes) => new Promise((resolve, reject) => { write = { id, version, changes, resolve, reject }; }),
     },
   }, { window: new EventTarget() });

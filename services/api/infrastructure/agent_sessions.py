@@ -7,6 +7,7 @@ from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from services.api.application.ports.work_sessions import AgentContextBasis, AgentHistoryMessage
 from services.api.domain.privacy import ensure_career_content
 from services.api.domain.work_session import WorkSessionHistoryUnavailable
+from services.api.infrastructure.run_process import run_process
 
 
 def presentation_status(run: Any) -> str:
@@ -109,12 +110,31 @@ class AgnoAgentHistoryReader:
             for run in session.runs or []
             if getattr(run, "parent_run_id", None) is None
             for message in getattr(run, "messages", None) or []
+            if not message.from_history
+        }
+        runs_by_id = {run.run_id: run for run in session.runs or []}
+        final_ids = {
+            run.run_id: next(
+                (
+                    message.id
+                    for message in reversed(getattr(run, "messages", None) or [])
+                    if message.role == "assistant"
+                    and not message.from_history
+                    and not message.tool_calls
+                    and message.get_content_string()
+                ),
+                None,
+            )
+            for run in session.runs or []
         }
         for message in messages:
             if message.role not in {"user", "assistant"}:
                 continue
             content = message.get_content_string()
             if not content:
+                continue
+            run_id, status = message_runs.get(message.id, (None, "UNKNOWN"))
+            if message.role == "assistant" and run_id and final_ids.get(run_id) != message.id:
                 continue
             result.append(
                 AgentHistoryMessage(
@@ -132,6 +152,26 @@ class AgnoAgentHistoryReader:
                         ),
                         None,
                     ),
+                    process=run_process(runs_by_id[run_id], message.id, status)
+                    if message.role == "assistant" and run_id in runs_by_id
+                    else (),
                 )
             )
+            if message.role == "user" and run_id in runs_by_id and final_ids.get(run_id) is None:
+                process = run_process(runs_by_id[run_id], None, status)
+                if process:
+                    result.append(
+                        AgentHistoryMessage(
+                            id=f"run-status:{run_id}",
+                            role="assistant",
+                            content="",
+                            created_at=message.created_at,
+                            run_id=run_id,
+                            run_status=status,
+                            run_duration_seconds=getattr(
+                                getattr(runs_by_id[run_id], "metrics", None), "duration", None
+                            ),
+                            process=process,
+                        )
+                    )
         return tuple(result[-limit:])
