@@ -30,6 +30,7 @@ class WorkSessionResponse(BaseModel):
     updated_at: str
     title: str
     archived: bool
+    pinned: bool
     version: UUID
     title_origin: str
     title_generation_attempted: bool
@@ -79,6 +80,7 @@ class UpdateConversationBody(BaseModel):
     version: UUID
     title: str | None = Field(default=None, min_length=1, max_length=120)
     archived: bool | None = None
+    pinned: bool | None = None
     project_id: UUID | None = None
     model_id: str | None = Field(default=None, min_length=1, max_length=128)
 
@@ -204,6 +206,7 @@ def serialize_session(session: AgentWorkSession) -> WorkSessionResponse:
         updated_at=session.updated_at.isoformat(),
         title=session.title,
         archived=session.archived,
+        pinned=session.pinned,
         version=session.version,
         title_origin=session.title_origin,
         title_generation_attempted=session.title_generation_attempted,
@@ -339,6 +342,7 @@ async def update_conversation(
             change_project="project_id" in body.model_fields_set,
             expected_version=body.version,
             model_id=body.model_id,
+            pinned=body.pinned,
         )
     )
 

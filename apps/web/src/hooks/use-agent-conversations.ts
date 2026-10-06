@@ -59,7 +59,7 @@ export function useAgentConversations(owner: string) {
     });
   }
 
-  async function persist(id: string, changes: { title?: string; project_id?: string | null; archived?: boolean; model_id?: string } = {}) {
+  async function persist(id: string, changes: { title?: string; project_id?: string | null; archived?: boolean; model_id?: string; pinned?: boolean } = {}) {
     const local = store.snapshot().conversations.find(item => item.id === id);
     if (!local) throw new Error("找不到该对话，请重新读取。");
     let saved: AgentConversation;

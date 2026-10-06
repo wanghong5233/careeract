@@ -1,7 +1,7 @@
 export type SpaceTab = { href: string; label: string };
 import type { AgentConversation } from "@/lib/agent-conversations";
 
-export type SpaceConversation = { id: string; projectId: string | null; title: string; draft: string; archived: boolean; tabs: SpaceTab[]; activeHref: string; panelHidden: boolean; version?: string; createId?: string; modelId?: string | null; titleOrigin?: string; titleGenerationAttempted?: boolean };
+export type SpaceConversation = { id: string; projectId: string | null; title: string; draft: string; archived: boolean; pinned?: boolean; createdAt?: string; tabs: SpaceTab[]; activeHref: string; panelHidden: boolean; version?: string; createId?: string; modelId?: string | null; titleOrigin?: string; titleGenerationAttempted?: boolean };
 export type SpaceState = { conversations: SpaceConversation[]; selectedId: string; navigation: boolean; panelWidth: number; recentExpanded?: boolean; archiveExpanded?: boolean };
 export function newSpaceConversation(id: string, projectId: string | null = null): SpaceConversation {
   return { id, projectId, title: "新对话", draft: "", archived: false, tabs: [], activeHref: "/workspace", panelHidden: false };
@@ -30,7 +30,7 @@ export function mergeSpaceConversations(state: SpaceState, conversations: AgentC
   const merged = conversations.map(item => ({
     ...newSpaceConversation(item.session_id), ...local.get(item.session_id),
     id: item.session_id, title: item.title, projectId: item.project_id,
-    archived: item.archived, version: item.version,
+    archived: item.archived, pinned: item.pinned, createdAt: item.created_at, version: item.version,
     modelId: item.model_id, titleOrigin: item.title_origin, titleGenerationAttempted: item.title_generation_attempted,
   }));
   return { ...state, conversations: [...merged, ...state.conversations.filter(item => !remoteIds.has(item.id))] };
@@ -68,6 +68,8 @@ function isSpaceState(value: unknown): value is SpaceState & { tabs?: SpaceTab[]
     && state.conversations.every(item => item && typeof item.id === "string"
       && (item.projectId === null || typeof item.projectId === "string")
       && typeof item.title === "string" && typeof item.draft === "string" && typeof item.archived === "boolean"
+      && (item.pinned === undefined || typeof item.pinned === "boolean")
+      && (item.createdAt === undefined || typeof item.createdAt === "string")
       && (item.version === undefined || typeof item.version === "string")
       && (item.createId === undefined || typeof item.createId === "string")
       && (item.tabs === undefined || validTabs(item.tabs))

@@ -12,26 +12,29 @@
 .navButton:hover,.conversationRow:hover { background:var(--muted); }
 .sectionHeading { display:flex; align-items:center; justify-content:space-between; margin-top:20px; padding-left:8px; font-size:12px; color:var(--muted-foreground); }
 .conversationRow { display:flex; align-items:center; position:relative; border-radius:6px; }
-.conversationLink { display:flex; align-items:center; gap:7px; flex:1; min-width:0; padding:8px 5px 8px 12px; text-align:left; font-size:var(--workspace-control-size); font-weight:400; line-height:1.5; }
+.conversationLink { display:flex; align-items:center; gap:7px; flex:1; min-width:0; padding:8px 12px; text-align:left; font-size:var(--workspace-control-size); font-weight:400; line-height:1.5; user-select:none; }
+.conversationActions { position:absolute; right:4px; display:flex; gap:1px; padding:2px; border-radius:6px; background:var(--sidebar); visibility:hidden; }
+.conversationRow:hover .conversationActions,.conversationRow:focus-within .conversationActions { visibility:visible; }
+.conversationRow:hover .conversationLink,.conversationRow:focus-within .conversationLink { padding-right:60px; }
+.conversationRow:hover .conversationActions { background:var(--muted); }
+.selected .conversationActions { background:var(--sidebar-accent); }
+.conversationActions svg { width:14px; height:14px; }
+.conversationLink:focus-visible { outline:2px solid var(--ring); outline-offset:-2px; border-radius:6px; }
+.selectionControls { display:flex; align-items:center; justify-content:flex-end; gap:4px; min-height:28px; margin-top:12px; color:var(--muted-foreground); font-size:12px; }
+.selectionControls span { margin-right:auto; padding-left:8px; }
+.batchSelected { background:var(--sidebar-accent); box-shadow:inset 2px 0 var(--ring); }
+.selectionMark { width:14px; height:14px; flex-shrink:0; border:1px solid var(--border); border-radius:3px; line-height:12px; font-size:12px; }
+.inlineRename { display:flex; align-items:center; flex-wrap:wrap; gap:2px; padding:4px; width:100%; min-width:0; }
+.inlineRename input { flex:1; min-width:0; width:0; padding:4px; border:1px solid var(--ring); border-radius:4px; background:var(--background); font-size:var(--workspace-control-size); outline:none; }
+@media(hover:none) { .conversationActions { visibility:visible; } .conversationLink { padding-right:60px; } }
 .draftMark { font-size:10px; color:var(--muted-foreground); margin-left:auto; flex-shrink:0; }
 .selected { background:var(--sidebar-accent); }
 .selected .conversationLink { color:oklch(0.3 0 0); }
-.conversationMenuTrigger { display:flex; align-items:center; justify-content:center; width:28px; height:28px; margin-right:2px; border-radius:6px; color:inherit; opacity:0; }
-.conversationRow:hover .conversationMenuTrigger,.conversationRow:focus-within .conversationMenuTrigger,.conversationMenuTrigger[data-popup-open] { opacity:1; }
-.conversationMenuTrigger:focus-visible { outline:2px solid var(--ring); outline-offset:2px; }
-.conversationPopup { min-width:172px; padding:5px; border:1px solid var(--border); border-radius:10px; background:var(--background); color:oklch(0.38 0 0); font-family:var(--font-sans); font-size:14px; font-weight:400; box-shadow:0 6px 24px #00000014; outline:none; }
-.conversationPopup [role=menuitem] { display:flex; align-items:center; gap:9px; padding:7px 9px; border-radius:5px; cursor:pointer; outline:none; }
-.conversationPopup [role=menuitem][data-highlighted] { background:var(--muted); }
-.conversationPopup [role=menuitem][data-disabled] { opacity:.45; cursor:default; }
-.conversationPopup svg { width:15px; height:15px; }
-.conversationPopup [role=separator] { height:1px; margin:5px 3px; background:var(--border); }
-.conversationPopup .deleteMenuItem { color:var(--destructive); }
 .conversationSection { display:flex; align-items:center; gap:6px; width:100%; margin-top:20px; padding:6px 8px; border-radius:6px; color:var(--muted-foreground); font-size:12px; font-weight:400; text-align:left; }
 .conversationSection:hover { background:var(--muted); }
 .conversationSection:focus-visible { outline:2px solid var(--ring); outline-offset:2px; }
 .conversationSection svg { width:12px; height:12px; transform:rotate(-90deg); }
 .conversationSection[data-panel-open] svg { transform:none; }
-@media(hover:none) { .conversationMenuTrigger { opacity:1; } }
 .conversationMenu summary { list-style:none; padding:9px 6px; cursor:pointer; color:var(--muted-foreground); }
 .conversationMenu summary::-webkit-details-marker { display:none; }
 .conversationMenu>div { position:absolute; right:0; top:34px; z-index:45; min-width:125px; padding:4px; border:1px solid var(--border); border-radius:8px; background:var(--background); box-shadow:0 8px 24px #00000012; }

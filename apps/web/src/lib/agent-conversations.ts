@@ -1,6 +1,6 @@
 import { isRestrictedResponse, restrictedContentMessage } from "@/lib/privacy";
 
-export type AgentConversation = { session_id: string; title: string; project_id: string | null; archived: boolean; version: string; created_at: string; updated_at: string; title_origin?: "default" | "manual" | "generated"; title_generation_attempted?: boolean; model_id?: string | null; branch_context?: { source_id: string; message_id: string; mode: "before" | "after" } | null };
+export type AgentConversation = { session_id: string; title: string; project_id: string | null; archived: boolean; pinned?: boolean; version: string; created_at: string; updated_at: string; title_origin?: "default" | "manual" | "generated"; title_generation_attempted?: boolean; model_id?: string | null; branch_context?: { source_id: string; message_id: string; mode: "before" | "after" } | null };
 export type RuntimeModel = { id: string; provider: string; model: string; label: string };
 export type RuntimeModels = { id: string; connection: string; models: RuntimeModel[] };
 export type ConversationPage = { items: AgentConversation[]; next_cursor: string | null };
@@ -37,7 +37,7 @@ export function createConversation(id: string, title: string, projectId: string 
   return request("/api/agent/conversations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, title, project_id: projectId }), signal: AbortSignal.timeout(20_000) });
 }
 
-export function saveConversation(id: string, version: string, changes: { title?: string; project_id?: string | null; archived?: boolean; model_id?: string }): Promise<AgentConversation> {
+export function saveConversation(id: string, version: string, changes: { title?: string; project_id?: string | null; archived?: boolean; model_id?: string; pinned?: boolean }): Promise<AgentConversation> {
   return request(`/api/agent/conversations/${encodeURIComponent(id)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ version, ...changes }), signal: AbortSignal.timeout(20_000) });
 }
 

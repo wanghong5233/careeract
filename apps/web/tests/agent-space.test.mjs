@@ -58,6 +58,25 @@ test("conversation removal clears only the selected chat and opens a blank witho
   assert.equal(state.conversations.length, 2);
 });
 
+test("server pin metadata survives refresh and archive transitions without losing drafts or tabs", () => {
+  const { mergeSpaceConversations, newSpaceConversation } = stateFixture();
+  const local = { ...newSpaceConversation("saved"), draft: "kept", tabs: [{ href: "/workspace/library", label: "材料" }] };
+  const state = { conversations: [local], selectedId: "saved", navigation: true, panelWidth: 50 };
+  const remote = { session_id: "saved", title: "合成标题", project_id: null, archived: false, pinned: true, version: "v2", created_at: "2026-10-06T01:00:00Z" };
+  const pinned = mergeSpaceConversations(state, [remote]);
+  assert.equal(pinned.conversations[0].pinned, true);
+  assert.equal(pinned.conversations[0].createdAt, remote.created_at);
+  const archived = mergeSpaceConversations(pinned, [{ ...remote, archived: true }]);
+  assert.equal(archived.conversations[0].pinned, true);
+  assert.equal(archived.conversations[0].archived, true);
+  assert.equal(archived.conversations[0].draft, "kept");
+  assert.deepEqual(archived.conversations[0].tabs, local.tabs);
+  assert.equal(mergeSpaceConversations(archived, [{ ...remote, pinned: false }]).conversations[0].pinned, false);
+  const legacy = { ...remote };
+  delete legacy.pinned;
+  assert.equal(mergeSpaceConversations(pinned, [legacy]).conversations[0].pinned, undefined);
+});
+
 test("draft storage restores across module reload and isolates owners and tabs", () => {
   const stored = new Map();
   const first = stateFixture(stored);

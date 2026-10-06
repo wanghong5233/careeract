@@ -2,8 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type FormEvent, type ReactNode } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Archive, ArrowUp, BookOpen, ChevronDown, FileText, Folder, ListTree, MessageSquarePlus, MoreHorizontal, PanelLeft, PanelRight, Plus, Search, Square, SquarePen, Trash2, X } from "lucide-react";
-import { Menu } from "@base-ui/react/menu";
+import { Archive, ArchiveRestore, ArrowUp, BookOpen, ChevronDown, FileText, Folder, ListChecks, ListTree, MessageSquarePlus, MoreHorizontal, PanelLeft, PanelRight, Pin, PinOff, Plus, RotateCcw, Search, Square, SquarePen, Trash2, X } from "lucide-react";
 import { useAui, useAuiState } from "@assistant-ui/react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -24,6 +23,7 @@ import { useConversationHistory } from "@/hooks/use-conversation-history";
 import { cn } from "@/lib/utils";
 import { cancelConversationRun, reconcileConversationRun, queueConversationSend, takeConversationSend } from "@/lib/agent-runtime";
 import { ConversationRequestError, createConversationBranch, generateConversationTitle, readConversation } from "@/lib/agent-conversations";
+import { deleteConversationSelection, selectConversationRange } from "@/lib/conversation-selection";
 import styles from "./agent-space.module.css";
 
 export function AgentHome({ owner, children }: { owner: string; children?: ReactNode }) {
@@ -60,7 +60,11 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
   const archiveExpanded = state.archiveExpanded ?? false;
   const setRecentExpanded = (open: boolean) => store.update(previous => ({ ...previous, recentExpanded: open }));
   const setArchiveExpanded = (open: boolean) => store.update(previous => ({ ...previous, archiveExpanded: open }));
-  const [deletingConversation, setDeletingConversation] = useState<SpaceConversation | null>(null);
+  const [deletingConversations, setDeletingConversations] = useState<SpaceConversation[]>([]);
+  const [selectedConversations, setSelectedConversations] = useState<string[]>([]);
+  const [selectingConversations, setSelectingConversations] = useState(false);
+  const selectionAnchor = useRef<string | null>(null);
+  const conversationClick = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [conversationDeleteError, setConversationDeleteError] = useState("");
   const [conversationDeleteCheck, setConversationDeleteCheck] = useState(false);
   const [contextOpen, setContextOpen] = useState(false);
@@ -91,6 +95,8 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
   const visibleTabs = routeOpen && !tabs.some(tab => tab.href === currentHref)
     ? [...tabs, { href: currentHref, label: tabLabel }] : tabs;
   const panelOpen = sideOpen || contextOpen || (routeOpen && !current.panelHidden);
+
+  useEffect(() => () => { if (conversationClick.current) clearTimeout(conversationClick.current); }, []);
 
   useEffect(() => {
     const replace = (event: Event) => {
@@ -214,41 +220,62 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
     finally { setConversationBusy(false); }
   }
 
-  async function changeConversation(id: string, changes: { project_id?: string | null; archived?: boolean; model_id?: string }) {
+  async function changeConversation(id: string, changes: { project_id?: string | null; archived?: boolean; model_id?: string; pinned?: boolean }, guarded = false) {
+    if (conversationClick.current) clearTimeout(conversationClick.current);
     if (conversationBusy || sendBusy) return;
+    if (changes.archived && id === current.id && !guarded && !window.dispatchEvent(new Event("careeract:before-navigate", { cancelable: true }))) {
+      setLeaveAction(() => () => void changeConversation(id, changes, true));
+      return;
+    }
     setConversationBusy(true); setFeedback("");
-    try { await conversations.persist(id, changes); if (changes.archived !== undefined) { if (changes.archived) setArchiveExpanded(true); else setRecentExpanded(true); setFeedback(changes.archived ? "对话已归档，可在侧栏归档列表中恢复。" : "对话已恢复。"); void history.refresh(); } }
+    try {
+      await conversations.persist(id, changes);
+      if (changes.archived !== undefined) {
+        if (changes.archived && store.snapshot().selectedId === id) {
+          store.update(previous => beginSpaceConversation(previous, crypto.randomUUID()));
+          pendingNavigation.current = "/workspace"; router.push("/workspace"); setContextOpen(false);
+        }
+        if (!changes.archived) setRecentExpanded(true);
+        setFeedback(changes.archived ? "对话已归档，可在侧栏归档列表中恢复。" : "对话已恢复。");
+        void history.refresh();
+      }
+    }
     catch (error) { setFeedback(error instanceof Error ? error.message : "未能保存对话，请重新读取核对。"); }
     finally { setConversationBusy(false); }
   }
 
   async function confirmConversationDelete() {
-    if (!deletingConversation || conversationBusy || conversationDeleteCheck) return;
+    if (!deletingConversations.length || conversationBusy || conversationDeleteCheck) return;
     setConversationBusy(true); setConversationDeleteError("");
-    try {
-      await conversations.remove(deletingConversation.id, deletingConversation.version);
-      if (deletingConversation.id === state.selectedId) { pendingNavigation.current = "/workspace"; router.push("/workspace"); }
-      setDeletingConversation(null); setFeedback("对话已删除。");
-    } catch (error) {
-      setConversationDeleteError(error instanceof Error ? error.message : "删除结果未确认，请先重新读取核对。");
+    const result = await deleteConversationSelection(deletingConversations, conversations.remove);
+    if (store.snapshot().selectedId !== state.selectedId) { pendingNavigation.current = "/workspace"; router.push("/workspace"); }
+    setDeletingConversations(result.remaining);
+    setSelectedConversations(previous => previous.filter(id => result.remaining.some(item => item.id === id)));
+    if (result.error) {
+      setConversationDeleteError(`已删除 ${result.deleted} 段；其余未继续删除。${result.error instanceof Error ? result.error.message : "删除结果未确认，请先重新读取核对。"}`);
       setConversationDeleteCheck(true);
-    } finally { setConversationBusy(false); }
+    } else { setSelectingConversations(false); setFeedback(`已删除 ${result.deleted} 段对话。`); }
+    setConversationBusy(false);
   }
 
   async function checkConversationDelete() {
+    const deletingConversation = deletingConversations[0];
     if (!deletingConversation || conversationBusy) return;
     setConversationBusy(true);
     try {
       const saved = await readConversation(deletingConversation.id);
       conversations.accept(saved);
-      setDeletingConversation({ ...deletingConversation, title: saved.title, version: saved.version });
+      setDeletingConversations(previous => [{ ...deletingConversation, title: saved.title, version: saved.version }, ...previous.slice(1)]);
       setConversationDeleteError("对话仍存在，已读取最新版本。请核对运行和侧聊后再确认。");
       setConversationDeleteCheck(false);
     } catch (error) {
       if (error instanceof ConversationRequestError && error.status === 404) {
         conversations.forget(deletingConversation.id);
         if (deletingConversation.id === state.selectedId) router.push("/workspace");
-        setDeletingConversation(null); setFeedback("已核对：对话已不存在。");
+        setDeletingConversations(previous => previous.slice(1));
+        setSelectedConversations(previous => previous.filter(id => id !== deletingConversation.id));
+        setConversationDeleteCheck(false); setConversationDeleteError("已核对：该对话已不存在，其余尚未删除。");
+        setFeedback("已核对：对话已不存在。");
       } else setConversationDeleteError(error instanceof Error ? error.message : "无法确认删除结果。");
     } finally { setConversationBusy(false); }
   }
@@ -450,7 +477,29 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
     } finally { setDeleteBusy(false); }
   }
 
-  const listedConversations = state.conversations.filter(item => !item.archived && (item.version || item.draft || item.title !== "新对话"));
+  const orderedConversations = [...state.conversations].sort((left, right) => (right.createdAt ?? "9999").localeCompare(left.createdAt ?? "9999") || right.id.localeCompare(left.id));
+  const listedConversations = orderedConversations.filter(item => !item.archived && !item.pinned && (item.version || item.draft || item.title !== "新对话"));
+  const pinnedConversations = orderedConversations.filter(item => item.pinned && !item.archived);
+  const recentConversations = listedConversations.filter(item => !item.projectId || !projects.some(project => project.id === item.projectId));
+  const archivedConversations = orderedConversations.filter(item => item.archived);
+  const visibleConversationIds = [
+    ...pinnedConversations,
+    ...projects.filter(item => !collapsed.includes(item.id)).flatMap(item => listedConversations.filter(conversation => conversation.projectId === item.id)),
+    ...(recentExpanded ? recentConversations : []),
+    ...(archiveExpanded ? archivedConversations : []),
+  ].map(item => item.id);
+  const selectedItems = orderedConversations.filter(item => selectedConversations.includes(item.id));
+
+  function requestConversationDelete(items: SpaceConversation[]) {
+    if (!items.length || conversationBusy || (runtimeRunning && items.some(item => item.id === current.id))) return;
+    setConversationDeleteError(""); setConversationDeleteCheck(false); setDeletingConversations(items);
+  }
+
+  function beginRename(item: SpaceConversation) {
+    if (conversationClick.current) clearTimeout(conversationClick.current);
+    if (conversationBusy || busy) return;
+    setEditingError(""); setEdit({ kind: "conversation", id: item.id, title: item.title });
+  }
 
   useEffect(() => {
     function dismissMenus(event: PointerEvent | KeyboardEvent) {
@@ -474,6 +523,14 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
       <button className={cn(styles.navButton, pathname === "/workspace/background" && panelOpen && !contextOpen && styles.selected)} aria-current={pathname === "/workspace/background" && panelOpen && !contextOpen ? "page" : undefined} onClick={() => openRoute("/workspace/background")}><BookOpen />职业背景</button>
       <button className={cn(styles.navButton, pathname === "/workspace/library" && panelOpen && !contextOpen && styles.selected)} aria-current={pathname === "/workspace/library" && panelOpen && !contextOpen ? "page" : undefined} onClick={() => openRoute("/workspace/library")}><FileText />资料与成果</button>
       <div className={styles.navigationList}>
+      <div className={styles.selectionControls}>
+        {selectingConversations ? <>
+          <span role="status">已选 {selectedItems.length} 段</span>
+          <TooltipIconButton tooltip="删除选中对话" aria-label="删除选中对话" className="size-7" disabled={!selectedItems.length || conversationBusy || (runtimeRunning && selectedItems.some(item => item.id === current.id))} onClick={() => requestConversationDelete(selectedItems)}><Trash2 /></TooltipIconButton>
+          <TooltipIconButton tooltip="取消选择" aria-label="取消选择" className="size-7" disabled={conversationBusy} onClick={() => { setSelectedConversations([]); setSelectingConversations(false); selectionAnchor.current = null; }}><X /></TooltipIconButton>
+        </> : <TooltipIconButton tooltip="选择对话 · Ctrl/⌘ 加选 · Shift 连选" aria-label="选择对话" className="size-7" onClick={() => setSelectingConversations(true)}><ListChecks /></TooltipIconButton>}
+      </div>
+      {!!pinnedConversations.length && <section aria-label="置顶对话"><div className={styles.sectionHeading}>置顶</div>{pinnedConversations.map(renderConversation)}</section>}
       <div className={styles.sectionHeading}><span>项目</span><Button variant="ghost" size="icon" title="新建项目" aria-label="新建项目" onClick={() => { setMobileNavigation(false); setEditingError(""); setEdit({ kind: "create", id: crypto.randomUUID(), title: "" }); }}><Plus className="size-3.5" /></Button></div>
       {projectLoading && <p role="status" className="px-2 py-3 text-xs text-muted-foreground">正在读取项目…</p>}
       {projectError && <div className="px-2 py-3 text-xs"><p role="alert" className="leading-5 text-destructive">{projectError}</p><Button variant="ghost" size="sm" onClick={refreshProjects}>重新读取</Button></div>}
@@ -501,15 +558,15 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
       <Collapsible open={recentExpanded} onOpenChange={setRecentExpanded}>
         <CollapsibleTrigger className={styles.conversationSection} aria-label="最近"><ChevronDown />最近</CollapsibleTrigger>
         <CollapsibleContent>
-          {listedConversations.filter(item => !item.projectId || !projects.some(project => project.id === item.projectId)).map(renderConversation)}
-          {!conversations.loading && !conversations.error && !listedConversations.some(item => !item.projectId || !projects.some(project => project.id === item.projectId)) && <p className="px-2 py-2 text-xs text-muted-foreground">暂无最近对话</p>}
+          {recentConversations.map(renderConversation)}
+          {!conversations.loading && !conversations.error && !recentConversations.length && <p className="px-2 py-2 text-xs text-muted-foreground">暂无最近对话</p>}
           {conversations.cursor && <Button variant="ghost" size="sm" disabled={conversations.loading} onClick={conversations.loadMore}>更多对话</Button>}
         </CollapsibleContent>
       </Collapsible>
       <Collapsible open={archiveExpanded} onOpenChange={setArchiveExpanded}>
         <CollapsibleTrigger className={styles.conversationSection} aria-label="归档"><ChevronDown />归档</CollapsibleTrigger>
         <CollapsibleContent>
-          {state.conversations.filter(item => item.archived).map(renderConversation)}
+          {archivedConversations.map(renderConversation)}
           {!conversations.loading && !conversations.error && !state.conversations.some(item => item.archived) && <p className="px-2 py-2 text-xs text-muted-foreground">没有已归档对话</p>}
           {conversations.cursor && <Button variant="ghost" size="sm" disabled={conversations.loading} onClick={conversations.loadMore}>更多归档对话</Button>}
         </CollapsibleContent>
@@ -594,10 +651,11 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
         </div>
       </aside></>}
     </div>
-    <Dialog open={!!deletingConversation} onOpenChange={open => { if (!open && !conversationBusy) setDeletingConversation(null); }}><DialogContent>
-      <DialogHeader><DialogTitle>删除对话？</DialogTitle><DialogDescription>将永久删除“{deletingConversation?.title}”的对话历史、运行记录和本标签页草稿。项目、材料、已保存规则与独立分支保留，已发生的外部操作不会撤销。此操作无法恢复。</DialogDescription></DialogHeader>
+    <Dialog open={!!deletingConversations.length} onOpenChange={open => { if (!open && !conversationBusy) setDeletingConversations([]); }}><DialogContent>
+      <DialogHeader><DialogTitle>{deletingConversations.length > 1 ? `删除 ${deletingConversations.length} 段对话？` : "删除对话？"}</DialogTitle><DialogDescription>将永久删除下列对话的历史、运行记录和本标签页草稿。项目、材料、已保存规则与独立分支保留，已发生的外部操作不会撤销。此操作无法恢复；逐项删除，失败时停止并核对。</DialogDescription></DialogHeader>
+      <ul className="max-h-48 overflow-auto text-sm">{deletingConversations.map(item => <li key={item.id} className="break-words py-1">{item.title}</li>)}</ul>
       {conversationDeleteError && <p role="alert" className="text-sm text-destructive">{conversationDeleteError}</p>}
-      <div className="flex justify-end gap-2"><Button variant="outline" disabled={conversationBusy} onClick={() => setDeletingConversation(null)}>取消</Button>
+      <div className="flex justify-end gap-2"><Button variant="outline" disabled={conversationBusy} onClick={() => setDeletingConversations([])}>取消</Button>
         {conversationDeleteCheck ? <Button disabled={conversationBusy} onClick={() => void checkConversationDelete()}>重新读取并核对</Button> : <Button variant="destructive" disabled={conversationBusy} onClick={() => void confirmConversationDelete()}>{conversationBusy ? "正在删除…" : "删除对话"}</Button>}
       </div>
     </DialogContent></Dialog>
@@ -620,19 +678,42 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
         </div>
       </DialogContent>
     </Dialog>
-    <Dialog open={!!edit} onOpenChange={value => { if (!value && !busy) setEdit(null); }}><DialogContent><DialogHeader><DialogTitle>{edit?.kind === "create" ? "新建项目" : "重命名"}</DialogTitle><DialogDescription>{edit?.kind === "conversation" ? "方便下次找到这项工作。" : "按你的职业目标组织工作，目标可以稍后补充。"}</DialogDescription></DialogHeader><form onSubmit={saveEdit} className="space-y-4"><label htmlFor="space-name" className="block text-sm">名称</label><input id="space-name" autoFocus required maxLength={120} value={edit?.title ?? ""} disabled={busy} onChange={event => setEdit(previous => previous ? { ...previous, title: event.target.value } : null)} className="h-10 w-full rounded-md border bg-background px-3 text-sm" />{editingError && <p role="alert" className="text-sm text-destructive">{editingError}</p>}<div className="flex justify-end gap-2"><Button type="button" variant="ghost" disabled={busy} onClick={() => setEdit(null)}>取消</Button><Button type="submit" disabled={busy || !edit?.title.trim()}>{busy ? "正在保存…" : "保存"}</Button></div></form></DialogContent></Dialog>
+    <Dialog open={!!edit && edit.kind !== "conversation"} onOpenChange={value => { if (!value && !busy) setEdit(null); }}><DialogContent><DialogHeader><DialogTitle>{edit?.kind === "create" ? "新建项目" : "重命名"}</DialogTitle><DialogDescription>按你的职业目标组织工作，目标可以稍后补充。</DialogDescription></DialogHeader><form onSubmit={saveEdit} className="space-y-4"><label htmlFor="space-name" className="block text-sm">名称</label><input id="space-name" autoFocus required maxLength={120} value={edit?.title ?? ""} disabled={busy} onChange={event => setEdit(previous => previous ? { ...previous, title: event.target.value } : null)} className="h-10 w-full rounded-md border bg-background px-3 text-sm" />{editingError && <p role="alert" className="text-sm text-destructive">{editingError}</p>}<div className="flex justify-end gap-2"><Button type="button" variant="ghost" disabled={busy} onClick={() => setEdit(null)}>取消</Button><Button type="submit" disabled={busy || !edit?.title.trim()}>{busy ? "正在保存…" : "保存"}</Button></div></form></DialogContent></Dialog>
   </div>;
 
   function renderConversation(item: SpaceConversation) {
-    return <div key={item.id} className={cn(styles.conversationRow, item.id === state.selectedId && styles.selected)}>
-      <button aria-current={item.id === state.selectedId ? "page" : undefined} onClick={() => select(item.id)} className={styles.conversationLink} title={item.title}><span className="truncate">{item.title}</span>{item.draft && <span className={styles.draftMark}>草稿</span>}</button>
-      <Menu.Root modal={false}><Menu.Trigger aria-label={`${item.title}的操作`} className={styles.conversationMenuTrigger}><MoreHorizontal className="size-3.5" /></Menu.Trigger><Menu.Portal><Menu.Positioner side="bottom" align="end" sideOffset={4} className="z-50"><Menu.Popup className={styles.conversationPopup}>
-        <Menu.Item disabled={conversationBusy} onClick={() => { setMobileNavigation(false); setEditingError(""); setEdit({ kind: "conversation", id: item.id, title: item.title }); }}><SquarePen />重命名</Menu.Item>
-        {item.titleOrigin === "default" && item.titleGenerationAttempted && <Menu.Item disabled={conversationBusy} onClick={() => void retryTitle(item)}>重新生成名称</Menu.Item>}
-        <Menu.Item disabled={conversationBusy} onClick={() => void changeConversation(item.id, { archived: !item.archived })}><Archive />{item.archived ? "恢复对话" : "归档对话"}</Menu.Item>
-        <Menu.Separator />
-        <Menu.Item className={styles.deleteMenuItem} disabled={conversationBusy || (item.id === current.id && runtimeRunning)} onClick={() => { setMobileNavigation(false); setConversationDeleteError(""); setConversationDeleteCheck(false); setDeletingConversation(item); }}><Trash2 />删除对话</Menu.Item>
-      </Menu.Popup></Menu.Positioner></Menu.Portal></Menu.Root>
+    const selected = selectedConversations.includes(item.id);
+    return <div key={item.id} className={cn(styles.conversationRow, item.id === state.selectedId && styles.selected, selected && styles.batchSelected)}>
+      {edit?.kind === "conversation" && edit.id === item.id ? <form className={styles.inlineRename} onSubmit={saveEdit}>
+        <input autoFocus aria-label="对话名称" maxLength={120} required disabled={busy} value={edit.title} onFocus={event => event.currentTarget.select()} onChange={event => setEdit(previous => previous ? { ...previous, title: event.target.value } : null)} onKeyDown={event => { if (event.key === "Escape" && !busy) { event.preventDefault(); setEdit(null); } }} />
+        <Button type="submit" variant="ghost" size="sm" disabled={busy || !edit.title.trim()}>{busy ? "保存中" : "保存"}</Button>
+        <TooltipIconButton type="button" tooltip="取消重命名 · Esc" aria-label="取消重命名" className="size-6" disabled={busy} onClick={() => setEdit(null)}><X /></TooltipIconButton>
+        {editingError && <p role="alert" className="w-full text-xs text-destructive">{editingError}</p>}
+      </form> : <>
+      <button aria-current={item.id === state.selectedId ? "page" : undefined} aria-pressed={selectingConversations ? selected : undefined} onDoubleClick={() => { if (!selectingConversations) beginRename(item); }} onKeyDown={event => {
+        if (event.key === "F2") { event.preventDefault(); beginRename(item); }
+        if (event.key === "Delete") { event.preventDefault(); requestConversationDelete(selectedItems.length ? selectedItems : [item]); }
+        if (event.key === "Escape") { setSelectingConversations(false); setSelectedConversations([]); }
+      }} onClick={event => {
+        if (conversationBusy) return;
+        if (conversationClick.current) clearTimeout(conversationClick.current);
+        if (selectingConversations || event.ctrlKey || event.metaKey || event.shiftKey) {
+          setSelectingConversations(true);
+          setSelectedConversations(previous => selectConversationRange(visibleConversationIds, previous, selectionAnchor.current, item.id, event.shiftKey, event.ctrlKey || event.metaKey));
+          if (!event.shiftKey) selectionAnchor.current = item.id;
+        } else {
+          selectionAnchor.current = item.id;
+          if (event.detail < 2) conversationClick.current = setTimeout(() => { void select(item.id); }, event.detail === 0 ? 0 : 350);
+        }
+      }} className={styles.conversationLink} title={item.title}>
+        {selectingConversations && <span aria-hidden="true" className={styles.selectionMark}>{selected ? "✓" : ""}</span>}<span className="truncate">{item.title}</span>{item.draft && <span className={styles.draftMark}>草稿</span>}
+      </button>
+      {!selectingConversations && <div className={styles.conversationActions}>
+        {item.titleOrigin === "default" && item.titleGenerationAttempted && <TooltipIconButton tooltip="重新生成名称" aria-label={`重新生成${item.title}的名称`} className="size-6" disabled={conversationBusy} onClick={() => void retryTitle(item)}><RotateCcw /></TooltipIconButton>}
+        {!item.archived && item.pinned !== undefined && <TooltipIconButton tooltip={item.pinned ? "取消置顶" : "置顶"} aria-label={`${item.pinned ? "取消置顶" : "置顶"}${item.title}`} aria-pressed={!!item.pinned} className="size-6" disabled={conversationBusy} onClick={() => void changeConversation(item.id, { pinned: !item.pinned })}>{item.pinned ? <PinOff /> : <Pin />}</TooltipIconButton>}
+        <TooltipIconButton tooltip={item.archived ? "恢复对话" : "归档对话"} aria-label={`${item.archived ? "恢复" : "归档"}${item.title}`} className="size-6" disabled={conversationBusy || (item.id === current.id && runtimeRunning)} onClick={() => void changeConversation(item.id, { archived: !item.archived })}>{item.archived ? <ArchiveRestore /> : <Archive />}</TooltipIconButton>
+      </div>}
+      </>}
     </div>;
   }
 }

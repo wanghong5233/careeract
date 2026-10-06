@@ -75,6 +75,7 @@ class AgentWorkSessionRepository(Protocol):
         change_project: bool,
         expected_version: UUID,
         model_id: str | None = None,
+        pinned: bool | None = None,
     ) -> AgentWorkSession | None: ...
 
     async def get(self, actor: ActorContext, session_id: str) -> AgentWorkSession | None: ...

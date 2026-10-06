@@ -1,5 +1,8 @@
 import asyncio
+import base64
+import json
 import os
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
@@ -18,11 +21,32 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from services.api.app.factory import create_app
-from services.api.domain.work_session import WorkSessionHistoryUnavailable
+from services.api.domain.work_session import (
+    AgentWorkSession,
+    WorkSessionHistoryUnavailable,
+    WorkSessionInvalid,
+)
 from services.api.infrastructure.agent_sessions import AgnoAgentHistoryReader
+from services.api.infrastructure.work_sessions import decode_cursor, encode_cursor
 from tests.api.test_agent_sessions import token_for
 from tests.api.test_health import build_settings, use_signing_key
 from tests.browser.test_postgres_leases import database_url as database_url
+
+
+def test_pinned_cursor_round_trip_and_legacy_boundary() -> None:
+    session = AgentWorkSession(
+        "synthetic-cursor", "owner", None, datetime.now(UTC), datetime.now(UTC), pinned=True
+    )
+    assert decode_cursor(encode_cursor(session)) == (True, session.created_at, session.session_id)
+    legacy = base64.urlsafe_b64encode(
+        json.dumps([session.created_at.isoformat(), session.session_id]).encode()
+    ).decode()
+    assert decode_cursor(legacy) == (False, session.created_at, session.session_id)
+    invalid = base64.urlsafe_b64encode(
+        json.dumps([1, session.created_at.isoformat(), session.session_id]).encode()
+    ).decode()
+    with pytest.raises(WorkSessionInvalid):
+        decode_cursor(invalid)
 
 
 @pytest.mark.asyncio
@@ -226,6 +250,48 @@ async def test_conversation_directory_ownership_versions_history_and_project_del
             assert history.json()["messages"][0]["run_status"] == "CANCELLED"
             assert history.json()["messages"][0]["run_id"] == "stored-cancelled"
             assert history.headers["cache-control"] == "no-store"
+            assert conversation["pinned"] is False
+            pin_body = {"version": conversation["version"], "pinned": True}
+            assert (
+                await client.patch(
+                    f"/api/v1/agent/conversations/{session_id}", headers=second, json=pin_body
+                )
+            ).status_code == 404
+            pin_responses = await asyncio.gather(
+                *[
+                    client.patch(
+                        f"/api/v1/agent/conversations/{session_id}", headers=first, json=pin_body
+                    )
+                    for _ in range(2)
+                ]
+            )
+            assert sorted(response.status_code for response in pin_responses) == [200, 409]
+            conversation = next(
+                response.json() for response in pin_responses if response.status_code == 200
+            )
+            assert conversation["pinned"] is True
+            assert conversation["archived"] is False and conversation["project_id"] == project["id"]
+            pinned_page = (
+                await client.get("/api/v1/agent/conversations", headers=first, params={"limit": 1})
+            ).json()
+            assert pinned_page["items"][0]["session_id"] == session_id
+            after_pin = (
+                await client.get(
+                    "/api/v1/agent/conversations",
+                    headers=first,
+                    params={"limit": 1, "cursor": pinned_page["next_cursor"]},
+                )
+            ).json()
+            assert after_pin["items"][0]["session_id"] == other["session_id"]
+            synthetic_history.active = True
+            unpinned = await client.patch(
+                f"/api/v1/agent/conversations/{session_id}",
+                headers=first,
+                json={"version": conversation["version"], "pinned": False},
+            )
+            assert unpinned.status_code == 200 and unpinned.json()["pinned"] is False
+            conversation = unpinned.json()
+            synthetic_history.active = False
             changes = {"version": conversation["version"], "title": "合成更名"}
             responses = await asyncio.gather(
                 *[

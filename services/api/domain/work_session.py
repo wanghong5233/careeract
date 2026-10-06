@@ -20,6 +20,7 @@ class AgentWorkSession:
     updated_at: datetime
     title: str = "历史对话"
     archived: bool = False
+    pinned: bool = False
     version: UUID = field(default_factory=uuid4)
     context_version: UUID = field(default_factory=uuid4)
     title_origin: str = "manual"

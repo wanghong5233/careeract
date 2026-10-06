@@ -120,10 +120,11 @@ class AgentWorkSessionService:
         change_project: bool,
         expected_version: UUID,
         model_id: str | None = None,
+        pinned: bool | None = None,
     ) -> AgentWorkSession:
         current = await self.read(actor, session_id=session_id)
         if current.temporary_until is not None and (
-            change_project or archived is not None or title is not None
+            change_project or archived is not None or title is not None or pinned is not None
         ):
             raise WorkSessionInvalid("Temporary chat scope and lifecycle use side chat endpoints")
         if (
@@ -136,7 +137,13 @@ class AgentWorkSessionService:
             if self.models is None:
                 raise WorkSessionUnavailable("Model selection is unavailable")
             await self.models.require(model_id)
-        if title is None and archived is None and not change_project and model_id is None:
+        if (
+            title is None
+            and archived is None
+            and not change_project
+            and model_id is None
+            and pinned is None
+        ):
             raise WorkSessionInvalid("No changes provided")
         if title is not None:
             title = self.validate_title(title)
@@ -149,6 +156,7 @@ class AgentWorkSessionService:
             change_project=change_project,
             expected_version=expected_version,
             model_id=model_id,
+            pinned=pinned,
         )
         if saved is None:
             raise WorkSessionConflict("Conversation changed; reload before saving")

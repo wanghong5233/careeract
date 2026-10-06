@@ -29,6 +29,7 @@ def work_session_from_row(row: RowMapping) -> AgentWorkSession:
         updated_at=row["updated_at"],
         title=row["title"],
         archived=row["archived"],
+        pinned=row["pinned"],
         version=row["version"],
         context_version=row["context_version"],
         title_origin=row["title_origin"],
@@ -41,27 +42,30 @@ def work_session_from_row(row: RowMapping) -> AgentWorkSession:
 
 
 def encode_cursor(session: AgentWorkSession) -> str:
-    payload = json.dumps([session.created_at.isoformat(), session.session_id])
+    payload = json.dumps([session.pinned, session.created_at.isoformat(), session.session_id])
     return base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
 
 
-def decode_cursor(cursor: str) -> tuple[datetime, str]:
+def decode_cursor(cursor: str) -> tuple[bool, datetime, str]:
     try:
         if not 1 <= len(cursor) <= 512:
             raise ValueError
         value = json.loads(
             base64.b64decode(cursor + "=" * (-len(cursor) % 4), altchars=b"-_", validate=True)
         )
+        if isinstance(value, list) and len(value) == 2:
+            value = [False, *value]
         if (
             not isinstance(value, list)
-            or len(value) != 2
-            or not all(isinstance(item, str) for item in value)
+            or len(value) != 3
+            or not isinstance(value[0], bool)
+            or not all(isinstance(item, str) for item in value[1:])
         ):
             raise ValueError
-        created_at = datetime.fromisoformat(value[0])
-        if created_at.utcoffset() is None or not value[1]:
+        created_at = datetime.fromisoformat(value[1])
+        if created_at.utcoffset() is None or not value[2]:
             raise ValueError
-        return created_at, value[1]
+        return value[0], created_at, value[2]
     except (ValueError, binascii.Error):
         raise WorkSessionInvalid("Invalid conversation cursor") from None
 
@@ -137,8 +141,12 @@ class PostgresAgentWorkSessionRepository:
         parameters: dict[str, object] = {"user_id": actor.user_id, "limit": limit + 1}
         condition = " AND temporary_until IS NULL"
         if boundary:
-            parameters.update({"created_at": boundary[0], "session_id": boundary[1]})
-            condition += " AND (created_at, session_id) < (:created_at, :session_id)"
+            parameters.update(
+                {"pinned": boundary[0], "created_at": boundary[1], "session_id": boundary[2]}
+            )
+            condition += (
+                " AND (pinned, created_at, session_id) < (:pinned, :created_at, :session_id)"
+            )
         if archived is not None:
             parameters["archived"] = archived
             condition += " AND archived=:archived"
@@ -150,7 +158,8 @@ class PostgresAgentWorkSessionRepository:
                             text(
                                 "SELECT * FROM career.agent_work_sessions WHERE user_id=:user_id"
                                 + condition
-                                + " ORDER BY created_at DESC, session_id DESC LIMIT :limit"
+                                + " ORDER BY pinned DESC, created_at DESC, session_id DESC "
+                                "LIMIT :limit"
                             ),
                             parameters,
                         )
@@ -243,6 +252,7 @@ class PostgresAgentWorkSessionRepository:
         change_project: bool,
         expected_version: UUID,
         model_id: str | None = None,
+        pinned: bool | None = None,
     ) -> AgentWorkSession | None:
         try:
             async with self.engine.begin() as connection:
@@ -273,6 +283,7 @@ class PostgresAgentWorkSessionRepository:
                                 "title_origin=CASE WHEN CAST(:title AS TEXT) IS NOT NULL "
                                 "THEN 'manual' ELSE title_origin END, "
                                 "archived=COALESCE(:archived, archived), "
+                                "pinned=COALESCE(:pinned, pinned), "
                                 "model_id=COALESCE(:model_id, model_id), "
                                 "project_id=CASE WHEN :change_project THEN :project_id "
                                 "ELSE project_id END, "
@@ -288,6 +299,7 @@ class PostgresAgentWorkSessionRepository:
                                 "user_id": actor.user_id,
                                 "title": title,
                                 "archived": archived,
+                                "pinned": pinned,
                                 "model_id": model_id,
                                 "project_id": project_id,
                                 "change_project": change_project,
