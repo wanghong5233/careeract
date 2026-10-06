@@ -2,7 +2,7 @@ export type SpaceTab = { href: string; label: string };
 import type { AgentConversation } from "@/lib/agent-conversations";
 
 export type SpaceConversation = { id: string; projectId: string | null; title: string; draft: string; archived: boolean; tabs: SpaceTab[]; activeHref: string; panelHidden: boolean; version?: string; createId?: string; modelId?: string | null; titleOrigin?: string; titleGenerationAttempted?: boolean };
-export type SpaceState = { conversations: SpaceConversation[]; selectedId: string; navigation: boolean; panelWidth: number };
+export type SpaceState = { conversations: SpaceConversation[]; selectedId: string; navigation: boolean; panelWidth: number; recentExpanded?: boolean; archiveExpanded?: boolean };
 export function newSpaceConversation(id: string, projectId: string | null = null): SpaceConversation {
   return { id, projectId, title: "新对话", draft: "", archived: false, tabs: [], activeHref: "/workspace", panelHidden: false };
 }
@@ -35,7 +35,7 @@ export function mergeSpaceConversations(state: SpaceState, conversations: AgentC
   }));
   return { ...state, conversations: [...merged, ...state.conversations.filter(item => !remoteIds.has(item.id))] };
 }
-const initialState: SpaceState = { conversations: [newSpaceConversation("new")], selectedId: "new", navigation: true, panelWidth: 50 };
+const initialState: SpaceState = { conversations: [newSpaceConversation("new")], selectedId: "new", navigation: true, panelWidth: 50, recentExpanded: true, archiveExpanded: false };
 
 export function removeSpaceProject(state: SpaceState, projectId: string): SpaceState {
   const href = `/workspace/projects/${projectId}`;
@@ -61,6 +61,8 @@ function isSpaceState(value: unknown): value is SpaceState & { tabs?: SpaceTab[]
   if (!value || typeof value !== "object") return false;
   const state = value as SpaceState & { tabs?: SpaceTab[] };
   return typeof state.selectedId === "string" && typeof state.navigation === "boolean"
+    && (state.recentExpanded === undefined || typeof state.recentExpanded === "boolean")
+    && (state.archiveExpanded === undefined || typeof state.archiveExpanded === "boolean")
     && typeof state.panelWidth === "number" && state.panelWidth >= 30 && state.panelWidth <= 65
     && Array.isArray(state.conversations) && state.conversations.length > 0
     && state.conversations.every(item => item && typeof item.id === "string"
@@ -91,6 +93,7 @@ function createStore(owner: string) {
           const parsed: unknown = raw ? JSON.parse(raw) : null;
           if (isSpaceState(parsed)) snapshot = {
             selectedId: parsed.selectedId, navigation: parsed.navigation, panelWidth: parsed.panelWidth,
+            recentExpanded: parsed.recentExpanded ?? true, archiveExpanded: parsed.archiveExpanded ?? false,
             conversations: parsed.conversations.map(item => ({ ...newSpaceConversation(item.id, item.projectId), ...item, tabs: item.tabs ?? (item.id === parsed.selectedId ? parsed.tabs ?? [] : []) })),
           };
         } catch { storageAvailable = false; }

@@ -73,6 +73,28 @@ test("draft storage restores across module reload and isolates owners and tabs",
   assert.equal(first.getSpaceStore("owner-one").snapshot().conversations[0].draft, "");
 });
 
+test("recent and archive sections persist through route changes and reload without sharing owner preferences", () => {
+  const stored = new Map();
+  const source = stateFixture(stored);
+  const store = source.getSpaceStore("section-owner");
+  store.snapshot();
+  store.update(state => ({ ...state, recentExpanded: false, archiveExpanded: true }));
+  store.update(state => source.beginSpaceConversation(state, "next"));
+  const restored = stateFixture(stored).getSpaceStore("section-owner").snapshot();
+  assert.equal(restored.recentExpanded, false);
+  assert.equal(restored.archiveExpanded, true);
+  const other = source.getSpaceStore("other-owner").snapshot();
+  assert.equal(other.recentExpanded, true);
+  assert.equal(other.archiveExpanded, false);
+  const legacy = JSON.parse(stored.get("careeract-space:section-owner"));
+  delete legacy.recentExpanded;
+  delete legacy.archiveExpanded;
+  stored.set("careeract-space:section-owner", JSON.stringify(legacy));
+  const migrated = stateFixture(stored).getSpaceStore("section-owner").snapshot();
+  assert.equal(migrated.recentExpanded, true);
+  assert.equal(migrated.archiveExpanded, false);
+});
+
 test("invalid stored routes are rejected and denied storage remains usable in memory", () => {
   const { getSpaceStore } = stateFixture(new Map([["careeract-space:owner", JSON.stringify({ conversations: [{ id: "x", projectId: null, title: "x", draft: "", archived: false, tabs: [{ href: "https://evil.example", label: "x" }] }], selectedId: "x", navigation: true, panelWidth: 50 })]]));
   assert.equal(getSpaceStore("owner").snapshot().selectedId, "new");

@@ -7,6 +7,7 @@ import { Menu } from "@base-ui/react/menu";
 import { useAui, useAuiState } from "@assistant-ui/react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { AccountButton } from "@/components/workspace-account";
 import { AgentComposerTools } from "@/components/agent-composer-tools";
 import { AgentProjectPicker } from "@/components/agent-project-picker";
@@ -55,7 +56,10 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
   const { projects, updateProjects: setProjects, loading: projectLoading, error: projectError, cursor: projectCursor, refresh: refreshProjects, loadMore: loadMoreProjects } = useProjectList();
   const [mobileNavigation, setMobileNavigation] = useState(false);
   const [collapsed, setCollapsed] = useState<string[]>([]);
-  const [showArchived, setShowArchived] = useState(false);
+  const recentExpanded = state.recentExpanded ?? true;
+  const archiveExpanded = state.archiveExpanded ?? false;
+  const setRecentExpanded = (open: boolean) => store.update(previous => ({ ...previous, recentExpanded: open }));
+  const setArchiveExpanded = (open: boolean) => store.update(previous => ({ ...previous, archiveExpanded: open }));
   const [deletingConversation, setDeletingConversation] = useState<SpaceConversation | null>(null);
   const [conversationDeleteError, setConversationDeleteError] = useState("");
   const [conversationDeleteCheck, setConversationDeleteCheck] = useState(false);
@@ -203,7 +207,7 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
     const id = store.snapshot().selectedId;
     router.push("/workspace");
     if (projectId) setCollapsed(previous => previous.filter(id => id !== projectId));
-    setContextOpen(false); setShowArchived(false); setMobileNavigation(false); setFeedback(""); requestAnimationFrame(() => input.current?.focus());
+    setContextOpen(false); setRecentExpanded(true); setMobileNavigation(false); setFeedback(""); requestAnimationFrame(() => input.current?.focus());
     setConversationBusy(true);
     try { await conversations.persist(id); }
     catch (error) { setFeedback(error instanceof Error ? error.message : "未能确认创建结果，草稿仍保留。请重新读取核对。"); }
@@ -213,7 +217,7 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
   async function changeConversation(id: string, changes: { project_id?: string | null; archived?: boolean; model_id?: string }) {
     if (conversationBusy || sendBusy) return;
     setConversationBusy(true); setFeedback("");
-    try { await conversations.persist(id, changes); if (changes.archived !== undefined) { setFeedback(changes.archived ? "对话已归档，可在已归档对话中恢复。" : "对话已恢复。"); void history.refresh(); } }
+    try { await conversations.persist(id, changes); if (changes.archived !== undefined) { if (changes.archived) setArchiveExpanded(true); else setRecentExpanded(true); setFeedback(changes.archived ? "对话已归档，可在侧栏归档列表中恢复。" : "对话已恢复。"); void history.refresh(); } }
     catch (error) { setFeedback(error instanceof Error ? error.message : "未能保存对话，请重新读取核对。"); }
     finally { setConversationBusy(false); }
   }
@@ -492,11 +496,24 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
         {!collapsed.includes(item.id) && listedConversations.filter(conversation => conversation.projectId === item.id).map(renderConversation)}
       </section>)}
       {projectCursor && <Button variant="ghost" size="sm" disabled={projectLoading} onClick={loadMoreProjects}>更多项目</Button>}
-      <div className={styles.sectionHeading}><span>对话</span><TooltipIconButton tooltip="已归档对话" aria-label="已归档对话" onClick={() => { setMobileNavigation(false); setShowArchived(true); }}><Archive className="size-3.5" /></TooltipIconButton></div>
       {conversations.loading && <p role="status" className="px-2 py-2 text-xs text-muted-foreground">正在读取对话…</p>}
       {conversations.error && <div className="px-2 py-2 text-xs"><p role="alert" className="text-destructive">{conversations.error}</p><Button variant="ghost" size="sm" onClick={conversations.refresh}>重新读取对话</Button></div>}
-      {listedConversations.filter(item => !item.projectId || !projects.some(project => project.id === item.projectId)).map(renderConversation)}
-      {conversations.cursor && <Button variant="ghost" size="sm" disabled={conversations.loading} onClick={conversations.loadMore}>更多对话</Button>}
+      <Collapsible open={recentExpanded} onOpenChange={setRecentExpanded}>
+        <CollapsibleTrigger className={styles.conversationSection} aria-label="最近"><ChevronDown />最近</CollapsibleTrigger>
+        <CollapsibleContent>
+          {listedConversations.filter(item => !item.projectId || !projects.some(project => project.id === item.projectId)).map(renderConversation)}
+          {!conversations.loading && !conversations.error && !listedConversations.some(item => !item.projectId || !projects.some(project => project.id === item.projectId)) && <p className="px-2 py-2 text-xs text-muted-foreground">暂无最近对话</p>}
+          {conversations.cursor && <Button variant="ghost" size="sm" disabled={conversations.loading} onClick={conversations.loadMore}>更多对话</Button>}
+        </CollapsibleContent>
+      </Collapsible>
+      <Collapsible open={archiveExpanded} onOpenChange={setArchiveExpanded}>
+        <CollapsibleTrigger className={styles.conversationSection} aria-label="归档"><ChevronDown />归档</CollapsibleTrigger>
+        <CollapsibleContent>
+          {state.conversations.filter(item => item.archived).map(renderConversation)}
+          {!conversations.loading && !conversations.error && !state.conversations.some(item => item.archived) && <p className="px-2 py-2 text-xs text-muted-foreground">没有已归档对话</p>}
+          {conversations.cursor && <Button variant="ghost" size="sm" disabled={conversations.loading} onClick={conversations.loadMore}>更多归档对话</Button>}
+        </CollapsibleContent>
+      </Collapsible>
       </div>
       <div className={styles.navigationFooter}><AccountButton compact onClick={() => { setMobileNavigation(false); openAccount(); }} /></div>
     </nav>
@@ -577,13 +594,6 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
         </div>
       </aside></>}
     </div>
-    <Dialog open={showArchived} onOpenChange={setShowArchived}><DialogContent className={styles.archiveDialog}>
-      <DialogHeader><DialogTitle>已归档对话</DialogTitle><DialogDescription>归档保留历史与草稿。恢复后可以继续对话。</DialogDescription></DialogHeader>
-      <div className={styles.archiveList}>{state.conversations.filter(item => item.archived).map(renderConversation)}</div>
-      {!state.conversations.some(item => item.archived) && <p className="text-sm text-muted-foreground">没有已归档对话。</p>}
-      {conversations.cursor && <Button variant="ghost" disabled={conversations.loading} onClick={conversations.loadMore}>加载更多</Button>}
-      {conversations.error && <p role="alert">{conversations.error}</p>}
-    </DialogContent></Dialog>
     <Dialog open={!!deletingConversation} onOpenChange={open => { if (!open && !conversationBusy) setDeletingConversation(null); }}><DialogContent>
       <DialogHeader><DialogTitle>删除对话？</DialogTitle><DialogDescription>将永久删除“{deletingConversation?.title}”的对话历史、运行记录和本标签页草稿。项目、材料、已保存规则与独立分支保留，已发生的外部操作不会撤销。此操作无法恢复。</DialogDescription></DialogHeader>
       {conversationDeleteError && <p role="alert" className="text-sm text-destructive">{conversationDeleteError}</p>}
@@ -615,13 +625,13 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
 
   function renderConversation(item: SpaceConversation) {
     return <div key={item.id} className={cn(styles.conversationRow, item.id === state.selectedId && styles.selected)}>
-      <button aria-current={item.id === state.selectedId ? "page" : undefined} onClick={() => { select(item.id); setShowArchived(false); }} className={styles.conversationLink} title={item.title}><span className="truncate">{item.title}</span>{item.draft && <span className={styles.draftMark}>草稿</span>}</button>
+      <button aria-current={item.id === state.selectedId ? "page" : undefined} onClick={() => select(item.id)} className={styles.conversationLink} title={item.title}><span className="truncate">{item.title}</span>{item.draft && <span className={styles.draftMark}>草稿</span>}</button>
       <Menu.Root modal={false}><Menu.Trigger aria-label={`${item.title}的操作`} className={styles.conversationMenuTrigger}><MoreHorizontal className="size-3.5" /></Menu.Trigger><Menu.Portal><Menu.Positioner side="bottom" align="end" sideOffset={4} className="z-50"><Menu.Popup className={styles.conversationPopup}>
-        <Menu.Item disabled={conversationBusy} onClick={() => { setShowArchived(false); setMobileNavigation(false); setEditingError(""); setEdit({ kind: "conversation", id: item.id, title: item.title }); }}><SquarePen />重命名</Menu.Item>
+        <Menu.Item disabled={conversationBusy} onClick={() => { setMobileNavigation(false); setEditingError(""); setEdit({ kind: "conversation", id: item.id, title: item.title }); }}><SquarePen />重命名</Menu.Item>
         {item.titleOrigin === "default" && item.titleGenerationAttempted && <Menu.Item disabled={conversationBusy} onClick={() => void retryTitle(item)}>重新生成名称</Menu.Item>}
         <Menu.Item disabled={conversationBusy} onClick={() => void changeConversation(item.id, { archived: !item.archived })}><Archive />{item.archived ? "恢复对话" : "归档对话"}</Menu.Item>
         <Menu.Separator />
-        <Menu.Item className={styles.deleteMenuItem} disabled={conversationBusy || (item.id === current.id && runtimeRunning)} onClick={() => { setShowArchived(false); setMobileNavigation(false); setConversationDeleteError(""); setConversationDeleteCheck(false); setDeletingConversation(item); }}><Trash2 />删除对话</Menu.Item>
+        <Menu.Item className={styles.deleteMenuItem} disabled={conversationBusy || (item.id === current.id && runtimeRunning)} onClick={() => { setMobileNavigation(false); setConversationDeleteError(""); setConversationDeleteCheck(false); setDeletingConversation(item); }}><Trash2 />删除对话</Menu.Item>
       </Menu.Popup></Menu.Positioner></Menu.Portal></Menu.Root>
     </div>;
   }

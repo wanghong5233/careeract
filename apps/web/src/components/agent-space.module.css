@@ -26,8 +26,11 @@
 .conversationPopup svg { width:15px; height:15px; }
 .conversationPopup [role=separator] { height:1px; margin:5px 3px; background:var(--border); }
 .conversationPopup .deleteMenuItem { color:var(--destructive); }
-.archiveDialog { color:oklch(0.38 0 0); font-family:var(--font-sans); font-weight:400; }
-.archiveList { max-height:55dvh; overflow:auto; }
+.conversationSection { display:flex; align-items:center; gap:6px; width:100%; margin-top:20px; padding:6px 8px; border-radius:6px; color:var(--muted-foreground); font-size:12px; font-weight:400; text-align:left; }
+.conversationSection:hover { background:var(--muted); }
+.conversationSection:focus-visible { outline:2px solid var(--ring); outline-offset:2px; }
+.conversationSection svg { width:12px; height:12px; transform:rotate(-90deg); }
+.conversationSection[data-panel-open] svg { transform:none; }
 @media(hover:none) { .conversationMenuTrigger { opacity:1; } }
 .conversationMenu summary { list-style:none; padding:9px 6px; cursor:pointer; color:var(--muted-foreground); }
 .conversationMenu summary::-webkit-details-marker { display:none; }
