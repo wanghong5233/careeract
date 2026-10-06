@@ -117,7 +117,7 @@ Docker CLI 存在不代表 Linux 引擎已启动。检查可用内存、Docker �
    ```
 
    ```powershell
-   uv run --package careeract-api uvicorn services.api.app.main:app --reload
+   npm --prefix apps/web run dev:api
    ```
 
 4. 验证模型、持久任务或浏览器时再启动相关组件：
@@ -144,7 +144,7 @@ Docker CLI 存在不代表 Linux 引擎已启动。检查可用内存、Docker �
 
 | 入口 | 本地地址 |
 | --- | --- |
-| Web | `http://localhost:3000` |
+| Web（Agent 根入口） | `http://localhost:3100/` |
 | API 健康检查 | `http://localhost:8000/health` |
 | Browser Service 健康检查 | `http://localhost:8001/health` |
 | PostgreSQL | `localhost:15432`，以实际配置为准 |
@@ -155,26 +155,27 @@ Docker CLI 存在不代表 Linux 引擎已启动。检查可用内存、Docker �
 本地 Compose 的数据库、模型网关、Temporal 和 Steel 端口仅绑定回环地址，不可直接当公网部署配置。
 生产拓扑在 `deploy/compose.yaml`，对宿主机只发布 Caddy 端口，仍需独立公网验收。
 
-如果 3000 已被系统占用，不终止系统进程。可临时用 3100，分别在两个终端启动，
-只覆盖当前进程环境，保留已有凭据文件：
-
-```powershell
-$env:BETTER_AUTH_URL = 'http://localhost:3100'
-$env:API_BASE_URL = 'http://127.0.0.1:8000'
-npm --prefix apps/web run dev -- --hostname 127.0.0.1 --port 3100
-```
-
-```powershell
-$env:AUTH_ISSUER = 'http://localhost:3100'
-$env:AUTH_AUDIENCE = 'http://localhost:3100'
-$env:AUTH_JWKS_URL = 'http://127.0.0.1:3100/api/auth/jwks'
-uv run --package careeract-api uvicorn services.api.app.main:app --host 127.0.0.1 --port 8000
-```
-
-打开 `http://localhost:3100`，未登录时进入注册/登录页面。变更端口必须同步认证地址，
-不要只改 Next.js 监听端口。`http://127.0.0.1:3001/v1/health` 是 Steel 健康接口，
+本地开发固定使用 Web 3100、API 8000，两个启动入口均先用 Next 的环境加载器核对
+根目录 `.env` 与 `apps/web/.env.local` 的认证/BFF 地址（包括当前终端覆盖值）。
+`BETTER_AUTH_URL`、`AUTH_ISSUER`、`AUTH_AUDIENCE` 统一为 `http://localhost:3100`，
+`AUTH_JWKS_URL` 为 `http://localhost:3100/api/auth/jwks`，`API_BASE_URL` 为
+`http://localhost:8000`。配置不一致时只报告变量名并拒绝启动；显式指定监听端口，
+端口占用时报错，不自动递增或临时改端口。不要给启动命令追加不同的端口参数。
+3000 不再是本地产品入口；生产 Web 容器内部 3000、Steel 内部 3000 是不同拓扑，保持部署配置。
+打开 `http://localhost:3100/`，未登录时进入注册/登录页面。
+`http://127.0.0.1:3001/v1/health` 是 Steel 健康接口，
 不是 CareerAct Agent 页面，不能拿它代替产品页面展示。
 停止本项目容器可用 `docker compose stop`；不要把删卷、全局 prune 或清空 Profile 当常规修复。
+
+启动前用 `Get-NetTCPConnection -LocalPort 3100,8000 -State Listen` 核对已有监听者，
+再按 `OwningProcess` 检查进程命令和健康；已运行的开发服务不重复启动，也不误停其他服务。
+开发服务留在独立终端；工具后台启动时使用 `Start-Process -WindowStyle Hidden`，
+将输出重定向到已忽略的 `data/dev/`，并核对 Web `/sign-in`、API `/health` 和登录后 BFF 读取；
+健康接口成功不能证明认证公钥或业务链路正常。
+API 通过 `uv` 的项目解释器执行 `python -m uvicorn`，避免全局/旧 `.exe` 启动器混用依赖；
+reload 限定 `services/`，不因隔离检查快照或前端修改重启 API。
+Web 始终用单一 `next dev`；环境变量、依赖或数据库迁移后的必要重启与普通 UI 热更新分开处理。
+这不提供开机自启或 Agent Run 跨进程续跑。
 
 ## 职业档案验收
 
