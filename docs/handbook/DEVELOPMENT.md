@@ -102,7 +102,7 @@ Docker CLI 存在不代表 Linux 引擎已启动。检查可用内存、Docker �
 
    等数据库 healthy 后再迁移。初始化脚本只作用于首次建卷；已有数据库结构必须通过新 Alembic revision 演进。
 
-3. 先启动模型网关并初始化受限服务 Key，再分别在独立终端启动 Web 与 API：
+3. 先启动模型网关并初始化受限服务 Key，再用组合入口启动 Web 与 API：
 
    ```powershell
    docker compose up -d litellm
@@ -117,7 +117,7 @@ Docker CLI 存在不代表 Linux 引擎已启动。检查可用内存、Docker �
    ```
 
    ```powershell
-   npm --prefix apps/web run dev:api
+   npm --prefix apps/web run dev:status
    ```
 
 4. 验证模型、持久任务或浏览器时再启动相关组件：
@@ -144,8 +144,8 @@ Docker CLI 存在不代表 Linux 引擎已启动。检查可用内存、Docker �
 
 | 入口 | 本地地址 |
 | --- | --- |
-| Web（Agent 根入口） | `http://localhost:3100/` |
-| API 健康检查 | `http://localhost:8000/health` |
+| Web（Agent 根入口） | 由组合启动器打印（主端口 `http://localhost:43110/`） |
+| API 健康检查 | 由组合启动器打印（主端口 `http://localhost:43111/health`） |
 | Browser Service 健康检查 | `http://localhost:8001/health` |
 | PostgreSQL | `localhost:15432`，以实际配置为准 |
 | LiteLLM | `http://localhost:4000` |
@@ -155,20 +155,30 @@ Docker CLI 存在不代表 Linux 引擎已启动。检查可用内存、Docker �
 本地 Compose 的数据库、模型网关、Temporal 和 Steel 端口仅绑定回环地址，不可直接当公网部署配置。
 生产拓扑在 `deploy/compose.yaml`，对宿主机只发布 Caddy 端口，仍需独立公网验收。
 
-本地开发固定使用 Web 3100、API 8000，两个启动入口均先用 Next 的环境加载器核对
-根目录 `.env` 与 `apps/web/.env.local` 的认证/BFF 地址（包括当前终端覆盖值）。
-`BETTER_AUTH_URL`、`AUTH_ISSUER`、`AUTH_AUDIENCE` 统一为 `http://localhost:3100`，
-`AUTH_JWKS_URL` 为 `http://localhost:3100/api/auth/jwks`，`API_BASE_URL` 为
-`http://localhost:8000`。配置不一致时只报告变量名并拒绝启动；显式指定监听端口，
-端口占用时报错，不自动递增或临时改端口。不要给启动命令追加不同的端口参数。
-3000 不再是本地产品入口；生产 Web 容器内部 3000、Steel 内部 3000 是不同拓扑，保持部署配置。
-打开 `http://localhost:3100/`，未登录时进入注册/登录页面。
+本地开发使用 Web `43110`、API `43111` 作为主调试端口，组合启动器会在固定的
+`43110/43111`、`43120/43121` … `43180/43181` 端口池中按“成对”退避。
+它先核对根目录 `.env` 与 `apps/web/.env.local` 的认证/BFF 地址，再检查两个端口；
+端口占用时保留占用进程信息并选择下一对，实际 Web/API 地址注入同一批子进程，避免认证漂移。
+同仓库再次执行 `dev` 会显示并复用已有实例，不另起 Next 进程。探测后发生绑定冲突时，清理
+本次子进程并继续尝试下一对。现有实例的服务退出或连续三次健康检查失败时，在原端口按
+1/2/4 秒退避恢复，单个服务累计最多恢复三次；编译或依赖错误、端口池耗尽会显示失败并保留日志，
+不无限重启、不重放 Agent 请求。此机制不保证后台 Run 跨进程恢复。
+端口池耗尽才拒绝启动，不会只替换一个服务的端口，也不会修改系统代理或终止未知进程。
+统一从仓库根目录运行 `npm --prefix apps/web run dev`，然后打开启动器打印的 Web URL。
+实际端口、状态和子进程 PID 写入已忽略的 `data/dev/careeract.json`，日志为 `data/dev/careeract.log`。
+状态查询用 `npm --prefix apps/web run dev:status`，完整停止用 `npm --prefix apps/web run dev:stop`，
+会清理启动器所属的 Web/API 子进程树。Windows 工具后台启动使用 `Start-Process -WindowStyle Hidden`，
+避免服务随一次终端工具调用结束；不设置开机自启。
+`npm --prefix apps/web run generate:api` 从当前 ready 实例读取实际 API 地址；smoke 脚本的
+`--base-url` 同样传入 `dev:status` 显示的 Web 地址，退避后不沿用主端口。
+未登录时进入注册/登录页面。生产 Web 容器内部 3000、Steel 内部 3000 是不同拓扑，保持部署配置。
 `http://127.0.0.1:3001/v1/health` 是 Steel 健康接口，
 不是 CareerAct Agent 页面，不能拿它代替产品页面展示。
 停止本项目容器可用 `docker compose stop`；不要把删卷、全局 prune 或清空 Profile 当常规修复。
 
-启动前用 `Get-NetTCPConnection -LocalPort 3100,8000 -State Listen` 核对已有监听者，
-再按 `OwningProcess` 检查进程命令和健康；已运行的开发服务不重复启动，也不误停其他服务。
+启动器会用实际绑定测试核对端口，并在 Windows 上显示占用 PID/进程；手工排查可用
+`Get-NetTCPConnection -LocalPort 43110,43111,43120,43121 -State Listen`，
+再按 `OwningProcess` 检查进程命令和健康；不重复启动已有开发服务，也不误停其他服务。
 开发服务留在独立终端；工具后台启动时使用 `Start-Process -WindowStyle Hidden`，
 将输出重定向到已忽略的 `data/dev/`，并核对 Web `/sign-in`、API `/health` 和登录后 BFF 读取；
 健康接口成功不能证明认证公钥或业务链路正常。
@@ -188,7 +198,7 @@ Web 始终用单一 `next dev`；环境变量、依赖或数据库迁移后的�
 ```powershell
 $env:RUN_PROFILE_POSTGRES_TESTS = '1'
 try { uv run pytest tests/api/test_profiles.py -q } finally { Remove-Item Env:RUN_PROFILE_POSTGRES_TESTS }
-uv run python scripts/smoke_profile.py --base-url http://localhost:3100
+uv run python scripts/smoke_profile.py --base-url http://localhost:43110
 ```
 
 第一项复用现有隔离 Docker PostgreSQL 夹具，验证迁移、真实持久化和并发；HTTP 身份签名

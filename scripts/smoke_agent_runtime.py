@@ -255,5 +255,5 @@ def check(base_url: str) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--base-url", default="http://localhost:3100")
+    parser.add_argument("--base-url", default="http://localhost:43110")
     check(parser.parse_args().base_url)

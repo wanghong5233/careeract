@@ -53,10 +53,10 @@ jobs:
       run:
         working-directory: apps/web
     env:
-      API_BASE_URL: http://localhost:8000
+      API_BASE_URL: http://localhost:43111
       AUTH_DATABASE_URL: postgresql://careeract:careeract@localhost:5432/careeract
       BETTER_AUTH_SECRET: ci-only-secret-ci-only-secret-32ch
-      BETTER_AUTH_URL: http://localhost:3100
+      BETTER_AUTH_URL: http://localhost:43110
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v6

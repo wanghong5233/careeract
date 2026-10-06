@@ -94,6 +94,6 @@ def check(base_url: str) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Validate the local career profile vertical slice")
-    parser.add_argument("--base-url", default="http://localhost:3100")
+    parser.add_argument("--base-url", default="http://localhost:43110")
     args = parser.parse_args()
     check(args.base_url)
