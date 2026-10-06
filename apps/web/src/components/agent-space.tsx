@@ -45,7 +45,8 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
   const runtimeMessages = useAuiState(runtime => runtime.thread.messages);
   const runtimeHasMessages = runtimeMessages.length > 0;
   const [conversationBusy, setConversationBusy] = useState(false);
-  const [messageEdit, setMessageEdit] = useState<{ id: string; text: string } | null>(null);
+  const [messageEdit, setMessageEdit] = useState<{ conversationId: string; id: string; text: string } | null>(null);
+  const activeMessageEdit = messageEdit?.conversationId === current.id ? messageEdit : null;
   const branchRequest = useRef<{ key: string; id: string } | null>(null);
   const branchLock = useRef(false);
   const [sendBusy, setSendBusy] = useState(false);
@@ -330,7 +331,7 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (current.archived) return;
+    if (current.archived || (activeMessageEdit && !runtimeRunning)) return;
     if (runtimeRunning) {
       if (stopBusy) return;
       setStopBusy(true);
@@ -494,7 +495,7 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
           {history.history?.session.branch_context && <p className={styles.feedback}>独立分支 · 原对话保留<Button variant="link" size="sm" disabled={runtimeRunning || conversationBusy} onClick={() => select(history.history!.session.branch_context!.source_id)}>查看来源对话</Button></p>}
           {history.loading && <p role="status" className={styles.feedback}>正在读取历史…</p>}
           {history.error && <div className={styles.feedback}><p role="alert">{history.error}</p><Button variant="ghost" size="sm" onClick={history.refresh}>重新读取历史</Button></div>}
-          {(runtimeHasMessages || history.history?.messages.length || history.history?.runs?.length || localRunning || sendBusy) && <ConversationHistory key={current.id} messages={history.history?.messages ?? []} runs={history.history?.runs} liveMessages={localRunning || sendBusy || !history.history ? runtimeMessages : undefined} isRunning={localRunning || sendBusy} onQuote={(id, quote) => void sideChat.open(id, quote)} onAddToConversation={current.archived ? undefined : text => { const draft = current.draft ? `${current.draft}\n\n${text}` : text; if (draft.length > 4000) { setFeedback("引用与草稿超过 4000 字，请精简后再添加；草稿已保留。"); return; } setContextOpen(false); store.update(previous => ({ ...previous, conversations: previous.conversations.map(item => item.id === current.id ? { ...item, draft } : item) })); requestAnimationFrame(() => input.current?.focus()); }} onEdit={runtimeRunning || conversationBusy || current.archived ? undefined : (id, text) => setMessageEdit({ id, text })} onBranch={runtimeRunning || conversationBusy || current.archived ? undefined : id => void createBranch(id, "after")} />}
+          {(runtimeHasMessages || history.history?.messages.length || history.history?.runs?.length || localRunning || sendBusy) && <ConversationHistory key={current.id} messages={history.history?.messages ?? []} runs={history.history?.runs} liveMessages={localRunning || sendBusy || !history.history ? runtimeMessages : undefined} isRunning={localRunning || sendBusy} onQuote={(id, quote) => void sideChat.open(id, quote)} onAddToConversation={current.archived ? undefined : text => { const draft = current.draft ? `${current.draft}\n\n${text}` : text; if (draft.length > 4000) { setFeedback("引用与草稿超过 4000 字，请精简后再添加；草稿已保留。"); return; } setContextOpen(false); store.update(previous => ({ ...previous, conversations: previous.conversations.map(item => item.id === current.id ? { ...item, draft } : item) })); requestAnimationFrame(() => input.current?.focus()); }} onEdit={runtimeRunning || conversationBusy || current.archived ? undefined : (id, text) => { setFeedback(""); setMessageEdit({ conversationId: current.id, id, text }); }} editing={activeMessageEdit ? { ...activeMessageEdit, busy: conversationBusy || runtimeRunning, error: feedback, onChange: text => setMessageEdit(previous => previous ? { ...previous, text } : null), onCancel: () => { setMessageEdit(null); setFeedback(""); requestAnimationFrame(() => input.current?.focus()); }, onSubmit: () => void createBranch(activeMessageEdit.id, "before", activeMessageEdit.text) } : undefined} onBranch={runtimeRunning || conversationBusy || current.archived || activeMessageEdit ? undefined : id => void createBranch(id, "after")} />}
           {sideChat.error && <p role="alert" className={styles.feedback}>{sideChat.error}</p>}
           {history.activeRun && !localRunning && <div className={styles.feedback}><p role="status">{["RUNNING", "PENDING"].includes(history.activeRun.status) ? "服务端运行尚未结束，可停止或重新读取状态。" : "运行状态需要核对，请勿重复发送。"}</p><Button variant="ghost" size="sm" onClick={history.refresh}>重新读取运行状态</Button><Button variant="ghost" size="sm" disabled={stopBusy} onClick={() => void reconcileRun()}>核对中断状态</Button><p>仅在确认没有执行进程后解除锁定；结果仍未知，不会重发。</p></div>}
           {history.history?.truncated && <p className={styles.feedback}>当前显示最近 100 条消息，更早内容仍保留。</p>}
@@ -506,9 +507,9 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
             </div>
             <form onSubmit={submit} className={styles.composer}>
               <label htmlFor="career-agent-input" className="sr-only">消息</label>
-              <textarea id="career-agent-input" ref={input} rows={1} maxLength={4000} readOnly={current.archived} value={current.draft} onChange={event => update({ draft: event.target.value })} onKeyDown={event => { if ((event.ctrlKey || event.metaKey) && event.key === "Enter" && !event.nativeEvent.isComposing) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} placeholder="发送消息…" />
+              <textarea id="career-agent-input" ref={input} rows={1} maxLength={4000} readOnly={current.archived || !!activeMessageEdit} value={current.draft} onChange={event => update({ draft: event.target.value })} onKeyDown={event => { if ((event.ctrlKey || event.metaKey) && event.key === "Enter" && !event.nativeEvent.isComposing) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} placeholder="发送消息…" />
               <AgentComposerTools key={current.id} readOnly={current.archived} modelId={current.modelId} modelDisabled={runtimeRunning || conversationBusy || sendBusy || history.loading || !!history.error} onModelChange={id => void changeConversation(current.id, { model_id: id })}>
-                <TooltipIconButton type="submit" variant="default" disabled={current.archived || conversationBusy || stopBusy || history.loading || !!history.error || (!runtimeRunning && (sendBusy || !current.draft.trim()))} tooltip={runtimeRunning ? "停止运行" : "发送 · Ctrl/⌘ Enter"} aria-label={runtimeRunning ? "停止运行" : "发送"} side="top" className="size-8 rounded-full">{runtimeRunning ? <Square className="size-3 fill-current" /> : <ArrowUp />}</TooltipIconButton>
+                <TooltipIconButton type="submit" variant="default" disabled={current.archived || (!!activeMessageEdit && !runtimeRunning) || conversationBusy || stopBusy || history.loading || !!history.error || (!runtimeRunning && (sendBusy || !current.draft.trim()))} tooltip={runtimeRunning ? "停止运行" : "发送 · Ctrl/⌘ Enter"} aria-label={runtimeRunning ? "停止运行" : "发送"} side="top" className="size-8 rounded-full">{runtimeRunning ? <Square className="size-3 fill-current" /> : <ArrowUp />}</TooltipIconButton>
               </AgentComposerTools>
             </form>
           {feedback && <p role="status" className={styles.feedback}>{feedback}</p>}
@@ -542,7 +543,6 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
         </div>
       </aside></>}
     </div>
-    <Dialog open={!!messageEdit} onOpenChange={value => { if (!value && !conversationBusy) setMessageEdit(null); }}><DialogContent><DialogHeader><DialogTitle>编辑并重发到独立分支</DialogTitle><DialogDescription>原对话及后续历史保留。新对话从这条输入之前继续；不会撤销材料修改或外部操作。</DialogDescription></DialogHeader><form onSubmit={event => { event.preventDefault(); if (messageEdit?.text.trim()) void createBranch(messageEdit.id, "before", messageEdit.text); }}><label htmlFor="branch-edit-input" className="sr-only">修改后的消息</label><textarea id="branch-edit-input" rows={5} maxLength={4000} value={messageEdit?.text ?? ""} onChange={event => setMessageEdit(previous => previous ? { ...previous, text: event.target.value } : null)} className="w-full rounded-md border p-3 text-sm" disabled={conversationBusy} />{feedback && <p role="alert">{feedback}</p>}<div className="mt-4 flex justify-end gap-2"><Button type="button" variant="ghost" disabled={conversationBusy} onClick={() => setMessageEdit(null)}>取消编辑</Button><Button type="submit" disabled={conversationBusy || !messageEdit?.text.trim()}>创建分支并发送</Button></div></form></DialogContent></Dialog>
     <Dialog open={!!deleting} onOpenChange={value => { if (!value && !deleteBusy) setDeleting(null); }}>
       <DialogContent>
         <DialogHeader><DialogTitle>删除项目？</DialogTitle><DialogDescription>将永久删除“{deleting?.title}”。对话与材料会保留并解除项目关联，项目规则与笔记会停用，已保存的职业背景不受影响。此操作无法撤销。</DialogDescription></DialogHeader>

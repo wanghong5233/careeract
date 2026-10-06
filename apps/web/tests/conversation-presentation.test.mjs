@@ -44,7 +44,7 @@ const markdown = loadSource("components/markdown-text.tsx", {
 });
 const components = loadSource("components/conversation-messages.tsx", {
   "@/components/message-actions": { useMessageActions: () => React.useContext(messageActions) },
-  "@/components/ui/button": { Button: props => React.createElement("button", { type: "button", onClick: props.onClick }, props.children) },
+  "@/components/ui/button": { Button: props => React.createElement("button", { type: props.type, disabled: props.disabled, onClick: props.onClick }, props.children) },
   "@/components/markdown-text": markdown, "@/components/tooltip-icon-button": tooltip,
   "@/lib/utils": utils, "./agent-space.module.css": styles,
   "@/lib/run-presentation": loadSource("lib/run-presentation.ts"),
@@ -128,6 +128,74 @@ test("live and saved replies use identical Markdown and message presentation", (
   const saved = renderToStaticMarkup(React.createElement(history.ConversationHistory, { messages }));
   const live = renderToStaticMarkup(React.createElement(history.ConversationHistory, { messages: [], liveMessages: presentation.historyThreadMessages(messages) }));
   assert.equal(live, saved);
+});
+
+test("inline editing replaces only the selected prompt and preserves the source reply", () => {
+  const messages = [syntheticMessage("older", "user", "first", "COMPLETED", "旧输入"), syntheticMessage("input", "user", "run", "COMPLETED", "原输入"), syntheticMessage("reply", "assistant", "run", "COMPLETED", "原回答保留")];
+  const editing = { id: "input", text: "修改后的多行\n**原文**", busy: false, error: "合成分支失败", onChange() {}, onCancel() {}, onSubmit() {} };
+  const html = renderToStaticMarkup(React.createElement(history.ConversationHistory, { messages, onEdit() {}, editing }));
+  assert.equal((html.match(/<textarea/g) ?? []).length, 1);
+  assert.match(html, /修改后的多行\n\*\*原文\*\*/);
+  assert.match(html, /原回答保留/);
+  assert.match(html, /旧输入/);
+  assert.match(html, /发送到独立分支，原对话及后续历史保留/);
+  assert.match(html, /role="alert"[^>]*>合成分支失败/);
+  assert.doesNotMatch(html, /role="dialog"|编辑并另建分支/);
+  const closed = renderToStaticMarkup(React.createElement(history.ConversationHistory, { messages, onEdit() {} }));
+  assert.match(closed, /原输入/);
+  assert.equal((closed.match(/aria-label="编辑消息"/g) ?? []).length, 1);
+  assert.doesNotMatch(closed, /textarea/);
+});
+
+test("inline editor guards blank/busy sends, keeps IME input and supports cancel/shortcut", () => {
+  let submitted = 0;
+  let cancelled = 0;
+  let requested = 0;
+  let changed;
+  const editing = { id: "input", text: "合成修改", busy: false, onChange(text) { changed = text; }, onCancel() { cancelled++; }, onSubmit() { submitted++; } };
+  const form = components.MessageEditForm({ editing });
+  const textarea = form.props.children[0];
+  const event = { preventDefault() {}, nativeEvent: { isComposing: false }, currentTarget: { form: { requestSubmit() { requested++; } } } };
+  textarea.props.onChange({ target: { value: "多行\nMarkdown" } });
+  assert.equal(changed, "多行\nMarkdown");
+  form.props.onSubmit(event);
+  assert.equal(submitted, 1);
+  textarea.props.onKeyDown({ ...event, key: "Enter", ctrlKey: true });
+  textarea.props.onKeyDown({ ...event, key: "Enter", metaKey: true });
+  textarea.props.onKeyDown({ ...event, key: "Enter", ctrlKey: true, nativeEvent: { isComposing: true } });
+  assert.equal(requested, 2);
+  textarea.props.onKeyDown({ ...event, key: "Escape" });
+  assert.equal(cancelled, 1);
+  editing.busy = true;
+  form.props.onSubmit(event);
+  textarea.props.onKeyDown({ ...event, key: "Escape" });
+  assert.equal(submitted, 1);
+  assert.equal(cancelled, 1);
+  const busyHtml = renderToStaticMarkup(React.createElement(components.MessageEditForm, { editing }));
+  assert.match(busyHtml, /textarea[^>]*disabled/);
+  assert.match(busyHtml, /正在创建/);
+  editing.busy = false;
+  editing.text = " \n ";
+  form.props.onSubmit(event);
+  assert.equal(submitted, 1);
+});
+
+test("navigation jumps immediately during a run so streaming follow does not interrupt a smooth jump", () => {
+  for (const running of [true, false]) {
+    const jumps = [];
+    const target = { dataset: { promptId: "first" }, scrollIntoView: options => jumps.push(options) };
+    const view = loadSource("components/conversation-messages.tsx", {
+      react: { useRef: () => ({ current: { querySelectorAll: () => [target] } }), useState: () => [null, () => {}], useEffect() {} },
+      "@assistant-ui/react": { ThreadPrimitive: { Root: "root", Viewport: "viewport", Messages: "messages", ViewportFooter: "footer", ScrollToBottom: "bottom" }, useAuiState: selector => selector({ thread: { isRunning: running, messages: ["first", "second"].map(id => ({ id, role: "user", content: [{ type: "text", text: id }] })) } }) },
+      "@/components/message-actions": { useMessageActions: () => ({}) },
+      "@/components/ui/button": {}, "@/components/markdown-text": {}, "@/components/tooltip-icon-button": tooltip,
+      "@/lib/utils": utils, "./agent-space.module.css": styles, "@/lib/run-presentation": {},
+    }, { window: { matchMedia: () => ({ matches: false }) } });
+    const navigationElement = view.ConversationMessages({}).props.children[0];
+    const navigation = navigationElement.type(navigationElement.props);
+    navigation.props.children[0].props.onClick();
+    assert.deepEqual(jumps, [{ block: "start", behavior: running ? "instant" : "smooth" }]);
+  }
 });
 
 test("saved timing stays visible while a subsequent reply streams", () => {

@@ -8,7 +8,7 @@ import { TooltipIconButton } from "@/components/tooltip-icon-button";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { formatRunDuration } from "@/lib/run-presentation";
-import { useMessageActions } from "@/components/message-actions";
+import { useMessageActions, type MessageEdit } from "@/components/message-actions";
 import styles from "./agent-space.module.css";
 
 export function ConversationMessages({ children }: { children?: ReactNode }) {
@@ -57,18 +57,36 @@ export function ConversationUserMessage() {
   const id = useAuiState(state => state.message.id);
   const original = useAuiState(state => state.message.content.filter(part => part.type === "text").map(part => part.text).join("\n"));
   const copied = useAuiState(state => state.message.isCopied);
-  return <MessagePrimitive.Root className={styles.userTurn} data-prompt-id={id} data-aui-quote-selectable="false">
-    <div className={styles.userMessage}><MessagePrimitive.Content /></div>
+  const editing = actions.editing?.id === id ? actions.editing : undefined;
+  return <MessagePrimitive.Root className={cn(styles.userTurn, editing && styles.editingTurn)} data-prompt-id={id} data-aui-quote-selectable="false">
+    {editing ? <MessageEditForm editing={editing} /> : <><div className={styles.userMessage}><MessagePrimitive.Content /></div>
     <ActionBarPrimitive.Root className={styles.userActions}>
       <ActionBarPrimitive.Copy asChild><TooltipIconButton tooltip={copied ? "已复制" : "复制消息"} aria-label={copied ? "已复制" : "复制消息"}>{copied ? <Check /> : <Copy />}</TooltipIconButton></ActionBarPrimitive.Copy>
-      {actions.edit && actions.editId === id && <TooltipIconButton tooltip="编辑并另建分支" aria-label="编辑并另建分支" onClick={() => actions.edit?.(id, original)}><Pencil /></TooltipIconButton>}
+      {actions.edit && actions.editId === id && <TooltipIconButton tooltip="编辑消息" aria-label="编辑消息" onClick={() => actions.edit?.(id, original)}><Pencil /></TooltipIconButton>}
       <span role="status" className="sr-only">{copied ? "消息已复制" : ""}</span>
-    </ActionBarPrimitive.Root>
+    </ActionBarPrimitive.Root></>}
   </MessagePrimitive.Root>;
+}
+
+export function MessageEditForm({ editing }: { editing: MessageEdit }) {
+  return <form className={styles.messageEditor} onSubmit={event => { event.preventDefault(); if (!editing.busy && editing.text.trim()) editing.onSubmit(); }}>
+    <textarea aria-label="修改后的消息" autoFocus rows={3} maxLength={4000} disabled={editing.busy} value={editing.text} onChange={event => editing.onChange(event.target.value)} onKeyDown={event => {
+      if (event.nativeEvent.isComposing) return;
+      if (event.key === "Escape" && !editing.busy) { event.preventDefault(); editing.onCancel(); }
+      if ((event.ctrlKey || event.metaKey) && event.key === "Enter") { event.preventDefault(); event.currentTarget.form?.requestSubmit(); }
+    }} />
+    <p className={styles.editHint}>发送到独立分支，原对话及后续历史保留。</p>
+    {editing.error && <p role="alert" className={styles.messageStatusError}>{editing.error}</p>}
+    <div className={styles.editActions}>
+      <Button type="button" variant="ghost" size="sm" disabled={editing.busy} onClick={editing.onCancel}>取消</Button>
+      <Button type="submit" size="sm" disabled={editing.busy || !editing.text.trim()}>{editing.busy ? "正在创建…" : "发送到新分支"}</Button>
+    </div>
+  </form>;
 }
 
 function PromptNavigation({ viewport }: { viewport: React.RefObject<HTMLDivElement | null> }) {
   const messages = useAuiState(state => state.thread.messages);
+  const running = useAuiState(state => state.thread.isRunning);
   const prompts = messages.filter(message => message.role === "user");
   const promptIds = prompts.map(message => message.id).join("\0");
   const [active, setActive] = useState<string | null>(null);
@@ -94,7 +112,7 @@ function PromptNavigation({ viewport }: { viewport: React.RefObject<HTMLDivEleme
       const text = message.content.filter(part => part.type === "text").map(part => part.text).join("\n");
       return <TooltipIconButton key={message.id} className={styles.promptTick} tooltip={text.length > 300 ? `${text.slice(0, 300)}…` : text} side="right" aria-label={`跳到第 ${index + 1} 条消息`} aria-current={active === message.id ? "location" : undefined} onClick={() => {
         const target = Array.from(viewport.current?.querySelectorAll<HTMLElement>("[data-prompt-id]") ?? []).find(element => element.dataset.promptId === message.id);
-        target?.scrollIntoView({ block: "start", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" });
+        target?.scrollIntoView({ block: "start", behavior: running || window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" });
         setActive(message.id);
       }}><span aria-hidden="true" /></TooltipIconButton>;
     })}
