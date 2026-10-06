@@ -2,19 +2,16 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
-First, run the development server:
+CareerAct 的配置与验收以[开发指南](../../docs/handbook/DEVELOPMENT.md#配置与启动)为准。
+从仓库根目录分别在两个终端启动：
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm --prefix apps/web run dev
+npm --prefix apps/web run dev:api
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Web 固定 [http://localhost:3100/](http://localhost:3100/)，API 固定 `http://localhost:8000`。
+启动前核对认证/BFF 配置；不一致或端口占用时拒绝启动，不临时换端口。
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 

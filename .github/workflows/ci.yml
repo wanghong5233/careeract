@@ -56,7 +56,7 @@ jobs:
       API_BASE_URL: http://localhost:8000
       AUTH_DATABASE_URL: postgresql://careeract:careeract@localhost:5432/careeract
       BETTER_AUTH_SECRET: ci-only-secret-ci-only-secret-32ch
-      BETTER_AUTH_URL: http://localhost:3000
+      BETTER_AUTH_URL: http://localhost:3100
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v6

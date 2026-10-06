@@ -4,7 +4,9 @@
   "private": true,
   "license": "Apache-2.0",
   "scripts": {
-    "dev": "next dev",
+    "predev": "node scripts/check-dev-env.mjs",
+    "dev": "next dev --hostname 127.0.0.1 --port 3100",
+    "dev:api": "node scripts/check-dev-env.mjs && uv run --directory ../.. --package careeract-api python -m uvicorn services.api.app.main:app --host 127.0.0.1 --port 8000 --reload --reload-dir services",
     "build": "next build",
     "generate:api": "openapi-typescript http://localhost:8000/openapi.json -o src/lib/api-schema.d.ts",
     "start": "next start",
@@ -37,6 +39,7 @@
     "zustand": "^5.0.15"
   },
   "devDependencies": {
+    "@next/env": "16.3.4",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/pg": "^8.23.1",
