@@ -538,6 +538,22 @@ API 私钥不放在 Browser，密钥不得复用用户登录或模型供应商�
 
 ## 执行器断连验收
 
+Steel 生命周期适配器的故障/并发/重建检查使用隔离 PostgreSQL 和合成 HTTP 替身：
+
+```powershell
+$env:RUN_BROWSER_POSTGRES_TESTS = '1'
+try { uv run pytest tests/browser/test_steel_sessions.py -q } finally {
+    Remove-Item Env:RUN_BROWSER_POSTGRES_TESTS
+}
+```
+
+额外设置 `RUN_STEEL_SESSION_TEST=1` 会对已启动的本地固定 Steel 镜像执行一项真实
+创建/只读核对/释放检查；结束后移除该环境变量。有活动会话会拒绝创建，不能因此释放
+他人会话。只使用合成新会话，不访问招聘站点。0018 迁移在隔离测试库升级/回退，
+不修改日常库；真实调用必须先应用迁移。此入口不验证 Profile 隔离或产品人工登录。
+不确定占用保留等待核对；不能删除占用记录来恢复运行，规则见
+[Steel 生命周期](../../services/browser/sessions/README.md#steel-lifecycle-adapter)。
+
 生命周期规则测试：`uv run pytest tests/browser/test_executor_lifecycle.py -q`。
 真实 Steel/Playwright/PostgreSQL 联合检查：先启动本地 Steel，然后执行：
 

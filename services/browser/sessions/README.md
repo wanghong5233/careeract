@@ -86,3 +86,32 @@ browser operation route is exposed until the connection boundary is enforced.
 Process-local locks are not used by the persistent adapter. Database state survives
 process exit; startup does not clear or recycle surviving leases. Internal routes
 return 503 when unconfigured. The health endpoint remains a liveness check only.
+
+## Steel lifecycle adapter
+
+`steel.py` manages create/inspect/release against the pinned Steel OSS instance.
+It is a trusted internal adapter, not an HTTP execution or product login endpoint.
+The caller must check ownership and consent, and stop/disconnect all executors and
+Viewer channels before calling release. A lifecycle reservation is not a writer lease.
+
+The pinned image's release controller ignores the path session ID; its per-ID GET
+also fabricates a released result for unknown IDs. The adapter reads the session
+inventory instead, refuses unowned or mismatched sessions, and verifies mutation
+responses and subsequent inventory. It returns only ID/status, discarding debug,
+CDP, cookie, and page data. It follows no redirects and retries no mutations.
+
+Revision `0018_steel_operations` reserves the single instance in PostgreSQL before
+each side effect. All managers use the same database and one configured Steel
+instance; advisory locking and a partial unique index coordinate reservations.
+`creating`/`releasing` survive cancellation, unknown responses, and process restart.
+They block further creation/release; inspection never clears them. Confirmed
+release permits a new ID, while replaying an old release cannot close a new session.
+Automated reconciliation of uncertain operations is not implemented; never delete
+the reservation or infer completion from an absent inventory entry. Direct Steel
+clients bypass this guard and must remain unavailable to product users.
+
+This increment is verified with synthetic sessions only. The pinned implementation
+uses shared Profile paths and does not honor arbitrary `userDataDir` as an isolated
+directory. No Profile parameter, credentials, real login, or public Viewer is wired
+to this adapter. Account isolation and Profile cleanup require a separate verified
+path before the product can use real recruitment accounts.
