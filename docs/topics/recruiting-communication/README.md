@@ -30,9 +30,9 @@
 - Browser Service 当前只有底座和内部控制契约，站点适配器、业务授权用例、沟通领域对象和生产执行入口尚未接入。
 - 浏览器执行必须通过 CareerAct 的用户归属、任务、授权、尝试和请求标识；原始 CDP/调试地址不能交给 Web 客户端。
 
-### 2.2 历史 Pulse 的可复用教训
+### 2.2 历史 Pulse 的参考证据（非实现来源）
 
-历史 Pulse 在 2026-03 对 BOSS 做过真实页面诊断和沟通执行，形成了以下证据。它们是待在当前环境复验的输入，不是可以直接复制的依赖：
+历史 Pulse 在 2026-03 对 BOSS 做过真实页面诊断和沟通执行，形成了以下记录。它们只用于提醒风险、形成实验假设和避免重复踩坑，不代表方案成熟，也不是可以直接复制的依赖：
 
 1. 标准 Playwright/Puppeteer 的 CDP 连接曾触发 BOSS 的协议级检测，页面跳转到 `about:blank`；JS stealth、真实 Chrome UA 和拦截 `location` 都没有解决。
 2. Pulse 通过 `patchright` 和长驻浏览器会话池恢复了登录、搜索、消息和职位详情页面；每次请求启动/关闭浏览器会导致会话失效风险。
@@ -153,9 +153,11 @@ PostgreSQL 是业务真相，建议首个增量引入以下对象；具体字段
 
 **直接复用：** CareerAct 的 Agno AgentOS/AG-UI、职业上下文工具、PostgreSQL 归属与版本模式、Temporal 状态模型、Browser lease/签名控制、现有测试和端口/开发流程。
 
-**借鉴但重新实现：** Pulse 的 BOSS DOM 合同、SPA 稳定等待、patchright 可行性结论、常驻 Profile 思路、发送后回读、未知结果和变更操作不重试、Action Report 与回归测试结构。
+**仅作为待验证输入：** Pulse 的 BOSS DOM 合同、SPA 稳定等待、patchright 可行性结论、常驻 Profile 思路、发送后回读、未知结果和变更操作不重试、Action Report 与回归测试结构。每一项都必须在 CareerAct 当前依赖、Browser Service 和真实验收环境中重新证明。
 
 **不复用：** Pulse 的领域模型、MCP 网关、进程内全局状态、旧 scheduler、私有 API 逆向、默认自动回复/发简历策略，以及任何绕过平台风控的脚本。
+
+Pulse 的代码、配置、选择器和运行时状态不进入 CareerAct；如果当前实验与历史结论冲突，以当前实验和可重复证据为准。
 
 ## 8. 交付产物
 
