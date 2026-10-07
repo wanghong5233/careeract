@@ -7,7 +7,6 @@ import { Search } from "lucide-react";
 import { RuntimeProvider } from "@/app/runtime-provider";
 import { AgentHome } from "@/components/agent-space";
 import { getSpaceStore } from "@/lib/agent-space-state";
-import { conversationRuntimeKey } from "@/lib/agent-runtime";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { WorkspaceActionsContext, useWorkspaceActions } from "@/components/workspace-actions";
 import { WorkspaceAccount } from "@/components/workspace-account";
@@ -51,8 +50,7 @@ export function WorkspaceFrame({ children, agentThreadId }: Readonly<{ children:
   const state = useSyncExternalStore(store.subscribe, store.snapshot, store.serverSnapshot);
   const selected = state.conversations.find(item => item.id === state.selectedId);
   const conversationId = selected?.version ? selected.id : undefined;
-  const runtimeKey = conversationRuntimeKey(conversationId, selected?.id);
-  return <RuntimeProvider key={runtimeKey} agentThreadId={conversationId}><WorkspaceFrameContent owner={agentThreadId}>{children}</WorkspaceFrameContent></RuntimeProvider>;
+  return <RuntimeProvider agentThreadId={conversationId} threadKey={selected?.id}><WorkspaceFrameContent owner={agentThreadId}>{children}</WorkspaceFrameContent></RuntimeProvider>;
 }
 
 function WorkspaceFrameContent({ children, owner }: { children: ReactNode; owner: string }) {

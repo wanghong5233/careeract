@@ -524,7 +524,7 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
       <button className={styles.navButton} onClick={showCapabilities}><Search />搜索能力<kbd className="ml-auto text-[10px] text-muted-foreground">Ctrl / ⌘ K</kbd></button>
       <button className={cn(styles.navButton, pathname === "/background" && panelOpen && !contextOpen && styles.selected)} aria-current={pathname === "/background" && panelOpen && !contextOpen ? "page" : undefined} onClick={() => openRoute("/background")}><BookOpen />职业背景</button>
       <button className={cn(styles.navButton, pathname === "/library" && panelOpen && !contextOpen && styles.selected)} aria-current={pathname === "/library" && panelOpen && !contextOpen ? "page" : undefined} onClick={() => openRoute("/library")}><FileText />资料与成果</button>
-      <div className={styles.navigationList}>
+      <div className={styles.navigationList} aria-busy={projectLoading || conversations.loading}>
       {selectingConversations && <div className={styles.selectionControls}>
           <span role="status">已选 {selectedItems.length} 段</span>
           <TooltipIconButton tooltip="删除选中对话" aria-label="删除选中对话" className="size-7" disabled={!selectedItems.length || conversationBusy || (runtimeRunning && selectedItems.some(item => item.id === current.id))} onClick={() => requestConversationDelete(selectedItems)}><Trash2 /></TooltipIconButton>
@@ -555,7 +555,6 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
         {!collapsed.includes(item.id) && listedConversations.filter(conversation => conversation.projectId === item.id).map(renderConversation)}
       </section>)}
       {projectCursor && <Button variant="ghost" size="sm" disabled={projectLoading} onClick={loadMoreProjects}>更多项目</Button>}
-      {conversations.loading && <p role="status" className="px-2 py-2 text-xs text-muted-foreground">正在读取对话…</p>}
       {conversations.error && <div className="px-2 py-2 text-xs"><p role="alert" className="text-destructive">{conversations.error}</p><Button variant="ghost" size="sm" onClick={conversations.refresh}>重新读取对话</Button></div>}
       <Collapsible open={recentExpanded} onOpenChange={setRecentExpanded}>
         <div className={cn(styles.sidebarActionRow, styles.conversationSectionRow)}>
@@ -604,10 +603,8 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
           <TooltipIconButton className="size-9" disabled={current.archived || !current.version || sideChat.busy} tooltip={current.archived ? "已归档对话不可开启侧聊" : sideChat.state.chat ? "打开临时侧聊" : "新建临时侧聊"} aria-label="打开临时侧聊" onClick={() => void sideChat.open()}><MessageSquarePlus /></TooltipIconButton>
           <TooltipIconButton className="size-9" disabled={!panelOpen && !routeOpen && !current.tabs.length} tooltip={panelOpen ? "收起内容区" : "展开内容区"} aria-label={panelOpen ? "收起内容区" : "展开内容区"} aria-expanded={panelOpen} onClick={() => { if (panelOpen) hideContent(); else if (routeOpen) update({ panelHidden: false }); else if (current.tabs.length) openRoute(current.tabs.at(-1)!.href); }}><PanelRight /></TooltipIconButton>
         </header>
-        <div className={styles.startArea}>
+        <div className={styles.startArea} aria-busy={history.loading}>
           {current.archived && <p role="status" className={styles.archiveNotice}><Archive className="size-4" />已归档 · 仅查看历史</p>}
-          {history.history?.session.branch_context && <p className={styles.feedback}>独立分支 · 原对话保留<Button variant="link" size="sm" disabled={runtimeRunning || conversationBusy} onClick={() => select(history.history!.session.branch_context!.source_id)}>查看来源对话</Button></p>}
-          {history.loading && <p role="status" className={styles.feedback}>正在读取历史…</p>}
           {history.error && <div className={styles.feedback}><p role="alert">{history.error}</p><Button variant="ghost" size="sm" onClick={history.refresh}>重新读取历史</Button></div>}
           {(runtimeHasMessages || history.history?.messages.length || history.history?.runs?.length || localRunning || sendBusy) && <ConversationHistory key={current.id} messages={history.history?.messages ?? []} runs={history.history?.runs} liveMessages={localRunning || sendBusy || !history.history ? runtimeMessages : undefined} isRunning={localRunning || sendBusy} onQuote={current.archived ? undefined : (id, quote) => void sideChat.open(id, quote)} onAddToConversation={current.archived ? undefined : text => { const draft = current.draft ? `${current.draft}\n\n${text}` : text; if (draft.length > 4000) { setFeedback("引用与草稿超过 4000 字，请精简后再添加；草稿已保留。"); return; } setContextOpen(false); store.update(previous => ({ ...previous, conversations: previous.conversations.map(item => item.id === current.id ? { ...item, draft } : item) })); requestAnimationFrame(() => input.current?.focus()); }} onEdit={runtimeRunning || conversationBusy || current.archived ? undefined : (id, text) => { setFeedback(""); setMessageEdit({ conversationId: current.id, id, text }); }} editing={activeMessageEdit ? { ...activeMessageEdit, busy: conversationBusy || runtimeRunning, error: feedback, onChange: text => setMessageEdit(previous => previous ? { ...previous, text } : null), onCancel: () => { setMessageEdit(null); setFeedback(""); requestAnimationFrame(() => input.current?.focus()); }, onSubmit: () => void createBranch(activeMessageEdit.id, "before", activeMessageEdit.text) } : undefined} onBranch={runtimeRunning || conversationBusy || current.archived || activeMessageEdit ? undefined : id => void createBranch(id, "after")} />}
           {sideChat.error && <p role="alert" className={styles.feedback}>{sideChat.error}</p>}

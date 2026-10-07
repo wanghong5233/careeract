@@ -13,6 +13,8 @@ export class ConversationRequestError extends Error {
   constructor(message: string, readonly status: number) { super(message); }
 }
 
+const pendingHistoryRequests = new Map<string, Promise<ConversationHistory>>();
+
 async function request<T>(url: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(url, { ...init, cache: "no-store" });
   if (!response.ok) {
@@ -46,7 +48,23 @@ export function deleteConversation(id: string, version: string): Promise<{ statu
 }
 
 export function readConversationHistory(id: string, signal?: AbortSignal): Promise<ConversationHistory> {
-  return request(`/api/agent/history?${new URLSearchParams({ session_id: id, limit: "100" })}`, { signal });
+  let pending = pendingHistoryRequests.get(id);
+  if (!pending) {
+    pending = request(`/api/agent/history?${new URLSearchParams({ session_id: id, limit: "100" })}`, { signal: AbortSignal.timeout(20_000) });
+    pendingHistoryRequests.set(id, pending);
+    void pending.then(
+      () => { if (pendingHistoryRequests.get(id) === pending) pendingHistoryRequests.delete(id); },
+      () => { if (pendingHistoryRequests.get(id) === pending) pendingHistoryRequests.delete(id); },
+    );
+  }
+  if (!signal) return pending;
+  if (signal.aborted) return Promise.reject(new DOMException("The operation was aborted", "AbortError"));
+  return Promise.race([
+    pending,
+    new Promise<ConversationHistory>((_, reject) => {
+      signal.addEventListener("abort", () => reject(new DOMException("The operation was aborted", "AbortError")), { once: true });
+    }),
+  ]);
 }
 
 export function generateConversationTitle(session: Pick<AgentConversation, "session_id" | "version">, signal?: AbortSignal, retry = false): Promise<AgentConversation> {

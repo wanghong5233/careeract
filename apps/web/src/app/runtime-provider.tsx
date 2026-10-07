@@ -4,16 +4,16 @@ import { HttpAgent } from "@ag-ui/client";
 import { ExportedMessageRepository, type ThreadHistoryAdapter } from "@assistant-ui/core";
 import { AssistantRuntimeProvider } from "@assistant-ui/react";
 import { useAgUiRuntime } from "@assistant-ui/react-ag-ui";
-import { type ReactNode, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
 import { isRestrictedResponse, restrictedContentMessage } from "@/lib/privacy";
-import { conversationHistoryUrl, registerConversationRun, requireFinishedStream } from "@/lib/agent-runtime";
+import { registerConversationRun, requireFinishedStream } from "@/lib/agent-runtime";
 import { historyThreadMessages } from "@/lib/conversation-presentation";
-import type { ConversationHistory } from "@/lib/agent-conversations";
+import { readConversationHistory } from "@/lib/agent-conversations";
 
 const AGENT_BFF_URL = "/api/agent";
 
-export function RuntimeProvider({ children, agentThreadId }: Readonly<{ children: ReactNode; agentThreadId?: string }>) {
+export function RuntimeProvider({ children, agentThreadId, threadKey }: Readonly<{ children: ReactNode; agentThreadId?: string; threadKey?: string }>) {
   const [fallbackThreadId] = useState(() => crypto.randomUUID());
   const threadId = agentThreadId ?? fallbackThreadId;
   const agent = useMemo(
@@ -58,9 +58,7 @@ export function RuntimeProvider({ children, agentThreadId }: Readonly<{ children
   const history = useMemo<ThreadHistoryAdapter>(() => ({
     async load() {
       if (!agentThreadId) return { messages: [] };
-      const response = await fetch(conversationHistoryUrl(threadId), { cache: "no-store", signal: AbortSignal.timeout(20_000) });
-      if (!response.ok) throw new Error("Agent 历史暂时无法读取，请稍后重试。");
-      const body = await response.json() as ConversationHistory;
+      const body = await readConversationHistory(threadId, AbortSignal.timeout(20_000));
       const messages = historyThreadMessages(body.messages, body.runs);
       return ExportedMessageRepository.fromBranchableArray(
         messages.map((message, index) => ({ message, parentId: index > 0 ? messages[index - 1]!.id ?? null : null })),
@@ -70,6 +68,28 @@ export function RuntimeProvider({ children, agentThreadId }: Readonly<{ children
     async update() {},
   }), [threadId, agentThreadId]);
   const runtime = useAgUiRuntime({ agent, adapters: { history } });
+
+  const sessionKey = threadKey ?? agentThreadId ?? threadId;
+  const activeSessionRef = useRef(sessionKey);
+  const runtimeRef = useRef(runtime);
+  useEffect(() => {
+    runtimeRef.current = runtime;
+  }, [runtime]);
+  useEffect(() => {
+    if (activeSessionRef.current === sessionKey) return;
+    activeSessionRef.current = sessionKey;
+    const controller = new AbortController();
+    runtimeRef.current.thread.reset();
+    if (agentThreadId) {
+      void readConversationHistory(threadId, controller.signal)
+        .then(body => {
+          if (controller.signal.aborted || activeSessionRef.current !== sessionKey) return;
+          runtimeRef.current.thread.reset(historyThreadMessages(body.messages, body.runs));
+        })
+        .catch(error => { if (error.name !== "AbortError") console.error(error); });
+    }
+    return () => controller.abort();
+  }, [agentThreadId, sessionKey, threadId]);
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
