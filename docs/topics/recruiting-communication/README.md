@@ -25,8 +25,9 @@
 
 这条能力不能只存在于 Agent 的一句自然语言回复里。它需要同时有一个可找回的招聘沟通工作面，
 以及可以暂停、查看和撤销的持久任务。当前 Web 已有 `/inbox`（招聘沟通）、`/tasks`（Agent 工作）、
-`/automations`（持续委托）和 `/reports`（工作结果）四个过渡页面，但它们还没有真实业务数据，
-入口已经加入展开和收起侧栏；`/inbox` 仍只展示合成数据，真实会话、任务和调度尚未接入。
+`/automations`（持续委托）和 `/reports`（工作结果）四个过渡页面。
+入口已经加入展开和收起侧栏；`/inbox` 的 BOSS 连接请求已持久化，其余列表仍是合成数据，
+真实招聘方会话、沟通任务和调度尚未接入。
 
 首版采用两条互相汇合的入口：
 
@@ -79,7 +80,7 @@ Temporal Workflow 触发 `OutreachAutomation`，每次运行生成独立的 `Com
 
 - PRD 已将 BOSS 主动沟通列为正式能力，要求保存沟通内容、发送依据和处理结果。
 - CareerAct 已有 Agno AgentOS/AG-UI 文本 Runtime、职业上下文工具、PostgreSQL 领域状态、Temporal 基础 Workflow 和 Browser Service 的会话租约边界。
-- Browser Service 当前只有底座和内部控制契约，站点适配器、业务授权用例、沟通领域对象和生产执行入口尚未接入。
+- Browser Service 当前只有底座、内部控制契约和合成 BOSS 快照解析器；实时站点读取、业务授权用例、沟通领域对象和生产执行入口尚未接入。
 - 浏览器执行必须通过 CareerAct 的用户归属、任务、授权、尝试和请求标识；原始 CDP/调试地址不能交给 Web 客户端。
 
 ### 2.2 历史 Pulse 的参考证据（非实现来源）
@@ -177,8 +178,16 @@ PostgreSQL 是业务真相，建议首个增量引入以下对象；具体字段
 建立关系；能找回任务状态/报告并返回原对话；关闭页面后的后台续跑与真实持久化仍标记为未接入。
 
 **当前实现证据：** `apps/web/src/components/agent-space.tsx` 将 `/inbox` 设为聚焦模式，保留 Agent 组件状态并提供“返回 Agent”；
-`apps/web/src/components/workspace-surfaces.tsx` 提供 BOSS 连接状态提醒、四类合成视图、状态标签、授权边界说明和“继续问 Agent/查看结果记录”入口。
-Web lint、typecheck 和 88 项回归已通过；桌面可见检查确认全宽、视图切换和返回 Agent，窄屏尚未单独验收。
+`apps/web/src/components/workspace-surfaces.tsx` 提供四类合成视图、状态标签、授权边界说明和“继续问 Agent/查看结果记录”入口；
+`boss-connection-card.tsx` 提供真实连接请求的记录、读取和撤销。
+连接请求增量的 Web lint、typecheck 和 93 项回归通过；此前桌面可见检查确认全宽、视图切换和返回 Agent，窄屏尚未单独验收。
+
+**阶段复核（2026-10-07）：** 当前方向仍符合 PRD 的主动触达与结果记录要求，但 Phase 0A 仅完成
+聚焦工作面和合成状态展示，Agent 结构化任务卡、真实一次性任务及定时委托未实现。
+Phase 0B 未通过：持久化 `pending` 没有消费者，不会启动浏览器，更不代表用户已登录。
+当前代码基线已提交并推送；下一增量必须推进真实会话链路，不再增加合成列表或占位状态。
+先实现并验证固定版本 Steel 的创建、只读对账和释放适配，再绑定产品连接请求、
+受认证的同源 Viewer 与人工登录。验收分别记录服务集成、产品可见路径和真实 BOSS 可行性。
 
 Phase 0A 的可见验收场景：
 
