@@ -554,6 +554,16 @@ try { uv run pytest tests/browser/test_steel_sessions.py -q } finally {
 不确定占用保留等待核对；不能删除占用记录来恢复运行，规则见
 [Steel 生命周期](../../services/browser/sessions/README.md#steel-lifecycle-adapter)。
 
+固定 Steel 实例的 Profile canary 使用两个不同路径、两个顺序会话和 `example.com` 的
+合成 localStorage 标记，不读取招聘页面：
+
+```powershell
+uv run python scripts/smoke_steel_profile.py
+```
+
+它只证明新会话没有继承前一会话的网页存储；不证明登录态可持久化，也不验证真实 Profile
+目录是否按路径保存。失败、超时或释放结果不明时保留会话并人工核对，不自动重试。
+
 生命周期规则测试：`uv run pytest tests/browser/test_executor_lifecycle.py -q`。
 真实 Steel/Playwright/PostgreSQL 联合检查：先启动本地 Steel，然后执行：
 
