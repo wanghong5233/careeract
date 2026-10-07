@@ -154,6 +154,9 @@ Docker CLI 存在不代表 Linux 引擎已启动。检查可用内存、Docker �
 
 本地 Compose 的数据库、模型网关、Temporal 和 Steel 端口仅绑定回环地址，不可直接当公网部署配置。
 生产拓扑在 `deploy/compose.yaml`，对宿主机只发布 Caddy 端口，仍需独立公网验收。
+生产 Caddy 将 `/api/browser/sessions/*` 在同源下转发到 Browser Service 的内部 Viewer
+HTML/WebSocket 路由；本地 `43110` 开发服务器尚未接入这条产品浏览器入口，不能把 `8001`
+或 Steel `3001/9223` 直接暴露给用户。
 
 本地开发使用 Web `43110`、API `43111` 作为主调试端口，组合启动器会在固定的
 `43110/43111`、`43120/43121` … `43180/43181` 端口池中按“成对”退避。
