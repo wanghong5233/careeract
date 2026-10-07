@@ -73,6 +73,61 @@ const recordSurfaces: Record<RecordSection, RecordSurfaceDefinition> = {
   },
 };
 
+type CommunicationView = "待处理会话" | "执行任务" | "定时委托" | "结果记录";
+type CommunicationStatus = "draft" | "waiting" | "running" | "unknown" | "failed" | "completed";
+
+const communicationStatusLabels: Record<CommunicationStatus, string> = {
+  draft: "草稿",
+  waiting: "等待用户",
+  running: "运行中",
+  unknown: "结果未知",
+  failed: "失败",
+  completed: "已完成",
+};
+
+const communicationStatusStyles: Record<CommunicationStatus, string> = {
+  draft: "bg-muted text-muted-foreground",
+  waiting: "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200",
+  running: "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-200",
+  unknown: "bg-orange-100 text-orange-800 dark:bg-orange-950 dark:text-orange-200",
+  failed: "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-200",
+  completed: "bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-200",
+};
+
+function CommunicationStatus({ status }: { status: CommunicationStatus }) {
+  return <span className={cn("inline-flex rounded-full px-2 py-1 text-[11px] font-medium", communicationStatusStyles[status])}>{communicationStatusLabels[status]}</span>;
+}
+
+export function CommunicationSurface() {
+  const [view, setView] = useState<CommunicationView>("待处理会话");
+  const [selectedId, setSelectedId] = useState("conversation");
+  const views: Record<CommunicationView, { description: string; title: string; status: CommunicationStatus; detail: string; fields: string[] }> = {
+    "待处理会话": { description: "查看招聘方会话、关联岗位和待处理事项。外部消息与 Agent 对话分开保存。", title: "暂无已连接的招聘方会话", status: "waiting", detail: "会话详情", fields: ["关联岗位与来源 URL", "最近读取时间和原始消息", "待处理事项与回复草稿", "发送授权和核验结果"] },
+    "执行任务": { description: "找回一次性沟通任务的范围、草稿、授权和当前运行状态。", title: "合成任务：岗位确认与首条打招呼", status: "waiting", detail: "任务详情", fields: ["岗位范围：单个已确认岗位", "模式：读取 → 匹配 → 生成草稿", "当前等待：用户审阅草稿并授权", "外部发送：未开启"] },
+    "定时委托": { description: "持续委托必须单独查看范围、频率、时区、数量上限和到期时间。", title: "暂无已开启的定时委托", status: "draft", detail: "委托详情", fields: ["平台和岗位范围", "运行频率与时区", "只读 / 草稿 / 发送模式", "授权有效期、暂停与撤销"] },
+    "结果记录": { description: "结果记录区分已完成、失败和无法确定的外部结果，未知结果需要人工对账。", title: "合成记录：发送后页面核验", status: "unknown", detail: "结果详情", fields: ["尝试 ID 与幂等键", "发送前岗位和草稿版本", "页面回读证据或缺失原因", "下一步：人工核对后决定是否继续"] },
+  };
+  const current = views[view];
+  const prompt = view === "定时委托"
+    ? "我想设计一个 BOSS 招聘沟通定时委托。请先确认平台、岗位范围、频率、时区、数量上限、只读/草稿/发送模式、授权有效期和暂停撤销方式；当前只讨论，不创建真实后台任务。"
+    : "我想创建一次 BOSS 招聘沟通任务。请先确认岗位范围、职业约束、招聘方会话、个性化打招呼依据和需要我明确授权的动作；当前只讨论，不发送消息。";
+  return <>
+    <SurfaceHeader title="招聘沟通" description="把 Agent 的判断、招聘方会话和外部沟通任务放在同一个可找回的工作面；真实平台尚未连接。" action={<div className="flex flex-wrap gap-2"><AgentAction prompt={prompt}>新建沟通任务</AgentAction><AgentAction variant="outline" prompt="我想设计一个 BOSS 招聘沟通定时委托。请先确认平台、岗位范围、频率、时区、数量上限、只读/草稿/发送模式、授权有效期和暂停撤销方式；当前只讨论，不创建真实后台任务。">创建定时委托</AgentAction></div>} />
+    <Unavailable>当前只展示合成状态卡和交互骨架，不会连接 BOSS、创建后台任务或发送消息。普通聊天文本也不会自动成为外部发送授权。</Unavailable>
+    <div className="mb-5 flex flex-wrap items-center justify-between gap-3"><ViewPicker options={["待处理会话", "执行任务", "定时委托", "结果记录"] as const} value={view} onChange={next => { setView(next as CommunicationView); setSelectedId(next === "执行任务" ? "task" : next === "结果记录" ? "report" : next === "定时委托" ? "automation" : "conversation"); }} label="招聘沟通视图" /><span className="text-xs text-muted-foreground">合成演示状态 · 未连接数据源</span></div>
+    <div aria-label="任务状态图例" className="mb-5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground"><span className="mr-1">状态语义</span>{(Object.keys(communicationStatusLabels) as CommunicationStatus[]).map(status => <CommunicationStatus key={status} status={status} />)}</div>
+    <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1fr)_19rem]">
+      <section className="min-w-0 overflow-hidden rounded-xl border">
+        <div className="border-b bg-muted/20 px-5 py-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-sm font-medium">{current.title}</h2><p className="mt-1 text-xs text-muted-foreground">{current.description}</p></div><CommunicationStatus status={current.status} /></div></div>
+        <button type="button" aria-pressed={selectedId === (view === "执行任务" ? "task" : view === "结果记录" ? "report" : view === "定时委托" ? "automation" : "conversation")} onClick={() => setSelectedId(view === "执行任务" ? "task" : view === "结果记录" ? "report" : view === "定时委托" ? "automation" : "conversation")} className="block w-full p-5 text-left outline-none transition-colors hover:bg-muted/30 focus-visible:ring-2 focus-visible:ring-ring"><div className="flex flex-wrap items-center justify-between gap-3"><span className="text-xs font-medium">{view === "待处理会话" ? "等待平台连接和人工登录" : view === "执行任务" ? "岗位确认与打招呼草稿" : view === "定时委托" ? "首版默认只读和生成草稿" : "页面回读未完成"}</span><span className="text-[11px] text-muted-foreground">点击查看依据</span></div><p className="mt-3 text-xs leading-5 text-muted-foreground">{view === "结果记录" ? "外部写操作的网络超时或页面跳转不能直接判为失败；保留 unknown，等待确定性回读或人工对账。" : "所有外部动作都需要岗位、草稿版本、短时授权和结果证据。"}</p></button>
+        <div className="border-t px-5 py-4 text-xs leading-5 text-muted-foreground">当前页面只承载任务关系和状态，不把 Agent Run 成功显示为招聘平台已发送。</div>
+      </section>
+      <aside className="rounded-xl border p-5"><div className="flex items-center justify-between gap-3"><h2 className="text-sm font-medium">{current.detail}</h2><CommunicationStatus status={current.status} /></div><ul className="mt-5 space-y-4">{current.fields.map(field => <li key={field} className="flex items-start gap-2 text-xs leading-5 text-muted-foreground"><span className="mt-2 size-1 shrink-0 rounded-full bg-muted-foreground/50" />{field}</li>)}</ul><div className="mt-6 flex flex-wrap gap-2"><AgentAction variant="outline" prompt="请继续围绕当前招聘沟通状态工作。先说明岗位范围、事实依据、未知项和需要我确认的动作，不发送消息。">继续问 Agent</AgentAction>{view === "结果记录" && <Link href="/reports" className="inline-flex min-h-9 items-center rounded-md border px-3 text-xs underline-offset-4 hover:underline">查看结果记录</Link>}</div></aside>
+    </div>
+    <RelatedWork sections={["tasks", "automations", "reports", "assistant"]} />
+  </>;
+}
+
 function RecordSurface({ section }: { section: RecordSection }) {
   const definition = recordSurfaces[section];
   const [filter, setFilter] = useState(definition.filters[0]);
@@ -175,6 +230,7 @@ function SettingsSurface() {
 
 export function WorkspaceSurface({ section }: { section: WorkspaceSection }) {
   if (section === "library") return <WorkspaceMaterials />;
+  if (section === "inbox") return <CommunicationSurface />;
   if (section in recordSurfaces) return <RecordSurface key={section} section={section as RecordSection} />;
   if (section in contentSurfaces) return <ContentSurface key={section} section={section as ContentSection} />;
   switch (section) {
