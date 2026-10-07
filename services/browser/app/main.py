@@ -1,3 +1,4 @@
+import httpx
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -23,5 +24,15 @@ else:
         hide_parameters=True,
         connect_args={"timeout": 5, "command_timeout": 10},
     )
-    app = create_app(verifier=CommandVerifier(public_key), store=PostgresLeaseStore(engine))
+    steel_client = httpx.AsyncClient(
+        base_url=str(settings.steel_base_url),
+        follow_redirects=False,
+        timeout=40,
+    )
+    app = create_app(
+        verifier=CommandVerifier(public_key),
+        store=PostgresLeaseStore(engine),
+        steel_client=steel_client,
+        viewer_public_origin=settings.viewer_public_origin,
+    )
 app.state.settings = settings

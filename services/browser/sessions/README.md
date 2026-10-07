@@ -116,9 +116,13 @@ clients bypass this guard and must remain unavailable to product users.
 the configured Steel cast WebSocket endpoint, rewrites it to a CareerAct-relative
 path carrying the server-selected session ID, rejects other WebSocket/devtools URLs,
 limits the HTML size, and requires an exact Origin. It does not create a ticket,
-authorize a user, proxy a WebSocket, or expose a product route by itself. Those
-pieces must be wired through the API and Browser Service before the UI can show a
-login Viewer.
+authorize a user, proxy a WebSocket, or expose a product route by itself. The
+Browser Service now has an internal `GET /internal/v1/sessions/{session_id}/viewer`
+route that accepts a short-lived signed `viewer` command, rechecks the registered
+session, fetches Steel debug HTML without redirects, and returns only rewritten
+HTML with `no-store` and same-origin frame policy. It is still not a product route:
+the API ticket, WebSocket proxy, same-origin forwarding and UI login entry remain
+unimplemented.
 
 This increment is verified with synthetic sessions only. The pinned implementation
 uses shared Profile paths and does not honor arbitrary `userDataDir` as an isolated

@@ -114,6 +114,22 @@ class PostgresLeaseStore:
                 )
             return current
 
+    async def authorize_viewer(self, command: BrowserCommand) -> None:
+        if command.action != "viewer" or command.lease_id is not None:
+            raise CommandRejected("Not a viewer command")
+        async with self.engine.begin() as connection:
+            row = await self._lock(connection, command.session_id)
+            now = cast(datetime, await connection.scalar(text("SELECT clock_timestamp()")))
+            if (
+                row["revoked"]
+                or row["user_id"] != command.sub
+                or row["task_id"] != command.task_id
+                or row["authorization_id"] != command.authorization_id
+                or not command.iat <= now.timestamp() < command.exp
+                or not 0 < command.exp - command.iat <= 60
+            ):
+                raise CommandRejected("Browser command is no longer authorized")
+
     async def manage(self, command: BrowserCommand) -> None:
         if command.action not in ("register", "revoke") or command.lease_id is not None:
             raise CommandRejected("Not a session command")

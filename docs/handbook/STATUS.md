@@ -13,7 +13,8 @@ BOSS 直聘的合适岗位筛选与招聘方主动沟通最小闭环，复用已
 内部 Steel 创建/核对/释放适配已通过合成会话集成，但尚未绑定产品请求；
 固定 Steel 实例的两个顺序会话 canary 已确认新会话不继承合成网页存储；
 同源 Viewer 的 HTML 地址重写、会话绑定和 Origin 校验组件已通过专项测试；
-尚未证明登录态持久化、Profile 目录隔离/清理或同源人工登录入口，接下来接 API 票据和 WebSocket 代理。
+Browser Service 内部 Viewer HTML 路由已通过合成测试。尚未证明登录态持久化、Profile 目录隔离/清理，
+也没有 API 票据、WebSocket 代理或同源人工登录入口，接下来补齐这些边界。
 
 正式 Agent 入口为 `/`，旧 `/workspace` 路径兼容跳转。左侧组织项目与独立对话，中间持续协作，
 右侧按需打开内容标签；个人背景共享、项目可选关联，模型选择按对话保存。对话管理、侧聊、
@@ -46,7 +47,7 @@ Runtime 已接入独立服务端对话 ID、Agno Session/Run、多轮历史、�
 | 机会发现 | 主 Agent 已接入受限公开网页检索，实际返回来源链接；机会发现与托管需求保留 | 搜索摘要不是核验全文；网页读取、招聘渠道接入与持续巡检尚未实现 |
 | 模型网关 | API 受限推理 Key、管理凭据分离、范围/预算/限流/停用验证通过 | 产品用户独立额度、BYOK 管理和加密存储；服务额度不等于用户权限 |
 | 持久任务 | Dev Server 恢复/取消/超时通过；正式 Temporal + PostgreSQL + Worker 健康 Workflow 通过 | Worker 只有健康 Workflow，无解析/求职 Activity、业务任务状态回写和恢复 |
-| 浏览器 | Steel/Playwright 虚构表单读写、持久租约、签名控制、停止/断连规则通过；BOSS 只读合成解析与产品连接请求持久化、幂等/归属/撤销通过；内部 Steel 生命周期和持久占用通过后台集成；标准 Playwright 跳 `about:blank`，临时 patchright 进入 `_security_check` | Profile 隔离/清理、Browser Service 产品请求绑定、同源 Viewer、真实连接状态回写与外部动作授权未接入；需完成人工登录/风控复验；记录连接请求不启动浏览器 |
+| 浏览器 | Steel/Playwright 虚构表单读写、持久租约、签名控制、停止/断连规则通过；BOSS 只读合成解析与产品连接请求持久化、幂等/归属/撤销通过；内部 Steel 生命周期和持久占用、受签名命令保护的 Viewer HTML 路由通过后台集成；标准 Playwright 跳 `about:blank`，临时 patchright 进入 `_security_check` | Profile 隔离/清理、API 票据、WebSocket 代理、产品请求绑定、真实连接状态回写与外部动作授权未接入；需完成人工登录/风控复验；记录连接请求不启动浏览器 |
 | 材料 | 合成纯文本领域存储、0008 迁移、同源 BFF、Agent 草稿/修改、Diff、接受/拒绝、版本历史与纯文本复制已接入；旧提议不能覆盖新版本。Docling 历史合成解析验证保留 | 默认关闭的合成实验；P1、真实资料、上传/对象存储、PDF/DOCX 导出、解析 Activity 与实投版本关联待完成 |
 | 部署运营 | 四应用镜像与生产 Compose 拓扑已在本地隔离验证；开发基础服务仅绑定回环 | 公网 HTTPS、域名/备案、云资源峰值、备份恢复、云 IP 风控与长期稳定性未完成 |
 
@@ -85,14 +86,15 @@ P1–P3 生产保护作为同时扩展其他模块的指令。后续业务仍须
   固定 Steel 镜像的合成会话；迁移 0018 升级/回退通过隔离库，日常库本轮未迁移。
   超时/取消/适配器重建后不自动重试，已释放旧请求不能关闭新会话。冻结依赖、Ruff、mypy、
   Python 回归 143 passed / 51 skipped、Web lint/typecheck/93 项测试和隔离 production build
-  通过；27 项专项已另外显式运行，不将默认跳过记为通过。未接产品 HTTP/Viewer，
-  未访问 BOSS 或使用真实凭据。镜像 Profile 参数未实现预期隔离，下一步先验证隔离/清理
-  和同源接管，再绑定产品请求；详见[专题证据](../topics/recruiting-communication/README.md#phase-0b-steel-会话生命周期前置增量)。
+  通过；27 项专项已另外显式运行，不将默认跳过记为通过。已接 Browser Service 内部 Viewer HTML
+  路由但未接产品 HTTP/页面，未访问 BOSS 或使用真实凭据。镜像 Profile 参数未实现预期隔离，
+  下一步先验证隔离/清理和同源接管，再绑定产品请求；详见[专题证据](../topics/recruiting-communication/README.md#phase-0b-steel-会话生命周期前置增量)。
 
 - 2026-10-07 同源 Viewer 边界增量：`services/browser/sessions/viewer.py` 只允许配置的 Steel
   cast WebSocket 地址，重写为带服务端会话 ID 的 CareerAct 相对路径，限制文档大小并严格校验
-  Origin；8 项合成测试通过。尚未接 API ticket、Browser Service WebSocket 代理或 Web 页面，
-  不展示登录入口，不暴露原始 CDP/调试地址。
+  Origin；Browser Service 内部路由再校验短时签名命令、会话撤销和 Steel `text/html` 响应，
+  返回 `no-store` HTML；12 项 Viewer/路由合成测试通过。尚未接 API ticket、WebSocket 代理或
+  Web 页面，不展示登录入口，不暴露原始 CDP/调试地址。
 
 - 2026-10-07 BOSS 连接请求增量：0017 迁移、用户归属、必填 UUID 幂等键、单用户活动请求互斥、
   版本条件撤销及旧请求重放通过隔离 PostgreSQL 4 项测试；真实 Better Auth/BFF/JWT/API/

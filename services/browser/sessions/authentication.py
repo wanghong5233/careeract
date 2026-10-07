@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 LeaseAction = Literal["acquire", "renew", "stop", "check"]
 SessionAction = Literal["register", "revoke"]
-Action = Literal["acquire", "renew", "stop", "check", "register", "revoke"]
+Action = Literal["acquire", "renew", "stop", "check", "register", "revoke", "viewer"]
 
 
 class CommandRejected(Exception):
@@ -56,7 +56,7 @@ class CommandVerifier:
             not 0 < command.exp - command.iat <= 60
             or command.session_id != session_id
             or command.action != action
-            or (action in ("acquire", "register", "revoke")) != (command.lease_id is None)
+            or (action in ("acquire", "register", "revoke", "viewer")) != (command.lease_id is None)
         ):
             raise CommandRejected("Invalid browser command scope")
         return command

@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     )
 
     steel_base_url: AnyHttpUrl = AnyHttpUrl("http://localhost:3001")
+    viewer_public_origin: AnyHttpUrl = AnyHttpUrl("http://localhost:43110")
     browser_database_url: SecretStr | None = None
     browser_command_public_key_file: Path | None = None
 
