@@ -12,7 +12,8 @@ BOSS 直聘的合适岗位筛选与招聘方主动沟通最小闭环，复用已
 已通过真实认证/BFF/PostgreSQL 链路与桌面可见检查。当前只记录请求，不创建浏览器会话；
 内部 Steel 创建/核对/释放适配已通过合成会话集成，但尚未绑定产品请求；
 固定 Steel 实例的两个顺序会话 canary 已确认新会话不继承合成网页存储；
-尚未证明登录态持久化、Profile 目录隔离/清理或同源人工登录入口，接下来继续实现后两者。
+同源 Viewer 的 HTML 地址重写、会话绑定和 Origin 校验组件已通过专项测试；
+尚未证明登录态持久化、Profile 目录隔离/清理或同源人工登录入口，接下来接 API 票据和 WebSocket 代理。
 
 正式 Agent 入口为 `/`，旧 `/workspace` 路径兼容跳转。左侧组织项目与独立对话，中间持续协作，
 右侧按需打开内容标签；个人背景共享、项目可选关联，模型选择按对话保存。对话管理、侧聊、
@@ -87,6 +88,11 @@ P1–P3 生产保护作为同时扩展其他模块的指令。后续业务仍须
   通过；27 项专项已另外显式运行，不将默认跳过记为通过。未接产品 HTTP/Viewer，
   未访问 BOSS 或使用真实凭据。镜像 Profile 参数未实现预期隔离，下一步先验证隔离/清理
   和同源接管，再绑定产品请求；详见[专题证据](../topics/recruiting-communication/README.md#phase-0b-steel-会话生命周期前置增量)。
+
+- 2026-10-07 同源 Viewer 边界增量：`services/browser/sessions/viewer.py` 只允许配置的 Steel
+  cast WebSocket 地址，重写为带服务端会话 ID 的 CareerAct 相对路径，限制文档大小并严格校验
+  Origin；8 项合成测试通过。尚未接 API ticket、Browser Service WebSocket 代理或 Web 页面，
+  不展示登录入口，不暴露原始 CDP/调试地址。
 
 - 2026-10-07 BOSS 连接请求增量：0017 迁移、用户归属、必填 UUID 幂等键、单用户活动请求互斥、
   版本条件撤销及旧请求重放通过隔离 PostgreSQL 4 项测试；真实 Better Auth/BFF/JWT/API/
