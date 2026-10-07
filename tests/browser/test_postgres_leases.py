@@ -23,7 +23,11 @@ from services.api.application.ports.browser_control import (
 )
 from services.api.infrastructure.browser_control import BrowserCommandSigner, BrowserControlClient
 from services.browser.app.factory import create_app
-from services.browser.sessions.authentication import CommandRejected, CommandVerifier
+from services.browser.sessions.authentication import (
+    BrowserCommand,
+    CommandRejected,
+    CommandVerifier,
+)
 from services.browser.sessions.lease import LeaseConflict
 from services.browser.sessions.postgres import PostgresLeaseStore
 from tests.api.test_browser_control import control_context
@@ -34,6 +38,76 @@ pytestmark = pytest.mark.skipif(
     reason="Opt-in isolated Docker PostgreSQL integration",
 )
 ROOT = Path(__file__).resolve().parents[2]
+
+
+@pytest.mark.asyncio
+async def test_viewer_lease_excludes_executors_and_requires_confirmed_stop(
+    database_url: str,
+) -> None:
+    engine = create_async_engine(database_url)
+    store = PostgresLeaseStore(engine)
+    command = BrowserCommand.model_validate(command_payload() | {"action": "viewer"})
+    await store.register(command.session_id, command.sub, command.task_id, command.authorization_id)
+    executor = command.model_copy(update={"action": "acquire", "jti": uuid4()})
+    try:
+        lease = await store.acquire_viewer(command)
+        with pytest.raises(LeaseConflict):
+            await store.execute(executor)
+        with pytest.raises(LeaseConflict):
+            await store.acquire_viewer(command.model_copy(update={"jti": uuid4()}))
+        await store.renew_viewer(command, lease.lease_id)
+        await store.check_viewer(command, lease.lease_id)
+        with pytest.raises(LeaseConflict):
+            await store.drain_viewer(
+                command.model_copy(update={"attempt_id": uuid4()}), lease.lease_id
+            )
+        await store.drain_viewer(command, lease.lease_id)
+        with pytest.raises(LeaseConflict):
+            await store.execute(executor)
+        with pytest.raises(LeaseConflict):
+            await store.renew_viewer(command, lease.lease_id)
+        await store.confirm_stopped(command.session_id, lease.lease_id)
+        with pytest.raises(CommandRejected):
+            await store.acquire_viewer(command)
+        executor_lease = await store.execute(executor)
+        with pytest.raises(LeaseConflict):
+            await store.authorize_viewer(command)
+        with pytest.raises(LeaseConflict):
+            await store.drain_viewer(command, lease.lease_id)
+        await store.execute(
+            executor.model_copy(
+                update={"action": "stop", "lease_id": executor_lease.lease_id, "jti": uuid4()}
+            )
+        )
+        await store.confirm_stopped(command.session_id, executor_lease.lease_id)
+        replacement = command.model_copy(update={"jti": uuid4(), "attempt_id": uuid4()})
+        viewer_lease = await store.acquire_viewer(replacement)
+        await store.revoke(command.session_id)
+        with pytest.raises(CommandRejected):
+            await store.renew_viewer(replacement, viewer_lease.lease_id)
+        await store.drain_viewer(replacement, viewer_lease.lease_id)
+        await store.confirm_stopped(command.session_id, viewer_lease.lease_id)
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_expired_viewer_retains_ownership_until_disconnect(database_url: str) -> None:
+    engine = create_async_engine(database_url)
+    store = PostgresLeaseStore(engine)
+    command = BrowserCommand.model_validate(command_payload() | {"action": "viewer"})
+    await store.register(command.session_id, command.sub, command.task_id, command.authorization_id)
+    try:
+        lease = await store.acquire_viewer(command)
+        expired = command.model_copy(update={"iat": 1, "exp": 61})
+        with pytest.raises(CommandRejected):
+            await store.renew_viewer(expired, lease.lease_id)
+        with pytest.raises(LeaseConflict):
+            await store.execute(command.model_copy(update={"action": "acquire", "jti": uuid4()}))
+        await store.drain_viewer(expired, lease.lease_id)
+        await store.confirm_stopped(command.session_id, lease.lease_id)
+    finally:
+        await engine.dispose()
 
 
 @pytest.fixture(scope="module")

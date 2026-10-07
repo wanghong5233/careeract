@@ -567,6 +567,17 @@ uv run python scripts/smoke_steel_profile.py
 它只证明新会话没有继承前一会话的网页存储；不证明登录态可持久化，也不验证真实 Profile
 目录是否按路径保存。失败、超时或释放结果不明时保留会话并人工核对，不自动重试。
 
+验证固定 Steel 的原生 context 导出/导入，可执行合成 Cookie/localStorage 三会话 canary：
+
+```powershell
+uv run python -m scripts.smoke_steel_context
+```
+
+先确认没有活动产品会话；脚本遇到 live 会话会拒绝操作。导出只选取本次随机合成标记，按明确的
+`https://example.com` origin 恢复到第二个会话，并验证第三个空会话不继承标记。context 只在内存中，
+不打印或存文件；当前 Steel 的导出域名键与恢复 origin 键不同，适配依据见招聘沟通专题。
+此实验不是加密持久化、磁盘 Profile 隔离或真实账号恢复验收；创建/释放结果不明时不重试。
+
 生命周期规则测试：`uv run pytest tests/browser/test_executor_lifecycle.py -q`。
 真实 Steel/Playwright/PostgreSQL 联合检查：先启动本地 Steel，然后执行：
 

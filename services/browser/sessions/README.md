@@ -123,8 +123,15 @@ session, fetches Steel debug HTML without redirects, and returns only rewritten
 HTML with `no-store` and same-origin frame policy. It is still not a product route:
 the API can now issue the matching 60-second command only for an existing, unrevoked
 registered session, and the internal cast route proxies text/binary WebSocket frames
-to Steel after rechecking that cookie. Same-origin forwarding and the UI login entry
-remain unimplemented.
+to Steel after rechecking that cookie. The cast connection acquires the existing durable
+writer lease, consumes its ticket, and excludes automatic executors and other Viewers.
+It checks authorization before forwarding input and renews the lease every five seconds;
+expiry, revocation, draining, or unavailable coordination stops the relay. Trusted cleanup
+marks it draining and releases ownership only after the upstream WebSocket has closed.
+Uncertain connection or disconnect outcomes retain ownership for reconciliation.
+Caddy forwards only the exact Viewer and cast path shapes; the UI login entry and
+automatic ticket renewal remain unimplemented. A ticket currently limits one takeover
+connection to at most 60 seconds plus the periodic check interval.
 
 This increment is verified with synthetic sessions only. The pinned implementation
 uses shared Profile paths and does not honor arbitrary `userDataDir` as an isolated

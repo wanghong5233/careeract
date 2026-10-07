@@ -95,9 +95,25 @@ P1–P3 生产保护作为同时扩展其他模块的指令。后续业务仍须
   cast WebSocket 地址，重写为带服务端会话 ID 的 CareerAct 相对路径，限制文档大小并严格校验
   Origin；Browser Service 内部路由再校验短时签名命令、会话撤销和 Steel `text/html` 响应，
   返回 `no-store` HTML 并设置短时 HttpOnly cookie；受保护 API 可对已注册会话签发绑定用户/任务/授权的
-  60 秒 `viewer` 票据，内部 cast 路由重查票据和 Origin 后转发文本/二进制帧；14 项 Viewer/路由和
-  9 项 API 票据测试通过。尚未连接真实 Steel WebSocket、产品会话创建或 Web 页面，不展示登录入口，
-  不暴露原始 CDP/调试地址。
+  60 秒 `viewer` 票据，内部 cast 路由消费票据并获取持久独占租约后转发文本/二进制帧；输入前及每 5 秒
+  重新核验票据、撤销状态和租约，失效或协调不可用会主动断开；确认上游通道关闭后才释放租约，不确定结果
+  保留占用。Caddy 只代理明确的 `viewer/cast`
+  路径。Viewer/路由和 API 票据专项测试、配置解析通过。尚未连接真实 Steel WebSocket、产品会话创建
+  或 Web 页面，不展示登录入口，不暴露原始 CDP/调试地址。
+
+- 2026-10-07 阶段复核：实现仍符合 PRD/ARCHITECTURE 的边界，业务真相在 PostgreSQL，Agno、Temporal、
+  Browser Service 和 Steel 仍按职责复用，没有引入 Zcode/Codex Harness 或 Pulse 的运行时。发现并修复
+  Viewer 建连后撤销/到期不生效、人工通道与执行租约可并存、Caddy 匹配范围过宽三个缺口；新增撤销后主动
+  关闭测试，10 项合成通道测试及 5 项隔离 PostgreSQL 集成、Ruff、mypy 和固定版本 Caddy adapt 通过。
+  一次集成重跑在既有服务凭证测试得到 403，单独复测通过，原因尚未确认；不把该次运行记录为全通过。
+  Python 回归 164 passed / 53 skipped，Web lint/typecheck/93 项测试及独立依赖副本生产构建通过。
+  原先构建副本的依赖链接被 Turbopack 拒绝，改为实际副本后通过，未重启日常服务。下一阶段进入产品浏览器会话创建、
+  人工登录一次并持久化 Profile 的生命周期，不把 `pending` 请求或合成 canary 当作已登录。
+
+- 2026-10-07 下一阶段前置实验：固定 Steel 镜像的原生 `sessionContext` 在明确 origin 的最小适配后，
+  通过合成 HttpOnly Cookie/localStorage 的导出、恢复与下一空会话隔离。直接按导出的域名键恢复失败，
+  源码确认恢复按完整 origin 匹配；可复现入口为 `python -m scripts.smoke_steel_context`。
+  只在内存中保存合成状态，尚未实现服务端加密持久化、真实 BOSS 登录或磁盘 Profile 隔离。
 
 - 2026-10-07 BOSS 连接请求增量：0017 迁移、用户归属、必填 UUID 幂等键、单用户活动请求互斥、
   版本条件撤销及旧请求重放通过隔离 PostgreSQL 4 项测试；真实 Better Auth/BFF/JWT/API/

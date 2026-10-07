@@ -1,5 +1,5 @@
 import asyncio
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import Any
 from uuid import UUID
@@ -34,12 +34,34 @@ from services.browser.sessions.viewer import (
 )
 
 
-async def _relay_websocket(websocket: WebSocket, upstream: Any) -> None:
+class ViewerAuthorizationRevoked(Exception):
+    pass
+
+
+class ViewerCoordinationUnavailable(Exception):
+    pass
+
+
+async def _relay_websocket(
+    websocket: WebSocket,
+    upstream: Any,
+    *,
+    authorization_check: Callable[[], Awaitable[None]],
+    authorization_renew: Callable[[], Awaitable[None]],
+    authorization_interval: float = 5.0,
+) -> None:
     async def from_client() -> None:
         while True:
             message = await websocket.receive()
             if message["type"] == "websocket.disconnect":
                 return
+            try:
+                async with asyncio.timeout(5):
+                    await authorization_check()
+            except (CommandRejected, LeaseNotFound, LeaseConflict) as error:
+                raise ViewerAuthorizationRevoked from error
+            except (DBAPIError, PoolTimeoutError, TimeoutError) as error:
+                raise ViewerCoordinationUnavailable from error
             if message.get("text") is not None:
                 await upstream.send(message["text"])
             elif message.get("bytes") is not None:
@@ -52,16 +74,29 @@ async def _relay_websocket(websocket: WebSocket, upstream: Any) -> None:
             else:
                 await websocket.send_text(message)
 
+    async def monitor_authorization() -> None:
+        while True:
+            await asyncio.sleep(authorization_interval)
+            try:
+                async with asyncio.timeout(5):
+                    await authorization_renew()
+            except (CommandRejected, LeaseNotFound, LeaseConflict) as error:
+                raise ViewerAuthorizationRevoked from error
+            except (DBAPIError, PoolTimeoutError, TimeoutError) as error:
+                raise ViewerCoordinationUnavailable from error
+
     client_task = asyncio.create_task(from_client())
     upstream_task = asyncio.create_task(from_upstream())
-    done, pending = await asyncio.wait(
-        (client_task, upstream_task), return_when=asyncio.FIRST_COMPLETED
-    )
-    for task in pending:
-        task.cancel()
-    await asyncio.gather(*pending, return_exceptions=True)
-    for task in done:
-        task.result()
+    authorization_task = asyncio.create_task(monitor_authorization())
+    tasks = (client_task, upstream_task, authorization_task)
+    try:
+        done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        for task in done:
+            task.result()
+    finally:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 def create_app(
@@ -71,7 +106,11 @@ def create_app(
     steel_client: httpx.AsyncClient | None = None,
     viewer_public_origin: AnyHttpUrl | None = None,
     steel_ws_connect: Callable[..., Any] | None = None,
+    viewer_authorization_interval: float = 5.0,
 ) -> FastAPI:
+    if not 0 < viewer_authorization_interval <= 5:
+        raise ValueError("Viewer authorization interval must be within 5 seconds")
+
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         try:
@@ -156,7 +195,7 @@ def create_app(
             html = await fetch_viewer_document(steel_client, page_id, context)
         except CommandRejected:
             raise HTTPException(403, "Browser command rejected") from None
-        except LeaseNotFound:
+        except (LeaseNotFound, LeaseConflict):
             raise HTTPException(403, "Browser command rejected") from None
         except ViewerRejected:
             raise HTTPException(502, "Viewer document unavailable") from None
@@ -203,9 +242,9 @@ def create_app(
             if not token:
                 raise ViewerRejected("Viewer command required")
             command = verifier.verify(token, session_id, "viewer")
-            await store.authorize_viewer(command)
             page_id = validate_page_id(websocket.query_params.get("pageId", ""))
-        except (CommandRejected, ViewerRejected, LeaseNotFound):
+            lease = await store.acquire_viewer(command)
+        except (CommandRejected, ViewerRejected, LeaseNotFound, LeaseConflict):
             await websocket.close(code=1008)
             return
         except (DBAPIError, PoolTimeoutError):
@@ -215,16 +254,44 @@ def create_app(
         upstream_url = cast_websocket_url(context, page_id)
         connector = steel_ws_connect or connect
         try:
+            close_code = 1000
             async with connector(
                 upstream_url,
                 open_timeout=10,
                 close_timeout=5,
                 max_size=2 * 1024 * 1024,
             ) as upstream:
-                await websocket.accept()
-                await _relay_websocket(websocket, upstream)
+                try:
+                    await store.renew_viewer(command, lease.lease_id)
+                    await websocket.accept()
+                    await _relay_websocket(
+                        websocket,
+                        upstream,
+                        authorization_check=lambda: store.check_viewer(command, lease.lease_id),
+                        authorization_renew=lambda: store.renew_viewer(command, lease.lease_id),
+                        authorization_interval=viewer_authorization_interval,
+                    )
+                except (ViewerAuthorizationRevoked, CommandRejected, LeaseNotFound, LeaseConflict):
+                    close_code = 1008
+                except (ViewerCoordinationUnavailable, DBAPIError, PoolTimeoutError):
+                    close_code = 1013
+                except (ConnectionClosed, WebSocketDisconnect, OSError, TimeoutError):
+                    close_code = 1011
+                finally:
+                    await store.drain_viewer(command, lease.lease_id)
+            async with asyncio.timeout(5):
+                await upstream.wait_closed()
+            await store.confirm_stopped(session_id, lease.lease_id)
+            if websocket.application_state != WebSocketState.DISCONNECTED:
+                await websocket.close(code=close_code)
+        except (DBAPIError, PoolTimeoutError):
+            if websocket.application_state != WebSocketState.DISCONNECTED:
+                await websocket.close(code=1013)
+        except (LeaseConflict, LeaseNotFound, CommandRejected):
+            if websocket.application_state != WebSocketState.DISCONNECTED:
+                await websocket.close(code=1008)
         except (ConnectionClosed, WebSocketDisconnect, OSError, TimeoutError):
-            if websocket.application_state == WebSocketState.CONNECTED:
+            if websocket.application_state != WebSocketState.DISCONNECTED:
                 await websocket.close(code=1011)
         except asyncio.CancelledError:
             raise

@@ -31,7 +31,7 @@ class PostgresLeaseStore:
             )
 
     async def execute(self, command: BrowserCommand) -> SessionLease:
-        if command.action in ("register", "revoke"):
+        if command.action not in ("acquire", "renew", "stop", "check"):
             raise CommandRejected("Not a lease command")
         async with self.engine.begin() as connection:
             row = await self._lock(connection, command.session_id)
@@ -129,6 +129,44 @@ class PostgresLeaseStore:
                 or not 0 < command.exp - command.iat <= 60
             ):
                 raise CommandRejected("Browser command is no longer authorized")
+            if row["lease_id"] is not None:
+                raise LeaseConflict("Previous writer must be stopped before viewing")
+
+    async def acquire_viewer(self, command: BrowserCommand) -> SessionLease:
+        if command.action != "viewer" or command.lease_id is not None:
+            raise CommandRejected("Not a viewer command")
+        return await self.execute(command.model_copy(update={"action": "acquire"}))
+
+    async def renew_viewer(self, command: BrowserCommand, lease_id: UUID) -> None:
+        if command.action != "viewer" or command.lease_id is not None:
+            raise CommandRejected("Not a viewer command")
+        await self.execute(
+            command.model_copy(update={"action": "renew", "lease_id": lease_id, "jti": uuid4()})
+        )
+
+    async def check_viewer(self, command: BrowserCommand, lease_id: UUID) -> None:
+        if command.action != "viewer" or command.lease_id is not None:
+            raise CommandRejected("Not a viewer command")
+        await self.execute(command.model_copy(update={"action": "check", "lease_id": lease_id}))
+
+    async def drain_viewer(self, command: BrowserCommand, lease_id: UUID) -> None:
+        if command.action != "viewer" or command.lease_id is not None:
+            raise CommandRejected("Not a viewer command")
+        async with self.engine.begin() as connection:
+            row = await self._lock(connection, command.session_id)
+            if (
+                row["lease_id"] != lease_id
+                or row["owner_id"] != command.owner_id
+                or row["attempt_id"] != command.attempt_id
+                or row["user_id"] != command.sub
+                or row["task_id"] != command.task_id
+                or row["authorization_id"] != command.authorization_id
+            ):
+                raise LeaseConflict("Viewer lease does not belong to this connection")
+            await connection.execute(
+                text("UPDATE browser.sessions SET draining=true WHERE session_id=:session"),
+                {"session": command.session_id},
+            )
 
     async def manage(self, command: BrowserCommand) -> None:
         if command.action not in ("register", "revoke") or command.lease_id is not None:

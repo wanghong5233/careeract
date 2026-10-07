@@ -11,6 +11,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import AnyHttpUrl
+from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from starlette.websockets import WebSocketDisconnect
 
 from services.browser.app.factory import create_app
@@ -19,6 +20,7 @@ from services.browser.sessions.authentication import (
     CommandRejected,
     CommandVerifier,
 )
+from services.browser.sessions.lease import SessionLease
 from services.browser.sessions.postgres import PostgresLeaseStore
 from services.browser.sessions.viewer import viewer_cookie_name
 
@@ -31,14 +33,36 @@ class _Engine:
 class _ViewerStore:
     engine = _Engine()
 
-    def __init__(self, reject: bool = False) -> None:
+    def __init__(self, reject: bool = False, reject_after: int | None = None) -> None:
         self.reject = reject
+        self.reject_after = reject_after
+        self.calls = 0
         self.commands: list[BrowserCommand] = []
+        self.drained = False
+        self.released = False
 
     async def authorize_viewer(self, command: BrowserCommand) -> None:
-        if self.reject:
+        self.calls += 1
+        if self.reject or (self.reject_after is not None and self.calls > self.reject_after):
             raise CommandRejected("revoked")
         self.commands.append(command)
+
+    async def acquire_viewer(self, command: BrowserCommand) -> SessionLease:
+        await self.authorize_viewer(command)
+        return SessionLease(command.session_id, uuid4(), command.owner_id, datetime.now(UTC))
+
+    async def renew_viewer(self, command: BrowserCommand, lease_id: UUID) -> None:
+        await self.authorize_viewer(command)
+
+    async def check_viewer(self, command: BrowserCommand, lease_id: UUID) -> None:
+        await self.authorize_viewer(command)
+
+    async def drain_viewer(self, command: BrowserCommand, lease_id: UUID) -> None:
+        self.drained = True
+
+    async def confirm_stopped(self, session_id: UUID, lease_id: UUID) -> None:
+        assert self.drained
+        self.released = True
 
 
 def _token(private_key: Ed25519PrivateKey, session_id: UUID) -> str:
@@ -76,6 +100,7 @@ def _app(
     store: _ViewerStore,
     client: httpx.AsyncClient,
     connector: Callable[..., Any] | None = None,
+    viewer_authorization_interval: float = 5.0,
 ) -> FastAPI:
     return create_app(
         verifier=CommandVerifier(private_key.public_key()),
@@ -83,6 +108,7 @@ def _app(
         steel_client=client,
         viewer_public_origin=AnyHttpUrl("https://careeract.example"),
         steel_ws_connect=connector,
+        viewer_authorization_interval=viewer_authorization_interval,
     )
 
 
@@ -188,6 +214,9 @@ class _Upstream:
         self.sent.append(message)
         self._stop.set()
 
+    async def wait_closed(self) -> None:
+        return None
+
     def __aiter__(self) -> "_Upstream":
         return self
 
@@ -200,9 +229,10 @@ class _Upstream:
 
 
 class _Connector:
-    def __init__(self, upstream: _Upstream) -> None:
+    def __init__(self, upstream: _Upstream, uncertain_close: bool = False) -> None:
         self.upstream = upstream
         self.url = ""
+        self.uncertain_close = uncertain_close
 
     def __call__(self, url: str, **_: object) -> "_Connector":
         self.url = url
@@ -212,6 +242,8 @@ class _Connector:
         return self.upstream
 
     async def __aexit__(self, *_: object) -> None:
+        if self.uncertain_close:
+            raise OSError("disconnect unconfirmed")
         return None
 
 
@@ -263,3 +295,120 @@ def test_viewer_cast_rejects_missing_cookie() -> None:
         pass
 
     assert connector.url == ""
+
+
+def test_viewer_cast_closes_when_session_is_revoked_after_connect() -> None:
+    session_id = uuid4()
+    private_key = Ed25519PrivateKey.generate()
+    upstream = _Upstream()
+    connector = _Connector(upstream)
+    store = _ViewerStore(reject_after=2)
+    steel_client = _steel_client(lambda _: httpx.Response(500))
+    with (
+        TestClient(
+            _app(
+                private_key,
+                store,
+                steel_client,
+                connector,
+                viewer_authorization_interval=0.01,
+            )
+        ) as client,
+        client.websocket_connect(
+            f"/internal/v1/sessions/{session_id}/cast?pageId=page-a",
+            headers={
+                "Origin": "https://careeract.example",
+                "Cookie": f"{viewer_cookie_name(session_id)}={_token(private_key, session_id)}",
+            },
+        ) as socket,
+    ):
+        assert socket.receive_text() == "from-steel"
+        with pytest.raises(WebSocketDisconnect) as disconnected:
+            socket.receive_text()
+        assert disconnected.value.code == 1008
+    assert store.drained and store.released
+
+
+def test_viewer_cast_keeps_lease_when_upstream_disconnect_is_uncertain() -> None:
+    session_id = uuid4()
+    private_key = Ed25519PrivateKey.generate()
+    store = _ViewerStore(reject_after=2)
+    connector = _Connector(_Upstream(), uncertain_close=True)
+    with (
+        TestClient(
+            _app(private_key, store, _steel_client(lambda _: httpx.Response(500)), connector, 0.01)
+        ) as client,
+        client.websocket_connect(
+            f"/internal/v1/sessions/{session_id}/cast?pageId=page-a",
+            headers={
+                "Origin": "https://careeract.example",
+                "Cookie": f"{viewer_cookie_name(session_id)}={_token(private_key, session_id)}",
+            },
+        ) as socket,
+    ):
+        assert socket.receive_text() == "from-steel"
+        with pytest.raises(WebSocketDisconnect) as disconnected:
+            socket.receive_text()
+        assert disconnected.value.code == 1011
+    assert store.drained and not store.released
+
+
+def test_viewer_cast_closes_when_coordination_becomes_unavailable() -> None:
+    class UnavailableStore(_ViewerStore):
+        async def renew_viewer(self, command: BrowserCommand, lease_id: UUID) -> None:
+            if self.calls >= 2:
+                raise PoolTimeoutError("coordination unavailable")
+            await super().renew_viewer(command, lease_id)
+
+    session_id = uuid4()
+    private_key = Ed25519PrivateKey.generate()
+    store = UnavailableStore()
+    with (
+        TestClient(
+            _app(
+                private_key,
+                store,
+                _steel_client(lambda _: httpx.Response(500)),
+                _Connector(_Upstream()),
+                0.01,
+            )
+        ) as client,
+        client.websocket_connect(
+            f"/internal/v1/sessions/{session_id}/cast?pageId=page-a",
+            headers={
+                "Origin": "https://careeract.example",
+                "Cookie": f"{viewer_cookie_name(session_id)}={_token(private_key, session_id)}",
+            },
+        ) as socket,
+    ):
+        assert socket.receive_text() == "from-steel"
+        with pytest.raises(WebSocketDisconnect) as disconnected:
+            socket.receive_text()
+        assert disconnected.value.code == 1013
+
+
+def test_viewer_cast_rechecks_authorization_after_upstream_connect_before_accept() -> None:
+    session_id = uuid4()
+    private_key = Ed25519PrivateKey.generate()
+    store = _ViewerStore(reject_after=1)
+    with (
+        TestClient(
+            _app(
+                private_key,
+                store,
+                _steel_client(lambda _: httpx.Response(500)),
+                _Connector(_Upstream()),
+            )
+        ) as client,
+        pytest.raises(WebSocketDisconnect) as disconnected,
+        client.websocket_connect(
+            f"/internal/v1/sessions/{session_id}/cast?pageId=page-a",
+            headers={
+                "Origin": "https://careeract.example",
+                "Cookie": f"{viewer_cookie_name(session_id)}={_token(private_key, session_id)}",
+            },
+        ),
+    ):
+        pass
+    assert disconnected.value.code == 1008
+    assert store.drained and store.released

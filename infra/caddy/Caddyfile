@@ -7,7 +7,7 @@
 		X-Frame-Options "SAMEORIGIN"
 	}
 
-	@browser path /api/browser/sessions/*
+	@browser path_regexp browser ^/api/browser/sessions/[^/]+/(viewer|cast)$
 	handle @browser {
 		uri replace /api/browser /internal/v1
 		reverse_proxy browser:8001
