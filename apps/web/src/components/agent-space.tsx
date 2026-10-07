@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type FormEvent, type ReactNode } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Archive, ArchiveRestore, ArrowUp, BookOpen, ChevronDown, FileText, Folder, ListTree, MessageSquarePlus, MoreHorizontal, PanelLeft, PanelRight, Pin, PinOff, Plus, RotateCcw, Search, Square, SquarePen, Trash2, X } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowUp, BookOpen, ChevronDown, FileText, Folder, ListTree, MessageSquare, MessageSquarePlus, MoreHorizontal, PanelLeft, PanelRight, Pin, PinOff, Plus, RotateCcw, Search, Square, SquarePen, Trash2, X } from "lucide-react";
 import { useAui, useAuiState } from "@assistant-ui/react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -523,6 +523,7 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
       <button className={styles.navButton} onClick={() => start()}><SquarePen />新对话</button>
       <button className={styles.navButton} onClick={showCapabilities}><Search />搜索能力<kbd className="ml-auto text-[10px] text-muted-foreground">Ctrl / ⌘ K</kbd></button>
       <button className={cn(styles.navButton, pathname === "/background" && panelOpen && !contextOpen && styles.selected)} aria-current={pathname === "/background" && panelOpen && !contextOpen ? "page" : undefined} onClick={() => openRoute("/background")}><BookOpen />职业背景</button>
+      <button className={cn(styles.navButton, pathname === "/inbox" && panelOpen && !contextOpen && styles.selected)} aria-current={pathname === "/inbox" && panelOpen && !contextOpen ? "page" : undefined} onClick={() => openRoute("/inbox")}><MessageSquare />招聘沟通</button>
       <button className={cn(styles.navButton, pathname === "/library" && panelOpen && !contextOpen && styles.selected)} aria-current={pathname === "/library" && panelOpen && !contextOpen ? "page" : undefined} onClick={() => openRoute("/library")}><FileText />资料与成果</button>
       <div className={styles.navigationList} aria-busy={projectLoading || conversations.loading}>
       {selectingConversations && <div className={styles.selectionControls}>
@@ -587,6 +588,7 @@ export function AgentHome({ owner, children }: { owner: string; children?: React
       <TooltipIconButton className="size-9" side="right" tooltip="新对话" aria-label="新对话" onClick={() => start()}><SquarePen /></TooltipIconButton>
       <TooltipIconButton className="size-9" side="right" tooltip="搜索能力 · Ctrl/⌘ K" aria-label="搜索能力" onClick={showCapabilities}><Search /></TooltipIconButton>
       <TooltipIconButton className="size-9" side="right" tooltip="职业背景" aria-label="职业背景" onClick={() => openRoute("/background")}><BookOpen /></TooltipIconButton>
+      <TooltipIconButton className="size-9" side="right" tooltip="招聘沟通" aria-label="招聘沟通" onClick={() => openRoute("/inbox")}><MessageSquare /></TooltipIconButton>
       <TooltipIconButton className="size-9" side="right" tooltip="资料与成果" aria-label="资料与成果" onClick={() => openRoute("/library")}><FileText /></TooltipIconButton>
       <div className="mt-auto"><AccountButton compact onClick={openAccount} /></div>
     </aside>

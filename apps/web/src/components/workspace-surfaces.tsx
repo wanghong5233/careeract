@@ -56,7 +56,7 @@ const recordSurfaces: Record<RecordSection, RecordSurfaceDefinition> = {
   inbox: {
     description: "通知关联申请，回复依据事实。涉及时间承诺或未知问题，先带回给你决定。",
     filters: ["需要我处理", "全部沟通", "招聘通知", "主动触达"], placeholder: "招聘方、公司或通知内容", columns: ["公司 / 会话", "最近内容", "待确认事项"],
-    empty: "让分散的招聘沟通回到同一处", boundary: "招聘平台与通知源尚未连接，发送、附件和自动回复均未开放。", detail: "回复与依据", fields: ["关联岗位与申请", "原始消息及时间", "回复草稿与事实来源", "授权范围和发送结果"],
+    empty: "让分散的招聘沟通回到同一处", boundary: "招聘平台与通知源尚未连接；下方入口只会进入 Agent 讨论，不会创建真实定时任务或发送消息。", detail: "回复与依据", fields: ["关联岗位与申请", "原始消息及时间", "回复草稿与事实来源", "授权范围和发送结果"],
     prompt: "我会粘贴一条招聘消息，请帮我理解意图并起草回复。事实不足和时间承诺先问我，不要发送消息。", related: ["applications", "calendar", "automations"],
   },
   tasks: {
@@ -77,8 +77,9 @@ function RecordSurface({ section }: { section: RecordSection }) {
   const definition = recordSurfaces[section];
   const [filter, setFilter] = useState(definition.filters[0]);
   const [query, setQuery] = useState("");
+  const action = section === "inbox" ? <div className="flex flex-wrap gap-2"><AgentAction prompt="我想创建一次 BOSS 招聘沟通任务。请先确认岗位范围、职业约束、招聘方会话、个性化打招呼依据和需要我明确授权的动作；当前只讨论，不发送消息。">新建沟通任务</AgentAction><AgentAction variant="outline" prompt="我想设计一个 BOSS 招聘沟通定时委托。请先确认平台、岗位范围、频率、时区、数量上限、只读/草稿/发送模式、授权有效期和暂停撤销方式；当前只讨论，不创建真实后台任务。">创建定时委托</AgentAction></div> : <AgentAction prompt={definition.prompt}>交给 Agent</AgentAction>;
   return <>
-    <SurfaceHeader title={workspaceSections.find(item => item.key === section)!.label} description={definition.description} action={<AgentAction prompt={definition.prompt}>交给 Agent</AgentAction>} />
+    <SurfaceHeader title={workspaceSections.find(item => item.key === section)!.label} description={definition.description} action={action} />
     <Unavailable>{definition.boundary}</Unavailable>
     <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><ViewPicker options={definition.filters} value={filter} onChange={setFilter} label="记录视图" /><label className="flex h-9 max-w-full items-center gap-2 rounded-md border px-3"><Search className="size-3.5 shrink-0 text-muted-foreground" /><input aria-label={definition.placeholder} placeholder={definition.placeholder} value={query} onChange={event => setQuery(event.target.value)} className="min-w-0 w-48 bg-transparent text-xs outline-none" /></label></div>
     <div className="grid min-w-0 gap-6 2xl:grid-cols-[minmax(0,1fr)_16rem]">
