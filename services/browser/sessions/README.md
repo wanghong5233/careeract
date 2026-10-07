@@ -110,6 +110,16 @@ Automated reconciliation of uncertain operations is not implemented; never delet
 the reservation or infer completion from an absent inventory entry. Direct Steel
 clients bypass this guard and must remain unavailable to product users.
 
+## Viewer boundary
+
+`viewer.py` is the first half of the same-origin takeover boundary. It accepts only
+the configured Steel cast WebSocket endpoint, rewrites it to a CareerAct-relative
+path carrying the server-selected session ID, rejects other WebSocket/devtools URLs,
+limits the HTML size, and requires an exact Origin. It does not create a ticket,
+authorize a user, proxy a WebSocket, or expose a product route by itself. Those
+pieces must be wired through the API and Browser Service before the UI can show a
+login Viewer.
+
 This increment is verified with synthetic sessions only. The pinned implementation
 uses shared Profile paths and does not honor arbitrary `userDataDir` as an isolated
 directory. No Profile parameter, credentials, real login, or public Viewer is wired

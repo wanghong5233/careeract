@@ -262,6 +262,9 @@ patchright 仅有实验依据，未加入业务依赖。必须先复验实际驱
 阻塞隔离，只做可复验的最小修复或配置，不把 Pulse 的单例和 stealth 方案引入产品。
 不确定占用的自动对账/清理未实现，不能把一次 inventory 缺失当作旧请求已停止。
 
+同源 Viewer 的地址重写和 Origin 边界已形成可测试内部组件，但尚未装配 API 票据、
+Browser Service WebSocket 代理或 Web 页面；因此当前仍不会显示登录入口。
+
 ### Phase 1：只读 BOSS 适配器
 
 当前已落地只读解析的第一条增量：`services/browser/site_adapters/boss.py` 的
