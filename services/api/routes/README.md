@@ -12,6 +12,16 @@ CareerAct REST and AG-UI endpoints live here.
 - Routes translate transport types and call application use cases. They do not query
   databases or call infrastructure adapters directly.
 
+`GET/POST /api/v1/connections/boss` reads or records a user-owned BOSS connection
+request. POST requires a UUID `Idempotency-Key` and an empty JSON object. Same-key
+replay returns the original record, including a revoked record; a different key
+while a request is active returns 409. `DELETE /api/v1/connections/boss/{id}` requires
+JSON `{version}`, preserves the revoked record and is idempotent after revocation.
+Cross-user IDs return 404; stale versions or an attached browser session return 409.
+These use cases only persist `pending`/`revoked`, create no browser session and do
+not authorize platform access or messaging. Future browser-backed revocation must
+stop the trusted executor and verify disconnection before claiming completion.
+
 `GET /api/v1/profile` reads the authenticated user's singleton confirmed profile;
 an absent profile returns empty content and a null version. `PUT /api/v1/profile`
 requires content, explicit confirmation and the version returned by the last read.

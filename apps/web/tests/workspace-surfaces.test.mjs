@@ -21,6 +21,7 @@ const dependencies = {
   "@/components/workspace-projects": { WorkspaceProjects: Placeholder },
   "@/components/workspace-memories": { WorkspaceMemories: Placeholder },
   "@/components/workspace-materials": { WorkspaceMaterials: Placeholder },
+  "@/components/boss-connection-card": { BossConnectionCard: Placeholder },
   "@/lib/utils": { cn: (...values) => values.filter(Boolean).join(" ") },
 };
 
@@ -28,8 +29,7 @@ test("recruiting communication surface exposes four honest synthetic views and s
   const { CommunicationSurface } = loadSource("components/workspace-surfaces.tsx", dependencies);
   const view = CommunicationSurface();
   const content = text(view);
-  for (const label of ["连接 BOSS 直聘", "尚未连接", "待处理会话", "执行任务", "定时委托", "结果记录", "合成演示状态", "等待用户", "结果未知", "继续问 Agent"]) assert.match(content, new RegExp(label));
-  assert.match(content, /密码、短信验证码和验证码只应由你在安全浏览器中输入/);
-  assert.match(content, /不会连接 BOSS、创建后台任务或发送消息/);
+  for (const label of ["待处理会话", "执行任务", "定时委托", "结果记录", "合成演示状态", "等待用户", "结果未知", "继续问 Agent"]) assert.match(content, new RegExp(label));
+  assert.match(content, /不会连接 BOSS、读取真实岗位或发送消息/);
   assert.match(content, /普通聊天文本也不会自动成为外部发送授权/);
 });

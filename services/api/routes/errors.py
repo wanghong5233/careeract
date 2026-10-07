@@ -5,6 +5,11 @@ from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from services.api.domain.boss_connection import (
+    BossConnectionConflict,
+    BossConnectionNotFound,
+    BossConnectionUnavailable,
+)
 from services.api.domain.material import (
     MaterialConflict,
     MaterialInvalid,
@@ -44,6 +49,8 @@ async def profile_error(request: Request, error: Exception) -> JSONResponse:
             return await memory_error(request, error)
         if request.url.path.startswith("/api/v1/materials"):
             return await material_error(request, error)
+        if request.url.path.startswith("/api/v1/connections/boss"):
+            return await boss_connection_error(request, error)
         if request.url.path.startswith(("/agui", "/api/v1/")):
             return JSONResponse(
                 {
@@ -90,6 +97,38 @@ async def privacy_error(request: Request, error: Exception) -> JSONResponse:
             }
         },
         status_code=422,
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+async def boss_connection_error(request: Request, error: Exception) -> JSONResponse:
+    if isinstance(error, BossConnectionNotFound):
+        status, code, message = 404, "boss_connection_not_found", "找不到这条 BOSS 连接。"
+    elif isinstance(error, BossConnectionUnavailable):
+        status, code, message = (
+            503,
+            "boss_connection_unavailable",
+            "BOSS 连接服务暂不可用，请稍后读取并核对。",
+        )
+    elif isinstance(error, BossConnectionConflict):
+        status, code, message = (
+            409,
+            "boss_connection_conflict",
+            "连接已有更新或需要核对，请读取最新状态。",
+        )
+    elif isinstance(error, RequestValidationError):
+        status, code, message = 422, "invalid_boss_connection", "请检查连接请求格式。"
+    else:
+        raise error
+    return JSONResponse(
+        status_code=status,
+        content={
+            "error": {
+                "code": code,
+                "message": message,
+                "request_id": getattr(request.state, "request_id", str(uuid4())),
+            }
+        },
         headers={"Cache-Control": "no-store"},
     )
 

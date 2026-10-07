@@ -1,0 +1,93 @@
+from typing import Annotated, cast
+from uuid import UUID, uuid4
+
+from fastapi import APIRouter, Depends, Header, Request, Response
+from pydantic import BaseModel, ConfigDict
+
+from services.api.application.boss_connections import BossConnectionService
+from services.api.application.context import ActorContext
+from services.api.domain.boss_connection import BossConnection, BossConnectionStatus
+
+router = APIRouter(prefix="/api/v1/connections/boss", tags=["connections"])
+
+
+class StartConnectionBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class RevokeConnectionBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    version: UUID
+
+
+class ConnectionResponse(BaseModel):
+    id: UUID
+    version: UUID
+    platform: str
+    browser_session_id: UUID | None
+    status: BossConnectionStatus
+    last_observed_url: str | None
+    last_observed_state: str | None
+    created_at: str
+    updated_at: str
+
+
+def get_service(request: Request) -> BossConnectionService:
+    return cast(BossConnectionService, request.app.state.boss_connection_service)
+
+
+def get_actor(request: Request) -> ActorContext:
+    request_id = str(uuid4())
+    request.state.request_id = request_id
+    return ActorContext(user_id=request.state.user_id, request_id=request_id)
+
+
+def serialize(connection: BossConnection) -> ConnectionResponse:
+    return ConnectionResponse(
+        id=connection.id,
+        version=connection.version,
+        platform=connection.platform,
+        browser_session_id=connection.browser_session_id,
+        status=connection.status,
+        last_observed_url=connection.last_observed_url,
+        last_observed_state=connection.last_observed_state,
+        created_at=connection.created_at.isoformat(),
+        updated_at=connection.updated_at.isoformat(),
+    )
+
+
+@router.get("", response_model=ConnectionResponse | None)
+async def read_connection(
+    response: Response,
+    service: Annotated[BossConnectionService, Depends(get_service)],
+    actor: Annotated[ActorContext, Depends(get_actor)],
+) -> ConnectionResponse | None:
+    response.headers["Cache-Control"] = "no-store"
+    connection = await service.read(actor)
+    return serialize(connection) if connection is not None else None
+
+
+@router.post("", response_model=ConnectionResponse, status_code=201)
+async def start_connection(
+    body: StartConnectionBody,
+    response: Response,
+    service: Annotated[BossConnectionService, Depends(get_service)],
+    actor: Annotated[ActorContext, Depends(get_actor)],
+    idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
+) -> ConnectionResponse:
+    response.headers["Cache-Control"] = "no-store"
+    connection = await service.start(actor, request_key=idempotency_key)
+    return serialize(connection)
+
+
+@router.delete("/{connection_id}", response_model=ConnectionResponse)
+async def revoke_connection(
+    connection_id: UUID,
+    body: RevokeConnectionBody,
+    response: Response,
+    service: Annotated[BossConnectionService, Depends(get_service)],
+    actor: Annotated[ActorContext, Depends(get_actor)],
+) -> ConnectionResponse:
+    response.headers["Cache-Control"] = "no-store"
+    return serialize(await service.revoke(actor, connection_id, expected_version=body.version))

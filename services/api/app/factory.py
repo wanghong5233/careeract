@@ -9,6 +9,7 @@ from fastapi.exceptions import RequestValidationError
 
 from services.api.app.settings import Settings
 from services.api.application.agent_context import AgentContextService
+from services.api.application.boss_connections import BossConnectionService
 from services.api.application.conversation_branches import ConversationBranchService
 from services.api.application.materials import MaterialService
 from services.api.application.memories import MemoryService
@@ -16,6 +17,11 @@ from services.api.application.profiles import ProfileService
 from services.api.application.projects import ProjectService
 from services.api.application.side_chats import SideChatService
 from services.api.application.work_sessions import AgentWorkSessionService
+from services.api.domain.boss_connection import (
+    BossConnectionConflict,
+    BossConnectionNotFound,
+    BossConnectionUnavailable,
+)
 from services.api.domain.material import (
     MaterialConflict,
     MaterialInvalid,
@@ -55,6 +61,7 @@ from services.api.infrastructure.agent_tools import (
     persist_run_manifest,
 )
 from services.api.infrastructure.authentication import JwtAuthenticationMiddleware
+from services.api.infrastructure.boss_connections import PostgresBossConnectionRepository
 from services.api.infrastructure.conversation_branches import AgnoConversationBranches
 from services.api.infrastructure.conversation_deletion import AgnoConversationDeletion
 from services.api.infrastructure.conversation_titles import AgnoConversationTitleGenerator
@@ -67,7 +74,9 @@ from services.api.infrastructure.projects import PostgresProjectRepository
 from services.api.infrastructure.side_chats import AgnoSideChatRuntime
 from services.api.infrastructure.work_sessions import PostgresAgentWorkSessionRepository
 from services.api.routes.agent_sessions import router as agent_session_router
+from services.api.routes.boss_connections import router as boss_connection_router
 from services.api.routes.errors import (
+    boss_connection_error,
     material_error,
     memory_error,
     privacy_error,
@@ -129,6 +138,9 @@ def create_app(
 
     app.router.lifespan_context = lifespan
     app.state.profile_service = ProfileService(PostgresProfileRepository(engine))
+    app.state.boss_connection_service = BossConnectionService(
+        PostgresBossConnectionRepository(engine)
+    )
     project_repository = PostgresProjectRepository(engine)
     app.state.project_service = ProjectService(project_repository)
     app.state.memory_service = MemoryService(PostgresMemoryRepository(engine))
@@ -195,6 +207,7 @@ def create_app(
         protected_path_prefixes=PROTECTED_PATH_PREFIXES,
     )
     app.include_router(system_router)
+    app.include_router(boss_connection_router)
     app.include_router(profile_router)
     app.include_router(project_router)
     app.include_router(agent_session_router)
@@ -221,4 +234,7 @@ def create_app(
     app.add_exception_handler(MaterialUnavailable, material_error)
     app.add_exception_handler(RequestValidationError, profile_error)
     app.add_exception_handler(RestrictedContent, privacy_error)
+    app.add_exception_handler(BossConnectionNotFound, boss_connection_error)
+    app.add_exception_handler(BossConnectionConflict, boss_connection_error)
+    app.add_exception_handler(BossConnectionUnavailable, boss_connection_error)
     return app

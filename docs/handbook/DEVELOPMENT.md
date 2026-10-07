@@ -187,6 +187,20 @@ reload 限定 `services/`，不因隔离检查快照或前端修改重启 API。
 Web 始终用单一 `next dev`；环境变量、依赖或数据库迁移后的必要重启与普通 UI 热更新分开处理。
 这不提供开机自启或 Agent Run 跨进程续跑。
 
+## BOSS 连接请求验收
+
+BOSS 连接请求的本地验收（不访问 BOSS、不创建浏览器会话）：
+
+```powershell
+$env:RUN_BOSS_CONNECTION_POSTGRES_TESTS = '1'
+try { uv run pytest tests/api/test_boss_connections.py -q } finally { Remove-Item Env:RUN_BOSS_CONNECTION_POSTGRES_TESTS }
+uv run python scripts/smoke_boss_connection.py --base-url http://localhost:43110
+```
+
+首项使用隔离 Docker PostgreSQL；次项使用当前开发 Web/API 和真实认证链路，创建两个虚构账号、
+记录/撤销连接请求后退出，合成账号保留在本地开发库。退避后使用 `dev:status` 的实际 Web 地址。
+连接请求的范围和后续登录门槛见[招聘沟通专题](../topics/recruiting-communication/README.md#phase-0b-产品连接请求前置增量)。
+
 ## 职业档案验收
 
 应用 Alembic 最新迁移后，登录 CareerAct Agent 即可手动维护并确认档案。产品接口是
