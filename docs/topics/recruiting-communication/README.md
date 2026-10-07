@@ -46,6 +46,15 @@
 
 2026-10-07 的只读当前环境探测打开 `https://www.zhipin.com/web/geek/jobs` 后先显示“加载中，请稍候”，随后浏览器标题和 URL 变为 `about:blank`。这与历史反爬现象相符，但当前 Web 只是 Codex 的受控浏览器，不能单独证明 patchright、真实 Chrome 或用户账号的结果；它把 Phase 0 标记为“需要专用驱动实验”，没有进行登录或写操作。当前 `services/browser` 仍依赖标准 `playwright`，尚未引入 patchright。
 
+同日使用临时 ASCII 路径的 `patchright 1.63.0` 环境和本机 Chrome 做了同目标、同等待时间的只读对照，没有加载用户 Profile，也没有登录或写操作：
+
+| 驱动 | 10 秒后的结果 | 结论 |
+| --- | --- | --- |
+| 标准 Playwright | URL 变为 `about:blank`，标题为空 | 不能作为 BOSS 当前执行驱动 |
+| patchright | 页面保留在 BOSS，URL 带 `_security_check`，能读取公开岗位页文本 | 驱动层可继续实验，但仍处于风控校验，不能推断已登录或可发送 |
+
+这组结果只证明当前 Chrome/驱动组合的差异，不证明 BOSS 登录、会话持久化或写操作可用。下一门槛是用户在可见隔离 Profile 中人工登录后重复只读检查，并记录登录重定向、验证码/风控、SPA 稳定等待和 Profile 生命周期；在此之前不把 patchright 加入生产依赖，也不开放 BOSS 写入口。
+
 ## 3. 架构判断
 
 ### 3.1 Agno、Runtime、Harness 的分工
@@ -95,7 +104,7 @@ PostgreSQL 是业务真相，建议首个增量引入以下对象；具体字段
 
 ## 5. 实施阶段和验收门槛
 
-### Phase 0：可行性 canary（先做）
+### Phase 0：可行性 canary（部分通过，先完成人工登录复验）
 
 - 在隔离合成 Profile 中验证 patchright/当前浏览器版本能打开 BOSS 登录、搜索、消息和职位详情页面。
 - 记录 `about:blank`、登录重定向、风控页、验证码、SPA 稳定时间、页面结构和浏览器内存。

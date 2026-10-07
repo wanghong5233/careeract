@@ -39,7 +39,7 @@ Runtime 已接入独立服务端对话 ID、Agno Session/Run、多轮历史、�
 | 机会发现 | 主 Agent 已接入受限公开网页检索，实际返回来源链接；机会发现与托管需求保留 | 搜索摘要不是核验全文；网页读取、招聘渠道接入与持续巡检尚未实现 |
 | 模型网关 | API 受限推理 Key、管理凭据分离、范围/预算/限流/停用验证通过 | 产品用户独立额度、BYOK 管理和加密存储；服务额度不等于用户权限 |
 | 持久任务 | Dev Server 恢复/取消/超时通过；正式 Temporal + PostgreSQL + Worker 健康 Workflow 通过 | Worker 只有健康 Workflow，无解析/求职 Activity、业务任务状态回写和恢复 |
-| 浏览器 | Steel/Playwright 虚构表单读写、持久租约、签名控制、停止/断连规则通过 | 产品授权记录、生产连接隔离、同源 Viewer、browser-use 业务执行及站点适配；控制入口默认关闭 |
+| 浏览器 | Steel/Playwright 虚构表单读写、持久租约、签名控制、停止/断连规则通过；2026-10-07 公开 BOSS 只读对照显示标准 Playwright 跳 `about:blank`，临时 patchright 可停留页面但进入 `_security_check` | 产品授权记录、生产连接隔离、同源 Viewer、browser-use 业务执行及站点适配；需在可见隔离 Profile 完成人工登录/风控复验；控制入口默认关闭 |
 | 材料 | 合成纯文本领域存储、0008 迁移、同源 BFF、Agent 草稿/修改、Diff、接受/拒绝、版本历史与纯文本复制已接入；旧提议不能覆盖新版本。Docling 历史合成解析验证保留 | 默认关闭的合成实验；P1、真实资料、上传/对象存储、PDF/DOCX 导出、解析 Activity 与实投版本关联待完成 |
 | 部署运营 | 四应用镜像与生产 Compose 拓扑已在本地隔离验证；开发基础服务仅绑定回环 | 公网 HTTPS、域名/备案、云资源峰值、备份恢复、云 IP 风控与长期稳定性未完成 |
 
@@ -107,6 +107,12 @@ P1–P3 生产保护作为同时扩展其他模块的指令。后续业务仍须
 - 2026-10-07 业务顺序调整：前端工作面收尾完成，下一阶段由合成简历定向修改调整为
   [BOSS 招聘沟通](../topics/recruiting-communication/README.md)最小闭环。PRD 范围不变，
   先实现岗位确认、匹配判断、个性化打招呼、短时授权、发送后核验与结果报告；未读回复、简历卡和长期托管后置。
+
+- 2026-10-07 BOSS Phase 0 只读驱动对照：同一公开岗位 URL、同一本机 Chrome 和 10 秒等待下，
+  标准 Playwright 跳转 `about:blank`；临时 `patchright 1.63.0` 保留 BOSS 页面但进入
+  `_security_check`，可读取公开文本。没有登录、真实 Profile、简历或写操作；结果只支持继续
+  人工登录/风控复验，不支持引入生产依赖或开放 BOSS 控制入口。完整记录见
+  [BOSS 招聘沟通专题](../topics/recruiting-communication/README.md)。
 
 - 2026-10-06 对话侧栏追加：移除对话三点菜单，复用现有 TooltipIconButton、Dialog、
   Collapsible 和版本条件接口，接入悬浮置顶/归档、双击/F2 就地改名、选择入口、Ctrl/⌘ 加选、
