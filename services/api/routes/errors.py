@@ -5,6 +5,10 @@ from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from services.api.application.ports.browser_viewer import (
+    BrowserViewerTicketRejected,
+    BrowserViewerTicketUnavailable,
+)
 from services.api.domain.boss_connection import (
     BossConnectionConflict,
     BossConnectionNotFound,
@@ -118,6 +122,30 @@ async def boss_connection_error(request: Request, error: Exception) -> JSONRespo
         )
     elif isinstance(error, RequestValidationError):
         status, code, message = 422, "invalid_boss_connection", "请检查连接请求格式。"
+    else:
+        raise error
+    return JSONResponse(
+        status_code=status,
+        content={
+            "error": {
+                "code": code,
+                "message": message,
+                "request_id": getattr(request.state, "request_id", str(uuid4())),
+            }
+        },
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+async def browser_viewer_error(request: Request, error: Exception) -> JSONResponse:
+    if isinstance(error, BrowserViewerTicketRejected):
+        status, code, message = 403, "browser_viewer_rejected", "浏览器会话不可用于接管。"
+    elif isinstance(error, BrowserViewerTicketUnavailable):
+        status, code, message = (
+            503,
+            "browser_viewer_unavailable",
+            "浏览器接管服务暂不可用，请稍后读取并核对。",
+        )
     else:
         raise error
     return JSONResponse(

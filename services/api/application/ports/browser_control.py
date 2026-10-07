@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-BrowserAction = Literal["register", "revoke", "acquire", "renew", "stop", "check"]
+BrowserAction = Literal["register", "revoke", "acquire", "renew", "stop", "check", "viewer"]
 
 
 @dataclass(frozen=True)

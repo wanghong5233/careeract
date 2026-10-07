@@ -37,7 +37,7 @@ class BrowserCommandSigner:
             not context.user_id.strip()
             or not context.owner_id.strip()
             or context.authorization_expires_at.utcoffset() is None
-            or (action in ("register", "revoke", "acquire")) != (lease_id is None)
+            or (action in ("register", "revoke", "acquire", "viewer")) != (lease_id is None)
         ):
             raise BrowserControlRejected("Invalid browser control context")
         issued_at = int(datetime.now(UTC).timestamp())
@@ -76,6 +76,8 @@ class BrowserControlClient:
     async def send(
         self, context: BrowserControlContext, action: BrowserAction, lease_id: UUID | None = None
     ) -> BrowserLease | None:
+        if action == "viewer":
+            raise BrowserControlRejected("Viewer commands require a document ticket")
         token = self.signer.sign(context, action, lease_id)
         prefix = "" if action in ("register", "revoke") else "lease/"
         try:

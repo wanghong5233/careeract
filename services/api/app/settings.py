@@ -31,6 +31,7 @@ class Settings(DatabaseSettings):
     auth_audience: str
     auth_jwt_algorithms: tuple[str, ...] = ("EdDSA",)
     auth_jwks_timeout_seconds: PositiveFloat = 5.0
+    browser_command_private_key_file: Path | None = None
     litellm_base_url: AnyHttpUrl = AnyHttpUrl("http://localhost:4000")
     litellm_api_key: SecretStr
     litellm_model: str = "careeract-default"

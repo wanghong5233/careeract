@@ -4,6 +4,8 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, suppress
 from typing import Protocol
 
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 
@@ -13,6 +15,10 @@ from services.api.application.boss_connections import BossConnectionService
 from services.api.application.conversation_branches import ConversationBranchService
 from services.api.application.materials import MaterialService
 from services.api.application.memories import MemoryService
+from services.api.application.ports.browser_viewer import (
+    BrowserViewerTicketRejected,
+    BrowserViewerTicketUnavailable,
+)
 from services.api.application.profiles import ProfileService
 from services.api.application.projects import ProjectService
 from services.api.application.side_chats import SideChatService
@@ -62,6 +68,8 @@ from services.api.infrastructure.agent_tools import (
 )
 from services.api.infrastructure.authentication import JwtAuthenticationMiddleware
 from services.api.infrastructure.boss_connections import PostgresBossConnectionRepository
+from services.api.infrastructure.browser_control import BrowserCommandSigner
+from services.api.infrastructure.browser_viewer import PostgresBrowserViewerTicketIssuer
 from services.api.infrastructure.conversation_branches import AgnoConversationBranches
 from services.api.infrastructure.conversation_deletion import AgnoConversationDeletion
 from services.api.infrastructure.conversation_titles import AgnoConversationTitleGenerator
@@ -75,8 +83,10 @@ from services.api.infrastructure.side_chats import AgnoSideChatRuntime
 from services.api.infrastructure.work_sessions import PostgresAgentWorkSessionRepository
 from services.api.routes.agent_sessions import router as agent_session_router
 from services.api.routes.boss_connections import router as boss_connection_router
+from services.api.routes.browser_viewer import router as browser_viewer_router
 from services.api.routes.errors import (
     boss_connection_error,
+    browser_viewer_error,
     material_error,
     memory_error,
     privacy_error,
@@ -141,6 +151,16 @@ def create_app(
     app.state.boss_connection_service = BossConnectionService(
         PostgresBossConnectionRepository(engine)
     )
+    app.state.browser_viewer_ticket_issuer = None
+    if settings.browser_command_private_key_file is not None:
+        private_key = serialization.load_pem_private_key(
+            settings.browser_command_private_key_file.read_bytes(), password=None
+        )
+        if not isinstance(private_key, Ed25519PrivateKey):
+            raise RuntimeError("Browser command private key must be Ed25519")
+        app.state.browser_viewer_ticket_issuer = PostgresBrowserViewerTicketIssuer(
+            engine, BrowserCommandSigner(private_key)
+        )
     project_repository = PostgresProjectRepository(engine)
     app.state.project_service = ProjectService(project_repository)
     app.state.memory_service = MemoryService(PostgresMemoryRepository(engine))
@@ -208,6 +228,7 @@ def create_app(
     )
     app.include_router(system_router)
     app.include_router(boss_connection_router)
+    app.include_router(browser_viewer_router)
     app.include_router(profile_router)
     app.include_router(project_router)
     app.include_router(agent_session_router)
@@ -237,4 +258,6 @@ def create_app(
     app.add_exception_handler(BossConnectionNotFound, boss_connection_error)
     app.add_exception_handler(BossConnectionConflict, boss_connection_error)
     app.add_exception_handler(BossConnectionUnavailable, boss_connection_error)
+    app.add_exception_handler(BrowserViewerTicketRejected, browser_viewer_error)
+    app.add_exception_handler(BrowserViewerTicketUnavailable, browser_viewer_error)
     return app
