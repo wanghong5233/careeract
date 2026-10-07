@@ -1,12 +1,17 @@
-from collections.abc import AsyncIterator
+import asyncio
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
+from typing import Any
 from uuid import UUID
 
 import httpx
-from fastapi import FastAPI, Header, HTTPException, Query, Response
+from fastapi import FastAPI, Header, HTTPException, Query, Response, WebSocket
 from pydantic import AnyHttpUrl
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.exc import TimeoutError as PoolTimeoutError
+from starlette.websockets import WebSocketDisconnect, WebSocketState
+from websockets.asyncio.client import connect
+from websockets.exceptions import ConnectionClosed
 
 from services.browser.sessions.authentication import (
     Action,
@@ -20,10 +25,43 @@ from services.browser.sessions.lease import LeaseConflict, LeaseNotFound, Sessio
 from services.browser.sessions.postgres import PostgresLeaseStore
 from services.browser.sessions.viewer import (
     ViewerRejected,
+    cast_websocket_url,
     fetch_viewer_document,
     validate_origin,
+    validate_page_id,
     viewer_context,
+    viewer_cookie_name,
 )
+
+
+async def _relay_websocket(websocket: WebSocket, upstream: Any) -> None:
+    async def from_client() -> None:
+        while True:
+            message = await websocket.receive()
+            if message["type"] == "websocket.disconnect":
+                return
+            if message.get("text") is not None:
+                await upstream.send(message["text"])
+            elif message.get("bytes") is not None:
+                await upstream.send(message["bytes"])
+
+    async def from_upstream() -> None:
+        async for message in upstream:
+            if isinstance(message, bytes):
+                await websocket.send_bytes(message)
+            else:
+                await websocket.send_text(message)
+
+    client_task = asyncio.create_task(from_client())
+    upstream_task = asyncio.create_task(from_upstream())
+    done, pending = await asyncio.wait(
+        (client_task, upstream_task), return_when=asyncio.FIRST_COMPLETED
+    )
+    for task in pending:
+        task.cancel()
+    await asyncio.gather(*pending, return_exceptions=True)
+    for task in done:
+        task.result()
 
 
 def create_app(
@@ -32,6 +70,7 @@ def create_app(
     store: PostgresLeaseStore | None = None,
     steel_client: httpx.AsyncClient | None = None,
     viewer_public_origin: AnyHttpUrl | None = None,
+    steel_ws_connect: Callable[..., Any] | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -123,7 +162,7 @@ def create_app(
             raise HTTPException(502, "Viewer document unavailable") from None
         except (DBAPIError, PoolTimeoutError):
             raise HTTPException(503, "Browser coordination unavailable") from None
-        return Response(
+        response = Response(
             content=html,
             media_type="text/html",
             headers={
@@ -131,5 +170,66 @@ def create_app(
                 "Content-Security-Policy": "frame-ancestors 'self'",
             },
         )
+        _, _, viewer_token = authorization.partition(" ")
+        response.set_cookie(
+            key=viewer_cookie_name(session_id),
+            value=viewer_token,
+            max_age=60,
+            httponly=True,
+            samesite="strict",
+            secure=context.origin.startswith("https://"),
+            path="/",
+        )
+        return response
+
+    @app.websocket("/internal/v1/sessions/{session_id}/cast")
+    async def viewer_cast(websocket: WebSocket, session_id: UUID) -> None:
+        if (
+            verifier is None
+            or store is None
+            or steel_client is None
+            or viewer_public_origin is None
+        ):
+            await websocket.close(code=1013)
+            return
+        context = viewer_context(
+            session_id=session_id,
+            origin=viewer_public_origin,
+            steel_origin=AnyHttpUrl(str(steel_client.base_url)),
+        )
+        try:
+            validate_origin(context, websocket.headers.get("origin"))
+            token = websocket.cookies.get(viewer_cookie_name(session_id))
+            if not token:
+                raise ViewerRejected("Viewer command required")
+            command = verifier.verify(token, session_id, "viewer")
+            await store.authorize_viewer(command)
+            page_id = validate_page_id(websocket.query_params.get("pageId", ""))
+        except (CommandRejected, ViewerRejected, LeaseNotFound):
+            await websocket.close(code=1008)
+            return
+        except (DBAPIError, PoolTimeoutError):
+            await websocket.close(code=1013)
+            return
+
+        upstream_url = cast_websocket_url(context, page_id)
+        connector = steel_ws_connect or connect
+        try:
+            async with connector(
+                upstream_url,
+                open_timeout=10,
+                close_timeout=5,
+                max_size=2 * 1024 * 1024,
+            ) as upstream:
+                await websocket.accept()
+                await _relay_websocket(websocket, upstream)
+        except (ConnectionClosed, WebSocketDisconnect, OSError, TimeoutError):
+            if websocket.application_state == WebSocketState.CONNECTED:
+                await websocket.close(code=1011)
+        except asyncio.CancelledError:
+            raise
+        except RuntimeError:
+            if websocket.application_state == WebSocketState.CONNECTED:
+                await websocket.close(code=1011)
 
     return app

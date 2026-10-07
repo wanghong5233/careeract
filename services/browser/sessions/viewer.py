@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from urllib.parse import parse_qsl, urlencode, urlsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import UUID
 
 import httpx
@@ -8,6 +8,7 @@ from pydantic import AnyHttpUrl
 MAX_VIEWER_HTML_BYTES = 512 * 1024
 MAX_VIEWER_PAGE_ID_BYTES = 256
 CAST_PATH = "/v1/sessions/cast"
+VIEWER_COOKIE_PREFIX = "careeract_viewer_"
 
 
 class ViewerRejected(Exception):
@@ -32,6 +33,22 @@ def _validate_page_id(page_id: str) -> str:
     if any(ord(character) < 0x20 for character in page_id):
         raise ViewerRejected("Viewer page is invalid")
     return page_id
+
+
+def validate_page_id(page_id: str) -> str:
+    return _validate_page_id(page_id)
+
+
+def viewer_cookie_name(session_id: UUID) -> str:
+    return VIEWER_COOKIE_PREFIX + session_id.hex
+
+
+def cast_websocket_url(context: ViewerContext, page_id: str) -> str:
+    page_id = _validate_page_id(page_id)
+    steel = urlsplit(context.steel_origin)
+    query = urlencode({"pageId": page_id, "sessionId": str(context.session_id)})
+    scheme = "wss" if steel.scheme == "https" else "ws"
+    return urlunsplit((scheme, steel.netloc, CAST_PATH, query, ""))
 
 
 async def fetch_viewer_document(

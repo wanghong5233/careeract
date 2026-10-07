@@ -262,11 +262,11 @@ patchright 仅有实验依据，未加入业务依赖。必须先复验实际驱
 阻塞隔离，只做可复验的最小修复或配置，不把 Pulse 的单例和 stealth 方案引入产品。
 不确定占用的自动对账/清理未实现，不能把一次 inventory 缺失当作旧请求已停止。
 
-同源 Viewer 的地址重写、Origin 边界、Browser Service 内部 HTML 路由和受保护 API 票据签发已形成可测试增量；
+同源 Viewer 的地址重写、Origin 边界、Browser Service 内部 HTML/WebSocket 路由和受保护 API 票据签发已形成可测试增量；
 路由只接受短时 `viewer` 签名命令，重查已注册会话并拒绝重定向/非 HTML 响应，返回的内容
 不包含 Steel 内部地址；API 票据还要求 `browser.sessions` 中存在同用户、未撤销的注册记录，
-不把 BOSS 连接记录当成授权。尚未装配 WebSocket 代理、产品会话创建或 Web 页面，因此当前仍
-不会显示登录入口。
+不把 BOSS 连接记录当成授权；cast 代理只在内部路径转发文本/二进制帧，尚未连接真实 Steel。
+尚未装配产品会话创建或 Web 页面，因此当前仍不会显示登录入口。
 
 ### Phase 1：只读 BOSS 适配器
 

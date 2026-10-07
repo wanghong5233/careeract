@@ -122,8 +122,9 @@ route that accepts a short-lived signed `viewer` command, rechecks the registere
 session, fetches Steel debug HTML without redirects, and returns only rewritten
 HTML with `no-store` and same-origin frame policy. It is still not a product route:
 the API can now issue the matching 60-second command only for an existing, unrevoked
-registered session, while the WebSocket proxy, same-origin forwarding and UI login
-entry remain unimplemented.
+registered session, and the internal cast route proxies text/binary WebSocket frames
+to Steel after rechecking that cookie. Same-origin forwarding and the UI login entry
+remain unimplemented.
 
 This increment is verified with synthetic sessions only. The pinned implementation
 uses shared Profile paths and does not honor arbitrary `userDataDir` as an isolated

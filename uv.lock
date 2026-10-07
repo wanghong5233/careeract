@@ -1015,6 +1015,7 @@ dependencies = [
     { name = "pyjwt", extra = ["crypto"] },
     { name = "sqlalchemy", extra = ["asyncio"] },
     { name = "uvicorn", extra = ["standard"] },
+    { name = "websockets" },
 ]
 
 [package.metadata]
@@ -1028,6 +1029,7 @@ requires-dist = [
     { name = "pyjwt", extras = ["crypto"] },
     { name = "sqlalchemy", extras = ["asyncio"] },
     { name = "uvicorn", extras = ["standard"] },
+    { name = "websockets" },
 ]
 
 [[package]]

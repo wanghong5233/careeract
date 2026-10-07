@@ -13,6 +13,7 @@ dependencies = [
     "pyjwt[crypto]",
     "sqlalchemy[asyncio]",
     "uvicorn[standard]",
+    "websockets",
 ]
 
 [tool.uv]

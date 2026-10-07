@@ -1,14 +1,17 @@
+import asyncio
 from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import cast
+from typing import Any, cast
 from uuid import UUID, uuid4
 
 import httpx
 import jwt
+import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import AnyHttpUrl
+from starlette.websockets import WebSocketDisconnect
 
 from services.browser.app.factory import create_app
 from services.browser.sessions.authentication import (
@@ -17,6 +20,7 @@ from services.browser.sessions.authentication import (
     CommandVerifier,
 )
 from services.browser.sessions.postgres import PostgresLeaseStore
+from services.browser.sessions.viewer import viewer_cookie_name
 
 
 class _Engine:
@@ -71,12 +75,14 @@ def _app(
     private_key: Ed25519PrivateKey,
     store: _ViewerStore,
     client: httpx.AsyncClient,
+    connector: Callable[..., Any] | None = None,
 ) -> FastAPI:
     return create_app(
         verifier=CommandVerifier(private_key.public_key()),
         store=cast(PostgresLeaseStore, store),
         steel_client=client,
         viewer_public_origin=AnyHttpUrl("https://careeract.example"),
+        steel_ws_connect=connector,
     )
 
 
@@ -112,6 +118,8 @@ def test_viewer_route_rewrites_steel_html_and_sets_browser_headers() -> None:
     assert "steel:3000" not in response.text
     assert response.headers["cache-control"] == "no-store"
     assert response.headers["content-security-policy"] == "frame-ancestors 'self'"
+    assert viewer_cookie_name(session_id) in response.headers["set-cookie"]
+    assert "HttpOnly" in response.headers["set-cookie"]
     assert len(store.commands) == 1
 
 
@@ -168,3 +176,90 @@ def test_viewer_route_hides_invalid_steel_document() -> None:
 
     assert response.status_code == 502
     assert "internal.example" not in response.text
+
+
+class _Upstream:
+    def __init__(self) -> None:
+        self.sent: list[str | bytes] = []
+        self._first = True
+        self._stop = asyncio.Event()
+
+    async def send(self, message: str | bytes) -> None:
+        self.sent.append(message)
+        self._stop.set()
+
+    def __aiter__(self) -> "_Upstream":
+        return self
+
+    async def __anext__(self) -> str:
+        if self._first:
+            self._first = False
+            return "from-steel"
+        await self._stop.wait()
+        raise StopAsyncIteration
+
+
+class _Connector:
+    def __init__(self, upstream: _Upstream) -> None:
+        self.upstream = upstream
+        self.url = ""
+
+    def __call__(self, url: str, **_: object) -> "_Connector":
+        self.url = url
+        return self
+
+    async def __aenter__(self) -> _Upstream:
+        return self.upstream
+
+    async def __aexit__(self, *_: object) -> None:
+        return None
+
+
+def test_viewer_cast_uses_cookie_ticket_and_rewrites_upstream_session() -> None:
+    session_id = uuid4()
+    private_key = Ed25519PrivateKey.generate()
+    upstream = _Upstream()
+    connector = _Connector(upstream)
+    steel_client = _steel_client(
+        lambda _: httpx.Response(
+            200,
+            headers={"content-type": "text/html"},
+            text='<script>const ws="ws://steel:3000/v1/sessions/cast"</script>',
+        )
+    )
+    with (
+        TestClient(_app(private_key, _ViewerStore(), steel_client, connector)) as client,
+        client.websocket_connect(
+            f"/internal/v1/sessions/{session_id}/cast?pageId=page-a",
+            headers={
+                "Origin": "https://careeract.example",
+                "Cookie": f"{viewer_cookie_name(session_id)}={_token(private_key, session_id)}",
+            },
+        ) as socket,
+    ):
+        assert socket.receive_text() == "from-steel"
+        socket.send_text("from-viewer")
+
+    assert connector.url.endswith(f"/v1/sessions/cast?pageId=page-a&sessionId={session_id}")
+    assert upstream.sent == ["from-viewer"]
+
+
+def test_viewer_cast_rejects_missing_cookie() -> None:
+    session_id = uuid4()
+    private_key = Ed25519PrivateKey.generate()
+    connector = _Connector(_Upstream())
+    with (
+        TestClient(
+            _app(
+                private_key, _ViewerStore(), _steel_client(lambda _: httpx.Response(500)), connector
+            )
+        ) as client,
+        pytest.raises(WebSocketDisconnect),
+        client.websocket_connect(
+            f"/internal/v1/sessions/{session_id}/cast?pageId=page-a",
+            headers={"Origin": "https://careeract.example"},
+        ),
+    ):
+        pass
+
+    assert connector.url == ""
