@@ -1008,6 +1008,7 @@ source = { virtual = "services/browser" }
 dependencies = [
     { name = "asyncpg" },
     { name = "browser-use" },
+    { name = "cryptography" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "playwright" },
@@ -1022,6 +1023,7 @@ dependencies = [
 requires-dist = [
     { name = "asyncpg" },
     { name = "browser-use", editable = "vendor/browser-use" },
+    { name = "cryptography" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "playwright" },

@@ -14,7 +14,8 @@ BOSS 直聘的合适岗位筛选与招聘方主动沟通最小闭环，复用已
 固定 Steel 实例的两个顺序会话 canary 已确认新会话不继承合成网页存储；
 同源 Viewer 的 HTML 地址重写、会话绑定和 Origin 校验组件已通过专项测试；
 Browser Service 内部 Viewer HTML 路由和受保护的 API 短时票据签发已通过合成测试；票据只有在
-已注册且未撤销的 `browser.sessions` 记录存在时才可签发。尚未证明登录态持久化、Profile 目录隔离/清理，
+已注册且未撤销的 `browser.sessions` 记录存在时才可签发。内部按用户/站点加密的 Cookie/localStorage
+快照已通过合成保存、重建恢复和撤销验证；真实登录态、Profile 目录隔离/清理尚未验证，
 内部 WebSocket cast 代理尚未连接真实 Steel；也没有产品会话创建或同源人工登录入口，接下来补齐这些边界。
 
 正式 Agent 入口为 `/`，旧 `/workspace` 路径兼容跳转。左侧组织项目与独立对话，中间持续协作，
@@ -48,7 +49,7 @@ Runtime 已接入独立服务端对话 ID、Agno Session/Run、多轮历史、�
 | 机会发现 | 主 Agent 已接入受限公开网页检索，实际返回来源链接；机会发现与托管需求保留 | 搜索摘要不是核验全文；网页读取、招聘渠道接入与持续巡检尚未实现 |
 | 模型网关 | API 受限推理 Key、管理凭据分离、范围/预算/限流/停用验证通过 | 产品用户独立额度、BYOK 管理和加密存储；服务额度不等于用户权限 |
 | 持久任务 | Dev Server 恢复/取消/超时通过；正式 Temporal + PostgreSQL + Worker 健康 Workflow 通过 | Worker 只有健康 Workflow，无解析/求职 Activity、业务任务状态回写和恢复 |
-| 浏览器 | Steel/Playwright 虚构表单读写、持久租约、签名控制、停止/断连规则通过；BOSS 只读合成解析与产品连接请求持久化、幂等/归属/撤销通过；内部 Steel 生命周期和持久占用、受签名命令保护的 Viewer HTML/cast 路由、注册会话归属的短时 API 票据通过合成集成；标准 Playwright 跳 `about:blank`，临时 patchright 进入 `_security_check` | Profile 隔离/清理、真实 Steel WebSocket、产品会话创建/请求绑定、真实连接状态回写与外部动作授权未接入；需完成人工登录/风控复验；记录连接请求不启动浏览器 |
+| 浏览器 | Steel/Playwright 虚构表单读写、持久租约、签名控制、停止/断连规则通过；BOSS 只读合成解析与产品连接请求持久化、幂等/归属/撤销通过；内部 Steel 生命周期和持久占用、受签名命令保护的 Viewer HTML/cast 路由、注册会话归属的短时 API 票据通过合成集成；加密 Cookie/localStorage 快照的合成保存、重建恢复、撤销和新会话隔离通过；标准 Playwright 跳 `about:blank`，临时 patchright 进入 `_security_check` | 生产密钥、联合停止/撤销、Profile 磁盘清理、真实 Steel WebSocket、产品会话创建/请求绑定、真实连接状态回写与外部动作授权未接入；需完成人工登录/风控复验；记录连接请求不启动浏览器 |
 | 材料 | 合成纯文本领域存储、0008 迁移、同源 BFF、Agent 草稿/修改、Diff、接受/拒绝、版本历史与纯文本复制已接入；旧提议不能覆盖新版本。Docling 历史合成解析验证保留 | 默认关闭的合成实验；P1、真实资料、上传/对象存储、PDF/DOCX 导出、解析 Activity 与实投版本关联待完成 |
 | 部署运营 | 四应用镜像与生产 Compose 拓扑已在本地隔离验证；开发基础服务仅绑定回环 | 公网 HTTPS、域名/备案、云资源峰值、备份恢复、云 IP 风控与长期稳定性未完成 |
 
@@ -80,6 +81,17 @@ P1–P3 生产保护作为同时扩展其他模块的指令。后续业务仍须
 不代表已完成集成。研究仍为私人资料，新克隆无需依赖它来运行现有代码。
 
 ## 已验证证据与复现入口
+
+- 2026-10-07 加密浏览器 context 增量：按用户/站点保存 AES-GCM Cookie/localStorage 快照，
+  绑定版本/期限/范围，支持条件保存和撤销清空密文，旧保存不能复活撤销记录。固定 Steel 原生导出
+  混入磁盘旧值，正式适配改用 Playwright 实时 canonical origin 导出，恢复复用原生 `sessionContext`。
+  固定 Steel + 隔离 PostgreSQL 的合成保存、适配器/连接重建恢复及下一空会话隔离已通过；
+  0019 迁移升级/回退仅在隔离库，未迁移日常库。生产密钥、联合停止/撤销和产品入口仍待装配，
+  真实 BOSS 登录留待用户在线；未使用真实凭据或发送消息。细节与复现入口见
+  [招聘沟通专题](../topics/recruiting-communication/README.md#phase-0b-steel-会话生命周期前置增量)。
+  专项 59 passed / 1 skipped，其中一次真实 Steel 加密恢复，其余为单元、隔离真库或故障替身；
+  默认 Python 回归 181 passed / 69 skipped，冻结依赖同步、Ruff、mypy、Web lint/typecheck/93 项测试、
+  合成配置下独立实际依赖副本生产构建、56 处文档链接与变更/秘密扫描通过。默认跳过未算通过。
 
 - 2026-10-07 阶段复核与 Steel 生命周期增量：方向仍是招聘沟通闭环，Phase 0A 的真实任务和
   定时委托、Phase 0B 的产品登录仍未完成，专题已区分合成展示和真实请求。内部适配的 27 项

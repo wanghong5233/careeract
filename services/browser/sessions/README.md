@@ -110,6 +110,43 @@ Automated reconciliation of uncertain operations is not implemented; never delet
 the reservation or infer completion from an absent inventory entry. Direct Steel
 clients bypass this guard and must remain unavailable to product users.
 
+## Encrypted context snapshots
+
+`context.py` validates live Playwright `storage_state()` snapshots, keeping cookies
+only for explicit cookie domains and localStorage only for exact HTTPS origins.
+It rejects empty, oversized, malformed, ambiguous, and partitioned-cookie state.
+Only cookies/localStorage are supported; IndexedDB, sessionStorage, service workers,
+and filesystem Profile directories are not captured. No storage values are logged.
+
+`SteelSessionManager.export_context` requires an owned live lifecycle reservation and
+checks inventory before and after the snapshot. Its trusted caller must supply the
+Playwright context connected to that session and hold an exclusive executor lease,
+with all human Viewer channels disconnected. The lifecycle lock serializes creation
+and release, but is not an executor lease or proof of caller identity. These adapters
+are not yet exposed by HTTP or bound to product connection requests.
+
+The pinned Steel native export merges disk and live-page localStorage using different
+keys; it can include stale disk values and loses the live origin scheme. Production
+snapshot export therefore uses Playwright's live canonical origins. Restore still
+uses Steel's native `sessionContext` during reserved creation, without copying disk
+directories or changing vendor code. Import is never automatically retried.
+
+`profiles.py` stores authenticated AES-256-GCM ciphertext in `browser.profiles`
+(migration `0019_browser_profiles`). A dedicated 32-byte raw key file can be loaded
+through `ProfileCipher.from_file`; no production key configuration is wired yet.
+Ciphertext binds the user, site, profile ID, version, expiry, scope, and format version.
+Reads and version-conditional saves are scoped to the user/site; retention is at most
+30 days and saves do not extend it. Expired records require explicit revocation before
+new creation. Revocation clears the live row's ciphertext and retains a tombstone,
+preventing stale saves from resurrecting it. A new login gets a new profile ID.
+
+Revoking this snapshot alone does not stop a running browser, invalidate a platform
+session, erase backups, or clear Steel disk files. Product stop/revoke coordination,
+automatic expiry cleanup, key rotation, and disk cleanup remain separate work. The
+real Steel canary uses synthetic `example.com` state and isolated PostgreSQL; it
+proves encrypted snapshot restore after adapter/connection reconstruction and a clean
+next session, not a BOSS login or browser process restart.
+
 ## Viewer boundary
 
 `viewer.py` is the first half of the same-origin takeover boundary. It accepts only

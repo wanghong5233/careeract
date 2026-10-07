@@ -11,3 +11,8 @@ The service owns session/profile lifecycle and the single-writer lease. Playwrig
 browser-use, and human takeover cannot write concurrently. Smart execution produces
 candidate results; deterministic verification produces the completion evidence.
 Raw Steel CDP and debug URLs are never returned to the public Web client.
+
+Internal encrypted Cookie/localStorage snapshots and Steel restore are described in
+[Sessions](sessions/README.md#encrypted-context-snapshots). They are verified with
+synthetic state; product login, production key configuration, and joint browser/profile
+revocation are not wired yet.

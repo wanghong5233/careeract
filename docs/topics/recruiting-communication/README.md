@@ -286,9 +286,28 @@ HttpOnly Cookie、localStorage 的恢复及第三个空会话不继承标记均�
 `scripts/smoke_steel_context.py`。脚本不打印或写入 context，逐阶段核对会话 ID、释放和 inventory，
 失败不重放创建或恢复；它不使用招聘平台数据。这支持优先复用 Steel 原生 context，避免手工复制磁盘 Profile；
 正式适配必须以已核验的站点 origin 范围转换，不能把任意导出域名猜成 HTTPS origin。
-实验只保存内存中的合成状态，不能证明账号登录已持久化或浏览器进程重启恢复。接下来顺序完成：
+实验只保存内存中的合成状态，不能证明账号登录已持久化或浏览器进程重启恢复。
 
-1. 按用户/站点保存加密 context，并明确撤销/删除；不把 Cookie 放入领域正文、Agent 或普通日志。
+**加密 context 增量（2026-10-07）：** 已实现按用户/站点保存受限 Cookie/localStorage 的内部适配，
+采用成熟 `cryptography.AESGCM`，密文绑定 profile、用户、站点、版本、期限和明确 origin/domain 范围。
+0019 迁移加入加密存储，版本条件更新、最长 30 天期限和撤销清空密文/保留 tombstone 已落地；
+旧请求不能复活已撤销记录，更新不延长期限，空/错误快照不能覆盖有效状态。
+
+本轮真实实验进一步发现：Steel 原生导出将磁盘完整 origin 和实时页面 hostname 键合并，
+两份内容可能不一致。直接选择其中一份会有保存旧状态的风险。因此正式导出改用已有 Playwright
+`storage_state()` 读取实时 canonical origin，恢复仍复用 Steel 原生 `sessionContext`，
+没有改动 vendor、复制磁盘 Profile 或新增 Harness。导出前后检查 Steel inventory 和持久占用；
+将来装配时调用方还必须绑定正确的 CDP context、持有执行租约并先断开人工接管通道。
+
+固定 Steel + 隔离 PostgreSQL 的三会话合成 canary 已通过加密保存、适配器/数据库连接重建后的
+HttpOnly Cookie/localStorage 恢复与下一空会话不继承标记。后台合成证据不等于真实 BOSS 登录，
+也不证明浏览器进程重启或磁盘目录隔离。生产密钥装配/轮换、自动到期清理及运行中会话的联合撤销
+尚未实现；数据库密文撤销不等于平台退出、磁盘或备份删除。检查命令见开发指南，内部边界见
+[Sessions](../../../services/browser/sessions/README.md#encrypted-context-snapshots)。
+
+接下来顺序完成：
+
+1. 已完成内部加密 context 保存/恢复/撤销；生产密钥与联合停止/撤销随产品登录生命周期装配。
 2. 持久化连接任务/授权/尝试语义并绑定 Browser Service 会话，不用连接 ID 假装这些对象已存在。
 3. 装配产品同源登录入口、会话票据续期和停止/退出清理，让用户人工登录一次。
 4. 用确定性只读验证登录、重建后的恢复与跨用户隔离，再进入 Phase 1 的真实站点适配。

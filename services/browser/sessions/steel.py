@@ -1,17 +1,29 @@
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, Protocol
 from uuid import UUID
 
 import httpx
+from playwright.async_api import Error as PlaywrightError
 from pydantic import BaseModel, ConfigDict, ValidationError
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
+from services.browser.sessions.context import (
+    BrowserContext,
+    BrowserContextRejected,
+    SiteScope,
+)
+
 SteelStatus = Literal["idle", "live", "released", "failed"]
+
+
+class BrowserStateReader(Protocol):
+    async def storage_state(self) -> object: ...
 
 
 class SteelSessionConflict(Exception):
@@ -76,7 +88,7 @@ class SteelSessionManager:
             raise SteelSessionUncertain("Steel coordination requires reconciliation") from None
 
     async def _request(
-        self, method: str, path: str, *, body: dict[str, str] | None = None
+        self, method: str, path: str, *, body: dict[str, object] | None = None
     ) -> httpx.Response:
         try:
             return await self._client.request(
@@ -107,7 +119,34 @@ class SteelSessionManager:
             session = next((session for session in sessions if session.id == session_id), None)
             return None if session is None else SteelSession(session.id, session.status)
 
-    async def create(self, session_id: UUID) -> SteelSession:
+    async def export_context(
+        self, session_id: UUID, scope: SiteScope, *, browser_context: BrowserStateReader
+    ) -> BrowserContext:
+        async with self._exclusive() as connection:
+            state = await connection.scalar(
+                text("SELECT state FROM browser.steel_operations WHERE session_id=:session_id"),
+                {"session_id": session_id},
+            )
+            if state != "live":
+                raise SteelSessionConflict("Steel context is unowned or requires reconciliation")
+            await self._confirm(session_id, "live")
+            try:
+                snapshot = await asyncio.wait_for(browser_context.storage_state(), timeout=10)
+                context = BrowserContext.from_playwright(snapshot, scope)
+            except (PlaywrightError, TimeoutError, BrowserContextRejected):
+                raise SteelSessionUnavailable(
+                    "Steel context is invalid or outside its scope"
+                ) from None
+            await self._confirm(session_id, "live")
+            return context
+
+    async def create(
+        self, session_id: UUID, *, context: BrowserContext | None = None
+    ) -> SteelSession:
+        body: dict[str, object] = {"sessionId": str(session_id)}
+        if context is not None:
+            context.encode()
+            body["sessionContext"] = context.to_steel()
         async with self._exclusive() as connection:
             reserved = await connection.scalar(
                 text(
@@ -128,7 +167,7 @@ class SteelSessionManager:
                 ),
                 {"session_id": session_id},
             )
-        response = await self._request("POST", "/v1/sessions", body={"sessionId": str(session_id)})
+        response = await self._request("POST", "/v1/sessions", body=body)
         if response.status_code != 200:
             raise SteelSessionUncertain("Steel creation result unconfirmed")
         try:

@@ -578,6 +578,26 @@ uv run python -m scripts.smoke_steel_context
 不打印或存文件；当前 Steel 的导出域名键与恢复 origin 键不同，适配依据见招聘沟通专题。
 此实验不是加密持久化、磁盘 Profile 隔离或真实账号恢复验收；创建/释放结果不明时不重试。
 
+加密 context 的内部适配检查使用隔离 PostgreSQL；开启第二个开关才运行固定 Steel 的
+真实合成保存/恢复/空会话 canary：
+
+```powershell
+$env:RUN_BROWSER_POSTGRES_TESTS = '1'
+$env:RUN_STEEL_PROFILE_TEST = '1'
+try {
+    uv run pytest tests/browser/test_browser_context.py tests/browser/test_browser_profiles.py tests/browser/test_steel_context.py -q
+} finally {
+    Remove-Item Env:RUN_BROWSER_POSTGRES_TESTS
+    Remove-Item Env:RUN_STEEL_PROFILE_TEST
+}
+```
+
+同样拒绝已有活动 Steel 会话，只使用 `example.com` 合成 Cookie/localStorage；密钥仅在测试内存中，
+迁移 0019 仅应用隔离库。正式适配读取 Playwright 的实时 canonical origin，避免 Steel 原生导出
+混入磁盘旧值；恢复复用 Steel 原生 `sessionContext`。支持范围、撤销含义和尚未装配的生产密钥见
+[加密 context 边界](../../services/browser/sessions/README.md#encrypted-context-snapshots)。
+该入口不证明真实 BOSS 登录、浏览器进程重启恢复或磁盘 Profile 清理；不自动重试不确定操作。
+
 生命周期规则测试：`uv run pytest tests/browser/test_executor_lifecycle.py -q`。
 真实 Steel/Playwright/PostgreSQL 联合检查：先启动本地 Steel，然后执行：
 
