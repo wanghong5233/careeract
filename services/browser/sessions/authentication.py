@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from typing import Literal
 from uuid import UUID
 
@@ -32,6 +33,9 @@ class BrowserCommand(BaseModel):
     action: Action
     lease_id: UUID | None = None
 
+    def is_current(self, timestamp: float) -> bool:
+        return self.iat - 2 <= timestamp < self.exp and 0 < self.exp - self.iat <= 60
+
 
 class CommandVerifier:
     def __init__(self, public_key: Ed25519PublicKey) -> None:
@@ -47,13 +51,16 @@ class CommandVerifier:
                 algorithms=["EdDSA"],
                 issuer="careeract-api",
                 audience="careeract-browser",
-                options={"require": ["iss", "aud", "sub", "iat", "exp", "jti"]},
+                options={
+                    "require": ["iss", "aud", "sub", "iat", "exp", "jti"],
+                    "verify_iat": False,
+                },
             )
             command = BrowserCommand.model_validate(payload)
         except (jwt.InvalidTokenError, ValidationError, ValueError):
             raise CommandRejected("Invalid browser command") from None
         if (
-            not 0 < command.exp - command.iat <= 60
+            not command.is_current(datetime.now(UTC).timestamp())
             or command.session_id != session_id
             or command.action != action
             or (action in ("acquire", "register", "revoke", "viewer")) != (command.lease_id is None)

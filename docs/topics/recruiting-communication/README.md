@@ -80,7 +80,7 @@ Temporal Workflow 触发 `OutreachAutomation`，每次运行生成独立的 `Com
 
 - PRD 已将 BOSS 主动沟通列为正式能力，要求保存沟通内容、发送依据和处理结果。
 - CareerAct 已有 Agno AgentOS/AG-UI 文本 Runtime、职业上下文工具、PostgreSQL 领域状态、Temporal 基础 Workflow 和 Browser Service 的会话租约边界。
-- Browser Service 当前只有底座、内部控制契约和合成 BOSS 快照解析器；实时站点读取、业务授权用例、沟通领域对象和生产执行入口尚未接入。
+- Browser Service 已有底座、内部控制契约、加密 context 和合成 BOSS 快照解析器；内部登录任务/授权/尝试可持久化并绑定会话注册，产品登录入口、实时站点读取、沟通领域对象和生产执行入口尚未接入。
 - 浏览器执行必须通过 CareerAct 的用户归属、任务、授权、尝试和请求标识；原始 CDP/调试地址不能交给 Web 客户端。
 
 ### 2.2 历史 Pulse 的参考证据（非实现来源）
@@ -257,8 +257,8 @@ patchright 仅有实验依据，未加入业务依赖。必须先复验实际驱
 的网页存储是干净的；当前镜像仍未证明登录态持久化、目录按路径隔离或释放后的磁盘清理。
 因此连接请求暂不保存招聘平台 Cookie，也不把 `connected` 当作已登录。
 
-**下一目标：** 先验证同一固定 Steel 实例下的 Profile 隔离/清理路径和同源 Viewer 转发，
-再把已持久化连接请求绑定到受认证的浏览器生命周期。复用现有镜像/协议；如上游缺陷确实
+**后续开放边界：** 同一固定 Steel 实例的磁盘 Profile 清理和真实同源 Viewer 仍需验证，
+产品连接请求尚未装配到受认证的浏览器生命周期。复用现有镜像/协议；如上游缺陷确实
 阻塞隔离，只做可复验的最小修复或配置，不把 Pulse 的单例和 stealth 方案引入产品。
 不确定占用的自动对账/清理未实现，不能把一次 inventory 缺失当作旧请求已停止。
 
@@ -305,10 +305,29 @@ HttpOnly Cookie/localStorage 恢复与下一空会话不继承标记。后台合
 尚未实现；数据库密文撤销不等于平台退出、磁盘或备份删除。检查命令见开发指南，内部边界见
 [Sessions](../../../services/browser/sessions/README.md#encrypted-context-snapshots)。
 
+**登录执行语义增量（2026-10-07）：** 0019 之后新增 0020，持久化 `ExecutionTask`、
+`ExecutionAuthorization`、`ExecutionAttempt`，分别拥有独立 ID，并按用户关联已有 BOSS 连接请求。
+当前只支持 `boss_login` / `boss.login`，最长 15 分钟；这是登录会话的有限授权，不授予岗位沟通或发送权限。
+每个连接请求只有一次登录尝试，同一幂等键返回原对象和原期限，不因重放重新授权；不同内容或已有尝试拒绝创建。
+
+内部 `BrowserRegistrationService` 在网络调用前持久化会话 ID 和运行中尝试，再复用已有签名 HTTP
+适配器注册 Browser Service。确认注册后任务/尝试进入 `waiting`；这里只确认 `browser.sessions`
+归属注册，**没有创建 Steel 进程会话或证明用户已登录**。响应丢失保留 `unknown`，取消/进程中断保留
+未核实的 `running`，重建后均拒绝重发；暂未实现自动对账。Viewer 票据现在同时检查真实任务、
+授权、尝试、会话归属和期限，使用真实尝试 ID，不再为随机 UUID 的注册行签发产品票据。
+
+内部撤销先使领域授权失效，再发送 Browser Service 的签名撤销命令，存活 Viewer 的后续检查会拒绝输入；
+原租约仍保留给可信断连清理。已开始的尝试保留 `unknown / cleanup_required`，不将授权撤销冒充实际
+浏览器释放或 Profile 删除。该用例尚未接入现有产品连接请求 POST/DELETE，也未开放新的 Web 登录按钮。
+
+隔离 PostgreSQL 与实际签名/Browser Service ASGI 链路验证上述关系；网络丢包和拒绝为故障替身，
+不是部署环境 HTTP 或真实 BOSS 验收。本轮还复现应用与 Docker 数据库的小幅时差，命令签发时间
+允许最多 2 秒偏差，到期时间与 60 秒签名跨度仍严格检查。检查入口见开发指南。
+
 接下来顺序完成：
 
 1. 已完成内部加密 context 保存/恢复/撤销；生产密钥与联合停止/撤销随产品登录生命周期装配。
-2. 持久化连接任务/授权/尝试语义并绑定 Browser Service 会话，不用连接 ID 假装这些对象已存在。
+2. 已完成内部登录任务/授权/尝试及 Browser Service 归属注册绑定；实际 Steel 创建、产品请求回写与公开登录用例随下一项装配。
 3. 装配产品同源登录入口、会话票据续期和停止/退出清理，让用户人工登录一次。
 4. 用确定性只读验证登录、重建后的恢复与跨用户隔离，再进入 Phase 1 的真实站点适配。
 

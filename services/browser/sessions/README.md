@@ -34,7 +34,9 @@ rejected even after release. Records currently have no automatic retention clean
 
 `authentication.py` accepts only EdDSA commands signed by the configured API public
 key, for issuer `careeract-api` and audience `careeract-browser`, with a maximum
-60-second lifetime. It binds the user, session, task, authorization, executor,
+60-second lifetime. Issue time tolerates at most two seconds of clock skew between
+services; expiration remains strict and the signed lifetime may not exceed 60 seconds.
+It binds the user, session, task, authorization, executor,
 attempt, action and lease ID. These keys are separate from Better Auth login keys.
 The private signing key remains in the API. The API signing/HTTP adapter exists,
 but no public authorization or task use case is wired to it yet.
@@ -66,6 +68,21 @@ No automatic retries or redirects are followed. Missing, malformed, mismatched o
 expired responses raise an uncertain-result error for reconciliation. An uncertain
 acquisition does not expose the unknown lease ID; automatic reconciliation is not yet
 implemented, so callers must not issue another acquisition as a retry.
+
+The API's internal `BrowserRegistrationService` now persists real login task,
+authorization, and attempt records (migration `0020_execution_semantics`) and reserves
+a session ID before using this register command. Its scope is only `boss.login`,
+with a maximum 15-minute authorization. The product Viewer issuer checks these
+records and the exact registered session, caps its ticket by the stored authorization
+deadline, and uses the real attempt ID. A standalone registration with arbitrary
+task/authorization UUIDs no longer qualifies for a product Viewer ticket.
+
+Registration confirms only the ownership registry, not Steel creation or login.
+Lost responses and interrupted attempts survive reconstruction and block resending.
+Revocation first disables the domain authorization, then sends the signed Browser
+Service revoke command; started attempts retain `cleanup_required` and writer leases
+remain until trusted disconnect is confirmed. These application use cases are not
+yet wired to product connection POST/DELETE, Web login, or physical Steel lifecycle.
 
 ## Executor lifecycle
 

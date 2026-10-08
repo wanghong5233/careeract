@@ -7,7 +7,11 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from fastapi.testclient import TestClient
 
 from services.browser.app.factory import create_app
-from services.browser.sessions.authentication import CommandRejected, CommandVerifier
+from services.browser.sessions.authentication import (
+    BrowserCommand,
+    CommandRejected,
+    CommandVerifier,
+)
 
 
 def command_payload() -> dict[str, object]:
@@ -42,6 +46,29 @@ def test_valid_signed_command_and_wrong_scope() -> None:
         verifier.verify(token, uuid4(), "acquire")
     with pytest.raises(CommandRejected):
         verifier.verify(token, session_id, "stop")
+
+
+def test_small_issue_time_skew_is_bounded_and_does_not_extend_expiration() -> None:
+    private_key = Ed25519PrivateKey.generate()
+    payload = command_payload()
+    now = int(datetime.now(UTC).timestamp())
+    payload.update(iat=now + 1, exp=now + 60)
+    command = BrowserCommand.model_validate(payload)
+    verifier = CommandVerifier(private_key.public_key())
+    assert (
+        verifier.verify(
+            jwt.encode(payload, private_key, algorithm="EdDSA"), command.session_id, "acquire"
+        )
+        == command
+    )
+    assert command.is_current(now)
+    assert not command.is_current(now - 2)
+    assert not command.is_current(now + 60)
+    payload.update(iat=now + 10)
+    with pytest.raises(CommandRejected):
+        verifier.verify(
+            jwt.encode(payload, private_key, algorithm="EdDSA"), command.session_id, "acquire"
+        )
 
 
 @pytest.mark.parametrize(

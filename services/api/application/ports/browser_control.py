@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal
+from typing import Literal, Protocol
 from uuid import UUID
 
 BrowserAction = Literal["register", "revoke", "acquire", "renew", "stop", "check", "viewer"]
@@ -39,3 +39,9 @@ class BrowserControlConflict(Exception):
 
 class BrowserControlUncertain(Exception):
     pass
+
+
+class BrowserSessionControl(Protocol):
+    async def send(
+        self, context: BrowserControlContext, action: BrowserAction, lease_id: UUID | None = None
+    ) -> BrowserLease | None: ...

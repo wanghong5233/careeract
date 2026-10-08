@@ -598,6 +598,20 @@ try {
 [加密 context 边界](../../services/browser/sessions/README.md#encrypted-context-snapshots)。
 该入口不证明真实 BOSS 登录、浏览器进程重启恢复或磁盘 Profile 清理；不自动重试不确定操作。
 
+登录执行对象和 Browser Service 注册/撤销的内部链路检查：
+
+```powershell
+$env:RUN_BROWSER_POSTGRES_TESTS = '1'
+try { uv run pytest tests/api/test_execution_semantics.py -q } finally {
+    Remove-Item Env:RUN_BROWSER_POSTGRES_TESTS
+}
+```
+
+该入口创建隔离 PostgreSQL 并升级/回退至 0020；实际校验签名和 Browser Service ASGI 路由，
+丢失响应/拒绝/取消为故障替身，不访问 Steel 或招聘平台。日常库不会随测试迁移；装配产品前须先升级。
+登录授权最长 15 分钟，同键重放不会续期；内部注册只建立会话归属记录，不代表浏览器已启动或已登录。
+未知/中断尝试不能重发，撤销后仍须核对浏览器断连和 Profile 清理。具体范围见招聘沟通专题。
+
 生命周期规则测试：`uv run pytest tests/browser/test_executor_lifecycle.py -q`。
 真实 Steel/Playwright/PostgreSQL 联合检查：先启动本地 Steel，然后执行：
 

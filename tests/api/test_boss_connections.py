@@ -222,15 +222,20 @@ async def test_connection_persistence_concurrency_replay_and_isolation(
 async def test_connection_migration_down_and_up(database_url: str) -> None:
     engine = create_async_engine(database_url, hide_parameters=True)
     migration = importlib.import_module("services.api.migrations.versions.0017_boss_connections")
+    execution_migration = importlib.import_module(
+        "services.api.migrations.versions.0020_execution_semantics"
+    )
 
     def roundtrip(database: Connection) -> None:
         with Operations.context(MigrationContext.configure(database)):
+            execution_migration.downgrade()
             migration.downgrade()
             assert database.scalar(text("SELECT to_regclass('career.boss_connections')")) is None
             migration.upgrade()
             assert (
                 database.scalar(text("SELECT to_regclass('career.boss_connections')")) is not None
             )
+            execution_migration.upgrade()
 
     try:
         async with engine.begin() as database:

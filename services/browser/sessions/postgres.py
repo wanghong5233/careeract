@@ -41,8 +41,7 @@ class PostgresLeaseStore:
                 or row["user_id"] != command.sub
                 or row["task_id"] != command.task_id
                 or row["authorization_id"] != command.authorization_id
-                or not command.iat <= now.timestamp() < command.exp
-                or not 0 < command.exp - command.iat <= 60
+                or not command.is_current(now.timestamp())
             ):
                 raise CommandRejected("Browser command is no longer authorized")
             if command.action != "check":
@@ -125,8 +124,7 @@ class PostgresLeaseStore:
                 or row["user_id"] != command.sub
                 or row["task_id"] != command.task_id
                 or row["authorization_id"] != command.authorization_id
-                or not command.iat <= now.timestamp() < command.exp
-                or not 0 < command.exp - command.iat <= 60
+                or not command.is_current(now.timestamp())
             ):
                 raise CommandRejected("Browser command is no longer authorized")
             if row["lease_id"] is not None:
@@ -193,8 +191,7 @@ class PostgresLeaseStore:
                 row["user_id"] != command.sub
                 or row["task_id"] != command.task_id
                 or row["authorization_id"] != command.authorization_id
-                or not command.iat <= now.timestamp() < command.exp
-                or not 0 < command.exp - command.iat <= 60
+                or not command.is_current(now.timestamp())
             ):
                 raise CommandRejected("Browser command is no longer authorized")
             consumed = await connection.scalar(
