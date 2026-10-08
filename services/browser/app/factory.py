@@ -220,6 +220,8 @@ def create_app(
                 profiles is None or context_reader is None or command.owner_id != "boss-login"
             ):
                 raise CommandRejected("Login verification is not configured")
+            if action == "forget" and (profiles is None or command.owner_id != "boss-login"):
+                raise CommandRejected("Profile removal is not configured")
             login_verified = False
             if action in ("release", "finish"):
                 await store.wait_for_viewer_stop(command)
@@ -234,6 +236,11 @@ def create_app(
                     session = await steel_sessions.create(
                         session_id, context=restored[1] if restored is not None else None
                     )
+                elif action == "forget":
+                    session = await steel_sessions.release(session_id)
+                    if profiles is None:
+                        raise CommandRejected("Profile removal is not configured")
+                    await profiles.forget_released_session(command.sub, session_id)
                 else:
                     try:
                         if profiles is not None and context_reader is not None:

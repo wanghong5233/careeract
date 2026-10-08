@@ -28,6 +28,15 @@ authorization and attempt; it does not accept credentials. The browser Viewer is
 available at `GET /api/v1/browser/sessions/{session_id}/viewer` only after confirmed
 physical creation and returns same-origin HTML with a short-lived HttpOnly cookie.
 
+`POST /api/v1/connections/boss/{id}/login/finish` requires JSON `{version}` and
+verifies the active login after stopping the Viewer, saves its encrypted state and
+releases the browser before recording `connected`. Unverified state never becomes
+connected; an uncertain result requires reading the existing execution.
+`DELETE /api/v1/connections/boss/{id}/saved-login` requires the connected resource's
+version and confirmed browser release. It removes CareerAct's saved credentials,
+then revokes that connection, returning 204. It does not log out the BOSS account
+remotely. Old cleanup commands cannot remove a newer login snapshot.
+
 `GET /api/v1/profile` reads the authenticated user's singleton confirmed profile;
 an absent profile returns empty content and a null version. `PUT /api/v1/profile`
 requires content, explicit confirmation and the version returned by the last read.

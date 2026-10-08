@@ -21,5 +21,8 @@ Steel manager and registered session boundary; see
 login lifecycle, and same-origin Viewer proxy are wired for configured environments;
 Local authenticated single-page Steel WebSocket use, ticket renewal, and physical
 release have been verified. Encrypted state capture and repeated product-session restores
-have passed locally. Later restore stability, durable connection-state updates,
-joint browser/profile revocation and production configuration remain unverified.
+have passed locally. Explicit login completion now verifies account navigation and the
+message entry before saving and updating the product connection. Forgetting a saved
+login requires confirmed release and purges only snapshots older than that release;
+isolated integration verifies revocation and protects newer logins from stale commands.
+Later restore stability, disk cleanup and production configuration remain unverified.

@@ -642,6 +642,59 @@ class PostgresExecutionRepository:
         except (DBAPIError, PoolTimeoutError):
             raise ExecutionUnavailable("Execution state is unavailable") from None
 
+    async def forget_context(
+        self, actor: ActorContext, attempt_id: UUID, *, expected_version: UUID
+    ) -> BrowserControlContext | None:
+        try:
+            async with self.engine.begin() as database:
+                row = await self._lock(database, actor, attempt_id)
+                if row["connection_status"] == "revoked":
+                    return None
+                if (
+                    row["connection_status"] != "connected"
+                    or row["connection_version"] != expected_version
+                    or row["authorization_status"] != "revoked"
+                    or row["outcome"] != "browser_released"
+                    or row["browser_session_id"] is None
+                ):
+                    raise ExecutionConflict("Saved login requires a released owned connection")
+                return BrowserControlContext(
+                    actor.user_id,
+                    row["browser_session_id"],
+                    row["task_id"],
+                    row["authorization_id"],
+                    row["authorization_expires_at"],
+                    attempt_id,
+                    UUID(actor.request_id),
+                    "boss-login",
+                )
+        except (DBAPIError, PoolTimeoutError):
+            raise ExecutionUnavailable("Saved login state is unavailable") from None
+
+    async def record_forget(
+        self, actor: ActorContext, attempt_id: UUID, *, expected_version: UUID
+    ) -> None:
+        try:
+            async with self.engine.begin() as database:
+                row = await self._lock(database, actor, attempt_id)
+                if row["connection_status"] == "revoked":
+                    return
+                if (
+                    row["connection_status"] != "connected"
+                    or row["connection_version"] != expected_version
+                ):
+                    raise ExecutionConflict("Saved login connection changed")
+                await database.execute(
+                    text(
+                        "UPDATE career.boss_connections SET status='revoked',"
+                        "last_observed_state='saved_login_forgotten',version=:version,"
+                        "updated_at=clock_timestamp() WHERE id=:id AND user_id=:user"
+                    ),
+                    {"id": row["connection_id"], "user": actor.user_id, "version": uuid4()},
+                )
+        except (DBAPIError, PoolTimeoutError):
+            raise ExecutionUnavailable("Saved login result requires reconciliation") from None
+
     async def record_release(
         self, actor: ActorContext, attempt_id: UUID, *, login_verified: bool = False
     ) -> ExecutionAttempt:

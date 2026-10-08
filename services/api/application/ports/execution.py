@@ -63,3 +63,11 @@ class ExecutionRepository(Protocol):
     async def record_release(
         self, actor: ActorContext, attempt_id: UUID, *, login_verified: bool = False
     ) -> ExecutionAttempt: ...
+
+    async def forget_context(
+        self, actor: ActorContext, attempt_id: UUID, *, expected_version: UUID
+    ) -> BrowserControlContext | None: ...
+
+    async def record_forget(
+        self, actor: ActorContext, attempt_id: UUID, *, expected_version: UUID
+    ) -> None: ...

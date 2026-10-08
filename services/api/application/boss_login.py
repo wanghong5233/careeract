@@ -96,3 +96,22 @@ class BossLoginService:
         if updated is None:
             raise ExecutionConflict("Login execution is unavailable")
         return updated
+
+    async def forget(
+        self, actor: ActorContext, connection_id: UUID, *, expected_version: UUID
+    ) -> None:
+        current = await self.read(actor, connection_id)
+        if current is None:
+            raise ExecutionConflict("Saved login has no execution evidence")
+        context = await self.browser.repository.forget_context(
+            actor, current.attempt.id, expected_version=expected_version
+        )
+        if context is None:
+            return
+        try:
+            await self.browser.control.lifecycle(context, "forget")
+        except (BrowserControlConflict, BrowserControlRejected, BrowserControlUncertain):
+            raise ExecutionUnavailable("Saved login removal requires reconciliation") from None
+        await self.browser.repository.record_forget(
+            actor, current.attempt.id, expected_version=expected_version
+        )

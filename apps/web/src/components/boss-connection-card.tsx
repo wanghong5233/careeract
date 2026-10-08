@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ExternalLink, LoaderCircle, RefreshCw } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogTitle } from "@/components/ui/dialog";
 import { createLatestRequest } from "@/lib/latest-request";
 import { cn } from "@/lib/utils";
 
@@ -30,7 +31,8 @@ export function BossConnectionCard() {
   const [connection, setConnection] = useState<Connection | null>(null);
   const [login, setLogin] = useState<LoginExecution | null>(null);
   const [loginAvailable, setLoginAvailable] = useState<boolean | null>(null);
-  const [busy, setBusy] = useState<"read" | "start" | "stop" | "finish" | null>("read");
+  const [busy, setBusy] = useState<"read" | "start" | "stop" | "finish" | "forget" | null>("read");
+  const [forgetOpen, setForgetOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [needsReconciliation, setNeedsReconciliation] = useState(false);
   const requests = useRef(createLatestRequest());
@@ -189,6 +191,37 @@ export function BossConnectionCard() {
     }
   };
 
+  const forgetLogin = async () => {
+    if (writing.current || busy || needsReconciliation || !connection || connection.status !== "connected") return;
+    writing.current = true;
+    const controller = requests.current.start();
+    setBusy("forget");
+    setError(null);
+    try {
+      const response = await fetch(`/api/connections/boss/${connection.id}/saved-login`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ version: connection.version }),
+        signal: AbortSignal.any([controller.signal, AbortSignal.timeout(60_000)]),
+      });
+      if (response.status !== 204) throw new Error("Saved login removal unconfirmed");
+      if (!requests.current.isCurrent(controller)) return;
+      setForgetOpen(false);
+      requestKey.current = null;
+      writing.current = false;
+      await load();
+    } catch (failure) {
+      if (!requests.current.isCurrent(controller)) return;
+      if (!(failure instanceof Error)) throw failure;
+      setForgetOpen(false);
+      setNeedsReconciliation(true);
+      setError("未能确认登录信息删除结果，请重新读取连接状态；不会自动重试。");
+    } finally {
+      writing.current = false;
+      if (requests.current.isCurrent(controller)) setBusy(null);
+    }
+  };
+
   const active = connection && !["revoked", "failed"].includes(connection.status);
   const browserReady = login?.attempt_status === "waiting" && login.outcome === "browser_created" && login.browser_session_id;
   const cleanupRequired = Boolean(login?.browser_session_id && login.outcome !== "browser_released");
@@ -209,9 +242,20 @@ export function BossConnectionCard() {
       {viewerHref && <a className="inline-flex min-h-9 items-center gap-2 rounded-md border px-3 text-xs hover:bg-muted" href={viewerHref} target="_blank" rel="noreferrer"><ExternalLink className="size-3.5" />打开安全浏览器</a>}
       {browserReady && <Button disabled={busy !== null || needsReconciliation} onClick={() => void finishLogin()}>{busy === "finish" && <LoaderCircle className="size-3.5 animate-spin" />}完成登录并保存</Button>}
       {cleanupRequired && <Button disabled={busy !== null || needsReconciliation} variant="ghost" onClick={() => void stopLogin()}>{busy === "stop" && <LoaderCircle className="size-3.5 animate-spin" />}停止登录</Button>}
+      {connection?.status === "connected" && <Button disabled={busy !== null || needsReconciliation} variant="ghost" onClick={() => setForgetOpen(true)}>忘记已保存登录</Button>}
       <Button disabled={busy !== null} variant="ghost" onClick={() => void load()}><RefreshCw className="size-3.5" />重新读取</Button>
     </div>
     {loginAvailable === false && <p role="status" className="mt-3 text-xs text-amber-700 dark:text-amber-300">安全登录服务尚未配置；当前不会启动浏览器。配置 Browser Service 后重新读取即可。</p>}
     {error && <p role="alert" className="mt-3 text-xs text-destructive">{error}</p>}
+    {forgetOpen && <Dialog open={forgetOpen} onOpenChange={setForgetOpen}>
+      <DialogContent>
+        <DialogTitle>忘记 BOSS 登录？</DialogTitle>
+        <DialogDescription>删除 CareerAct 保存的加密登录信息并撤销连接，下次使用需要重新登录。此操作不会注销 BOSS 账号或退出其他浏览器。</DialogDescription>
+        <DialogFooter>
+          <Button disabled={busy !== null} variant="outline" onClick={() => setForgetOpen(false)}>保留登录</Button>
+          <Button disabled={busy !== null || needsReconciliation} variant="destructive" onClick={() => void forgetLogin()}>{busy === "forget" && <LoaderCircle className="size-3.5 animate-spin" />}确认忘记登录</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>}
   </section>;
 }

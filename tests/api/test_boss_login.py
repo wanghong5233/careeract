@@ -120,6 +120,35 @@ async def test_finish_login_updates_owned_business_state_only_after_verified_sav
                         await client.post(path + "/finish", headers=headers, json=body)
                     ).json() == result
                     assert len(steel.writes) == 2
+                    forget_path = path.removesuffix("/login") + "/saved-login"
+                    assert (
+                        await client.request(
+                            "DELETE",
+                            forget_path,
+                            headers=headers,
+                            json={"version": str(uuid4())},
+                        )
+                    ).status_code == 409
+                    assert await profiles.current(scenario.actor.user_id) is not None
+                    forgotten = await client.request(
+                        "DELETE",
+                        forget_path,
+                        headers=headers,
+                        json={"version": str(current.version)},
+                    )
+                    assert forgotten.status_code == 204
+                    assert await profiles.current(scenario.actor.user_id) is None
+                    revoked = await connections.get_current(scenario.actor)
+                    assert revoked is not None and revoked.status == "revoked"
+                    assert (
+                        await client.request(
+                            "DELETE",
+                            forget_path,
+                            headers=headers,
+                            json={"version": str(current.version)},
+                        )
+                    ).status_code == 204
+                    assert len(steel.writes) == 2
 
 
 async def test_product_login_requires_explicit_scope_version_and_owned_connection(

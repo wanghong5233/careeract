@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 LeaseAction = Literal["acquire", "renew", "stop", "check"]
 SessionAction = Literal["register", "revoke"]
-LifecycleAction = Literal["create", "release", "finish"]
+LifecycleAction = Literal["create", "release", "finish", "forget"]
 Action = Literal[
     "acquire",
     "renew",
@@ -20,6 +20,7 @@ Action = Literal[
     "create",
     "release",
     "finish",
+    "forget",
 ]
 
 
@@ -76,7 +77,17 @@ class CommandVerifier:
             or command.session_id != session_id
             or command.action != action
             or (
-                action in ("acquire", "register", "revoke", "viewer", "create", "release", "finish")
+                action
+                in (
+                    "acquire",
+                    "register",
+                    "revoke",
+                    "viewer",
+                    "create",
+                    "release",
+                    "finish",
+                    "forget",
+                )
             )
             != (command.lease_id is None)
         ):

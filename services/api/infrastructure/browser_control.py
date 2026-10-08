@@ -48,14 +48,24 @@ class BrowserCommandSigner:
             or not context.owner_id.strip()
             or context.authorization_expires_at.utcoffset() is None
             or (
-                action in ("register", "revoke", "acquire", "viewer", "create", "release", "finish")
+                action
+                in (
+                    "register",
+                    "revoke",
+                    "acquire",
+                    "viewer",
+                    "create",
+                    "release",
+                    "finish",
+                    "forget",
+                )
             )
             != (lease_id is None)
         ):
             raise BrowserControlRejected("Invalid browser control context")
         issued_at = int(datetime.now(UTC).timestamp())
         expires_at = issued_at + 60
-        if action not in ("revoke", "release"):
+        if action not in ("revoke", "release", "forget"):
             expires_at = min(expires_at, int(context.authorization_expires_at.timestamp()))
         if expires_at <= issued_at:
             raise BrowserControlRejected("Browser authorization has expired")
@@ -89,7 +99,7 @@ class BrowserControlClient:
     async def send(
         self, context: BrowserControlContext, action: BrowserAction, lease_id: UUID | None = None
     ) -> BrowserLease | None:
-        if action in ("viewer", "create", "release", "finish"):
+        if action in ("viewer", "create", "release", "finish", "forget"):
             raise BrowserControlRejected("Browser action requires its dedicated adapter")
         token = self.signer.sign(context, action, lease_id)
         prefix = "" if action in ("register", "revoke") else "lease/"
@@ -132,7 +142,9 @@ class BrowserControlClient:
         )
 
     async def lifecycle(
-        self, context: BrowserControlContext, action: Literal["create", "release", "finish"]
+        self,
+        context: BrowserControlContext,
+        action: Literal["create", "release", "finish", "forget"],
     ) -> BrowserSession:
         token = self.signer.sign(context, action)
         try:

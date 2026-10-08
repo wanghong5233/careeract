@@ -30,6 +30,7 @@ test("recruiting communication surface exposes four honest synthetic views and s
   const view = CommunicationSurface();
   const content = text(view);
   for (const label of ["待处理会话", "执行任务", "定时委托", "结果记录", "合成演示状态", "等待用户", "结果未知", "继续问 Agent"]) assert.match(content, new RegExp(label));
-  assert.match(content, /不会连接 BOSS、读取真实岗位或发送消息/);
+  assert.match(content, /已支持 BOSS 登录保存与恢复/);
+  assert.match(content, /真实岗位、HR 会话读取和消息发送尚未接入/);
   assert.match(content, /普通聊天文本也不会自动成为外部发送授权/);
 });

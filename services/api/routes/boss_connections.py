@@ -199,3 +199,14 @@ async def finish_login(
     return serialize_login(
         await service.finish(actor, connection_id, expected_version=body.version)
     )
+
+
+@router.delete("/{connection_id}/saved-login", status_code=204)
+async def forget_login(
+    connection_id: UUID,
+    body: RevokeConnectionBody,
+    service: Annotated[BossLoginService, Depends(get_login_service)],
+    actor: Annotated[ActorContext, Depends(get_actor)],
+) -> Response:
+    await service.forget(actor, connection_id, expected_version=body.version)
+    return Response(status_code=204, headers={"Cache-Control": "no-store"})

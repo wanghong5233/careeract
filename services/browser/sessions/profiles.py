@@ -184,6 +184,53 @@ class PostgresBrowserProfileStore:
     ) -> BrowserProfile:
         return await self._change(user_id, profile_id, expected_version, context)
 
+    async def forget_released_session(self, user_id: str, session_id: UUID) -> None:
+        try:
+            async with self.engine.begin() as connection:
+                cutoff = await connection.scalar(
+                    text(
+                        "SELECT o.updated_at FROM browser.steel_operations o "
+                        "JOIN browser.sessions s ON s.session_id=o.session_id "
+                        "WHERE o.session_id=:session AND o.state='released' "
+                        "AND s.user_id=:user AND s.revoked=true AND s.lease_id IS NULL"
+                    ),
+                    {"session": session_id, "user": user_id},
+                )
+                if cutoff is None:
+                    raise BrowserProfileConflict("Profile removal requires confirmed release")
+                rows = (
+                    (
+                        await connection.execute(
+                            text(
+                                "SELECT id,updated_at FROM browser.profiles "
+                                "WHERE user_id=:user AND site=:site AND revoked=false FOR UPDATE"
+                            ),
+                            {"user": user_id, "site": self.scope.site},
+                        )
+                    )
+                    .mappings()
+                    .all()
+                )
+                if any(row["updated_at"] > cutoff for row in rows):
+                    raise BrowserProfileConflict(
+                        "A newer login must not be forgotten by an old session"
+                    )
+                await connection.execute(
+                    text(
+                        "UPDATE browser.profiles SET revoked=true,ciphertext=NULL,version=:version,"
+                        "updated_at=clock_timestamp() WHERE user_id=:user AND site=:site "
+                        "AND revoked=false AND updated_at<=:cutoff"
+                    ),
+                    {
+                        "user": user_id,
+                        "site": self.scope.site,
+                        "cutoff": cutoff,
+                        "version": uuid4(),
+                    },
+                )
+        except (DBAPIError, PoolTimeoutError):
+            raise BrowserProfileUnavailable("Browser profile removal is unavailable") from None
+
     async def revoke(
         self, user_id: str, profile_id: UUID, *, expected_version: UUID
     ) -> BrowserProfile:

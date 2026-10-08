@@ -192,8 +192,10 @@ new creation. Revocation clears the live row's ciphertext and retains a tombston
 preventing stale saves from resurrecting it. A new login gets a new profile ID.
 
 Revoking this snapshot alone does not stop a running browser, invalidate a platform
-session, erase backups, or clear Steel disk files. Product stop/revoke coordination,
-automatic expiry cleanup, key rotation, and disk cleanup remain separate work. The
+session, erase backups, or clear Steel disk files. Product forgetting requires the
+signed session to be revoked and physically released. Only snapshots saved before
+that release are cleared; a newer login rejects the old removal command. Automatic
+expiry cleanup, key rotation, and disk cleanup remain separate work. The
 real Steel canary uses synthetic `example.com` state and isolated PostgreSQL; it
 proves encrypted snapshot restore after adapter/connection reconstruction and a clean
 next session, not a BOSS login or browser process restart.
@@ -233,11 +235,13 @@ the UI and the relay expires within its existing signed deadline. Reopening afte
 confirmed disconnect obtains a new ticket through the authenticated HTML route.
 
 Local product create/release, same-origin single-page cast and renewal beyond one
-minute have been verified. BOSS navigation still ends at a blank page; real login and
-encrypted login-state persistence remain unverified.
+minute have been verified. The compatibility image also passes manual BOSS login,
+encrypted Cookie/localStorage saving and repeated product-session restore.
+Explicit login completion verifies account and message navigation before saving,
+physical release and the product connection update. This authorizes no messaging.
 
 The pinned implementation uses shared Profile paths and does not honor arbitrary
-`userDataDir` as an isolated directory. No real credentials or encrypted recruitment
-snapshot have been saved in the local product verification. The product Viewer is
-now wired; account isolation, Profile cleanup and real login-state persistence still
-require separate verification before real recruitment accounts are retained.
+`userDataDir` as an isolated directory. Real BOSS snapshots are retained encrypted
+in PostgreSQL with a separate local key. Clean sequential session storage has canary
+evidence, but disk cleanup, production isolation and long-term login validity still
+require separate verification.

@@ -4,6 +4,7 @@ import * as React from "react";
 import { loadSource } from "./load-source.mjs";
 
 const Placeholder = ({ children, ...props }) => React.createElement("button", props, children);
+const Container = ({ children }) => React.createElement("div", {}, children);
 const origin = "https://careeract.example";
 const connectionId = "d1965402-3575-4125-b339-6e489e5a3209";
 
@@ -36,6 +37,10 @@ function card(fetch) {
     },
     "lucide-react": { LoaderCircle: Placeholder, RefreshCw: Placeholder },
     "@/components/ui/button": { Button: Placeholder },
+    "@/components/ui/dialog": {
+      Dialog: ({ open, children }) => open ? children : null,
+      DialogContent: Container, DialogDescription: Container, DialogFooter: Container, DialogTitle: Container,
+    },
     "@/lib/latest-request": loadSource("lib/latest-request.ts"),
     "@/lib/utils": { cn: (...values) => values.filter(Boolean).join(" ") },
   }, { fetch });
@@ -51,6 +56,41 @@ function card(fetch) {
 }
 
 const settle = () => new Promise(resolve => setImmediate(resolve));
+
+test("forget requires confirmation, reads revoked state and never retries a lost response", async () => {
+  for (const lost of [false, true]) {
+    let removed = false;
+    let writes = 0;
+    const fixture = card(async (url, options = {}) => {
+      if (url.endsWith("/saved-login")) {
+        writes++;
+        removed = true;
+        assert.equal(options.method, "DELETE");
+        assert.deepEqual(JSON.parse(options.body), { version: "v1" });
+        if (lost) throw new TypeError("Lost response");
+        return new Response(null, { status: 204 });
+      }
+      if (url.endsWith("/login")) return Response.json({ attempt_status: "completed", outcome: "browser_released" });
+      return Response.json({ id: connectionId, version: "v1", status: removed ? "revoked" : "connected" });
+    });
+    fixture.mount();
+    await settle();
+    fixture.click("忘记已保存登录");
+    assert.equal(writes, 0);
+    fixture.click("保留登录");
+    assert.equal(writes, 0);
+    fixture.click("忘记已保存登录");
+    fixture.click("确认忘记登录");
+    await settle();
+    if (lost) {
+      assert.match(text(fixture.render()), /未能确认登录信息删除结果/);
+      fixture.click("重新读取");
+      await settle();
+    }
+    assert.match(text(fixture.render()), /请求已撤销/);
+    assert.equal(writes, 1);
+  }
+});
 
 test("finish reads connected state after verified save and never replays an uncertain save", async () => {
   for (const lost of [false, true]) {
@@ -239,6 +279,7 @@ function bff({ authorized = true, upstream = () => Response.json(null) } = {}) {
     detail: loadSource("app/api/connections/boss/[connectionId]/route.ts", { "../_helpers": helper, "@/app/api/projects/_helpers": shared }),
     login: loadSource("app/api/connections/boss/[connectionId]/login/route.ts", { "../../_helpers": helper, "@/app/api/projects/_helpers": shared }),
     finish: loadSource("app/api/connections/boss/[connectionId]/login/finish/route.ts", { "../../../_helpers": helper, "@/app/api/projects/_helpers": shared }),
+    forget: loadSource("app/api/connections/boss/[connectionId]/saved-login/route.ts", { "../../_helpers": helper, "@/app/api/projects/_helpers": shared }),
     viewer: loadSource("app/api/browser/sessions/[sessionId]/viewer/route.ts", {
       "@/app/api/projects/_helpers": shared,
       "@/lib/server-env": { serverEnv: { apiBaseUrl: "https://api.example" } },
@@ -323,6 +364,21 @@ test("finish BFF preserves version and rejects foreign origin, missing identity 
   assert.equal((await fixture.finish.POST(request("POST", body), context)).status, 200);
   assert.equal(fixture.calls.length, 1);
   assert.equal(new URL(fixture.calls[0].url).pathname, `/api/v1/connections/boss/${connectionId}/login/finish`);
+  assert.deepEqual(JSON.parse(fixture.calls[0].options.body), body);
+});
+
+test("forget BFF preserves empty 204 and blocks foreign origin or unauthenticated removal", async () => {
+  const context = { params: Promise.resolve({ connectionId }) };
+  const fixture = bff({ upstream: () => new Response(null, { status: 204 }) });
+  const body = { version: "v1" };
+  assert.equal((await fixture.forget.DELETE(request("DELETE", body, { Origin: "https://other.example" }), context)).status, 403);
+  const denied = bff({ authorized: false });
+  assert.equal((await denied.forget.DELETE(request("DELETE", body), context)).status, 401);
+  assert.equal(denied.calls.length, 0);
+  const response = await fixture.forget.DELETE(request("DELETE", body), context);
+  assert.equal(response.status, 204);
+  assert.equal(await response.text(), "");
+  assert.equal(new URL(fixture.calls[0].url).pathname, `/api/v1/connections/boss/${connectionId}/saved-login`);
   assert.deepEqual(JSON.parse(fixture.calls[0].options.body), body);
 });
 

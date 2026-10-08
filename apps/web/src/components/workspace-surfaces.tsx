@@ -113,9 +113,9 @@ export function CommunicationSurface() {
     ? "我想设计一个 BOSS 招聘沟通定时委托。请先确认平台、岗位范围、频率、时区、数量上限、只读/草稿/发送模式、授权有效期和暂停撤销方式；当前只讨论，不创建真实后台任务。"
     : "我想创建一次 BOSS 招聘沟通任务。请先确认岗位范围、职业约束、招聘方会话、个性化打招呼依据和需要我明确授权的动作；当前只讨论，不发送消息。";
   return <>
-    <SurfaceHeader title="招聘沟通" description="把 Agent 的判断、招聘方会话和外部沟通任务放在同一个可找回的工作面；真实平台尚未连接。" action={<div className="flex flex-wrap gap-2"><AgentAction prompt={prompt}>新建沟通任务</AgentAction><AgentAction variant="outline" prompt="我想设计一个 BOSS 招聘沟通定时委托。请先确认平台、岗位范围、频率、时区、数量上限、只读/草稿/发送模式、授权有效期和暂停撤销方式；当前只讨论，不创建真实后台任务。">创建定时委托</AgentAction></div>} />
+    <SurfaceHeader title="招聘沟通" description="把 Agent 的判断、招聘方会话和外部沟通任务放在同一个可找回的工作面；BOSS 登录状态见下方连接卡片。" action={<div className="flex flex-wrap gap-2"><AgentAction prompt={prompt}>新建沟通任务</AgentAction><AgentAction variant="outline" prompt="我想设计一个 BOSS 招聘沟通定时委托。请先确认平台、岗位范围、频率、时区、数量上限、只读/草稿/发送模式、授权有效期和暂停撤销方式；当前只讨论，不创建真实后台任务。">创建定时委托</AgentAction></div>} />
     <BossConnectionCard />
-    <Unavailable>当前仍不会连接 BOSS、读取真实岗位或发送消息。普通聊天文本也不会自动成为外部发送授权。</Unavailable>
+    <Unavailable>当前已支持 BOSS 登录保存与恢复；真实岗位、HR 会话读取和消息发送尚未接入。普通聊天文本也不会自动成为外部发送授权。</Unavailable>
     <div className="mb-5 flex flex-wrap items-center justify-between gap-3"><ViewPicker options={["待处理会话", "执行任务", "定时委托", "结果记录"] as const} value={view} onChange={next => { setView(next as CommunicationView); setSelectedId(next === "执行任务" ? "task" : next === "结果记录" ? "report" : next === "定时委托" ? "automation" : "conversation"); }} label="招聘沟通视图" /><span className="text-xs text-muted-foreground">合成演示状态 · 未连接数据源</span></div>
     <div aria-label="任务状态图例" className="mb-5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground"><span className="mr-1">状态语义</span>{(Object.keys(communicationStatusLabels) as CommunicationStatus[]).map(status => <CommunicationStatus key={status} status={status} />)}</div>
     <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1fr)_19rem]">

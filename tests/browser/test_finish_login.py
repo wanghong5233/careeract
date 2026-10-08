@@ -1,4 +1,5 @@
 from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import AsyncMock
@@ -6,15 +7,18 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from services.api.application.ports.browser_control import (
     BrowserControlConflict,
     BrowserControlRejected,
+    BrowserControlUncertain,
 )
 from services.api.infrastructure.browser_control import BrowserCommandSigner, BrowserControlClient
 from services.browser.app.factory import create_app
 from services.browser.sessions.authentication import CommandVerifier
+from services.browser.sessions.context import BrowserContext
 from services.browser.sessions.postgres import PostgresLeaseStore
 from services.browser.sessions.profiles import PostgresBrowserProfileStore, ProfileCipher
 from services.browser.sessions.steel import SteelSessionManager
@@ -95,3 +99,27 @@ async def test_finish_saves_only_verified_state_and_releases_with_evidence(
                 await adapter.lifecycle(context, "finish")
             with pytest.raises(BrowserControlRejected):
                 await adapter.lifecycle(replace(context, user_id="other"), "finish")
+            if authenticated:
+                expired = replace(
+                    context, authorization_expires_at=datetime.now(UTC) - timedelta(seconds=1)
+                )
+                await adapter.lifecycle(expired, "forget")
+                assert await profiles.current(context.user_id) is None
+                async with engine.connect() as database:
+                    assert (
+                        await database.scalar(
+                            text(
+                                "SELECT count(*) FROM browser.profiles WHERE user_id=:user "
+                                "AND site='boss' AND revoked=true AND ciphertext IS NULL"
+                            ),
+                            {"user": context.user_id},
+                        )
+                        == 1
+                    )
+                await adapter.lifecycle(context, "forget")
+                await profiles.create(
+                    context.user_id, BrowserContext.from_playwright(reader.return_value, BOSS_SCOPE)
+                )
+                with pytest.raises(BrowserControlUncertain):
+                    await adapter.lifecycle(context, "forget")
+                assert await profiles.current(context.user_id) is not None

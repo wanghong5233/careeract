@@ -14,6 +14,7 @@ BrowserAction = Literal[
     "create",
     "release",
     "finish",
+    "forget",
 ]
 
 
@@ -65,5 +66,7 @@ class BrowserSessionControl(Protocol):
     ) -> BrowserLease | None: ...
 
     async def lifecycle(
-        self, context: BrowserControlContext, action: Literal["create", "release", "finish"]
+        self,
+        context: BrowserControlContext,
+        action: Literal["create", "release", "finish", "forget"],
     ) -> BrowserSession: ...

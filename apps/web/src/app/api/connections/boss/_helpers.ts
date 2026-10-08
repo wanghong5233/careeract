@@ -64,7 +64,7 @@ export async function forward(request: NextRequest, path: string, method: "GET" 
     if (upstream.status === 401 || upstream.status === 403) {
       return failure(upstream.status, "unauthorized", "登录验证失败，请重新登录。", requestId);
     }
-    if (![200, 201, 404, 409, 422, 503].includes(upstream.status)) {
+    if (![200, 201, 204, 404, 409, 422, 503].includes(upstream.status)) {
       return failure(502, "boss_connection_unavailable", "连接服务暂不可用，请稍后读取并核对。", requestId);
     }
     return new NextResponse(upstream.body, {
