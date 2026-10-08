@@ -19,13 +19,16 @@ from services.browser.site_adapters.boss_login import (
     [
         None,
         "initial_blank",
+        "initial_empty",
         "redirect_blank",
+        "redirect_empty",
         "target",
         "url",
         "multiple_pages",
         "discovery",
         "navigation",
         "blank",
+        "empty",
         "foreign",
     ],
 )
@@ -41,7 +44,9 @@ async def test_login_navigation_uses_owned_blank_page_and_disconnects(
     }
     navigation = AsyncMock(return_value={"errorText": "private"} if changed == "navigation" else {})
     retained_url = (
-        "about:blank"
+        ""
+        if changed == "empty"
+        else "about:blank"
         if changed == "blank"
         else "https://example.com"
         if changed == "foreign"
@@ -64,15 +69,15 @@ async def test_login_navigation_uses_owned_blank_page_and_disconnects(
         ),
     )
     constructor = Mock(return_value=client)
-    if changed == "initial_blank":
+    if changed in {"initial_blank", "initial_empty"}:
         client.send.Target.getTargetInfo.side_effect = [
-            {"targetInfo": {"url": "about:blank"}},
+            {"targetInfo": {"url": "" if changed == "initial_empty" else "about:blank"}},
             {"targetInfo": {"url": BOSS_LOGIN_URL}},
         ]
-    if changed == "redirect_blank":
+    if changed in {"redirect_blank", "redirect_empty"}:
         client.send.Target.getTargetInfo.side_effect = [
             {"targetInfo": {"url": BOSS_LOGIN_URL}},
-            {"targetInfo": {"url": "about:blank"}},
+            {"targetInfo": {"url": "" if changed == "redirect_empty" else "about:blank"}},
             {"targetInfo": {"url": "https://www.zhipin.com/"}},
         ]
 
@@ -97,9 +102,9 @@ async def test_login_navigation_uses_owned_blank_page_and_disconnects(
         "services.browser.site_adapters.boss_login.monotonic",
         Mock(
             side_effect=[0, 0, 1, 4]
-            if changed == "redirect_blank"
+            if changed in {"redirect_blank", "redirect_empty"}
             else [0, 0, 4]
-            if changed == "initial_blank"
+            if changed in {"initial_blank", "initial_empty"}
             else [0, 4]
         ),
     )
@@ -114,7 +119,7 @@ async def test_login_navigation_uses_owned_blank_page_and_disconnects(
     )
     async with steel_client:
         navigator = BossLoginNavigator(steel_client, AnyHttpUrl("http://cdp:9223"))
-        if changed in {None, "initial_blank", "redirect_blank"}:
+        if changed in {None, "initial_blank", "initial_empty", "redirect_blank", "redirect_empty"}:
             await navigator(session_id)
             constructor.assert_called_once_with("ws://cdp:9223/devtools/browser/synthetic")
             navigation.assert_awaited_once_with(
@@ -124,7 +129,7 @@ async def test_login_navigation_uses_owned_blank_page_and_disconnects(
         else:
             with pytest.raises(BossLoginUnavailable):
                 await navigator(session_id)
-            if changed not in {"navigation", "blank", "foreign"}:
+            if changed not in {"navigation", "blank", "empty", "foreign"}:
                 navigation.assert_not_awaited()
     if changed == "discovery":
         constructor.assert_not_called()

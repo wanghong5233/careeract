@@ -35,7 +35,10 @@ in a new isolated session. Product cookie restore and capture of both cookies
 and localStorage at release have passed locally. Later full-context navigation
 failed the site-retention check, with the page subsequently observed on the BOSS
 home or verification page. A transient `about:blank` remains an unverified
-hypothesis; the bounded navigation fix needs a daily-service reload and acceptance.
+hypothesis. After allowing empty URLs within the bounded navigation window and
+reloading the daily service, a product session restored the logged-in BOSS home
+page without another QR login. Release and encrypted full-context update passed;
+persistent empty URLs and foreign origins remain rejected.
 Account forgetting, joint revocation and deployment remain separate gates.
 
 Build through the development Compose file. Production Compose still uses the

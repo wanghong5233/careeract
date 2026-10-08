@@ -133,7 +133,7 @@ Docker CLI 存在不代表 Linux 引擎已启动。检查可用内存、Docker �
    ```
 
    ```powershell
-   uv run --package careeract-browser uvicorn services.browser.app.main:app --port 8001 --reload
+   uv run --package careeract-browser python -m uvicorn services.browser.app.main:app --host 127.0.0.1 --port 8001 --reload --reload-dir services/browser
    ```
 
    LiteLLM 配置在 `infra/litellm/config.yaml`，当前提供两个服务端模型别名：

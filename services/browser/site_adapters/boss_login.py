@@ -77,7 +77,7 @@ class BossLoginNavigator:
                         current = urlsplit(info["targetInfo"]["url"])
                         if current.scheme == "https" and current.hostname == "www.zhipin.com":
                             retained_site = True
-                        elif info["targetInfo"]["url"] == "about:blank":
+                        elif info["targetInfo"]["url"] in {"", "about:blank"}:
                             retained_site = False
                         else:
                             raise BossLoginUnavailable(
