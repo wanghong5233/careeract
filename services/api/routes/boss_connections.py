@@ -185,3 +185,17 @@ async def stop_login(
 ) -> LoginResponse:
     response.headers["Cache-Control"] = "no-store"
     return serialize_login(await service.stop(actor, connection_id, expected_version=body.version))
+
+
+@router.post("/{connection_id}/login/finish", response_model=LoginResponse)
+async def finish_login(
+    connection_id: UUID,
+    body: RevokeConnectionBody,
+    response: Response,
+    service: Annotated[BossLoginService, Depends(get_login_service)],
+    actor: Annotated[ActorContext, Depends(get_actor)],
+) -> LoginResponse:
+    response.headers["Cache-Control"] = "no-store"
+    return serialize_login(
+        await service.finish(actor, connection_id, expected_version=body.version)
+    )

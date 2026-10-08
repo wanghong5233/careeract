@@ -33,6 +33,7 @@ class SessionResponse(BaseModel):
 
     session_id: UUID
     status: Literal["live", "released"]
+    login_verified: bool | None = None
 
 
 class BrowserCommandSigner:
@@ -46,7 +47,9 @@ class BrowserCommandSigner:
             not context.user_id.strip()
             or not context.owner_id.strip()
             or context.authorization_expires_at.utcoffset() is None
-            or (action in ("register", "revoke", "acquire", "viewer", "create", "release"))
+            or (
+                action in ("register", "revoke", "acquire", "viewer", "create", "release", "finish")
+            )
             != (lease_id is None)
         ):
             raise BrowserControlRejected("Invalid browser control context")
@@ -86,7 +89,7 @@ class BrowserControlClient:
     async def send(
         self, context: BrowserControlContext, action: BrowserAction, lease_id: UUID | None = None
     ) -> BrowserLease | None:
-        if action in ("viewer", "create", "release"):
+        if action in ("viewer", "create", "release", "finish"):
             raise BrowserControlRejected("Browser action requires its dedicated adapter")
         token = self.signer.sign(context, action, lease_id)
         prefix = "" if action in ("register", "revoke") else "lease/"
@@ -129,7 +132,7 @@ class BrowserControlClient:
         )
 
     async def lifecycle(
-        self, context: BrowserControlContext, action: Literal["create", "release"]
+        self, context: BrowserControlContext, action: Literal["create", "release", "finish"]
     ) -> BrowserSession:
         token = self.signer.sign(context, action)
         try:
@@ -155,4 +158,6 @@ class BrowserControlClient:
             "live" if action == "create" else "released"
         ):
             raise BrowserControlUncertain("Browser lifecycle response does not match command")
-        return BrowserSession(result.session_id, result.status)
+        if action == "finish" and type(result.login_verified) is not bool:
+            raise BrowserControlUncertain("Login verification evidence is missing")
+        return BrowserSession(result.session_id, result.status, result.login_verified)

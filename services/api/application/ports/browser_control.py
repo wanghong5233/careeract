@@ -4,7 +4,16 @@ from typing import Literal, Protocol
 from uuid import UUID
 
 BrowserAction = Literal[
-    "register", "revoke", "acquire", "renew", "stop", "check", "viewer", "create", "release"
+    "register",
+    "revoke",
+    "acquire",
+    "renew",
+    "stop",
+    "check",
+    "viewer",
+    "create",
+    "release",
+    "finish",
 ]
 
 
@@ -35,6 +44,7 @@ class BrowserLease:
 class BrowserSession:
     session_id: UUID
     status: Literal["live", "released"]
+    login_verified: bool | None = None
 
 
 class BrowserControlRejected(Exception):
@@ -55,5 +65,5 @@ class BrowserSessionControl(Protocol):
     ) -> BrowserLease | None: ...
 
     async def lifecycle(
-        self, context: BrowserControlContext, action: Literal["create", "release"]
+        self, context: BrowserControlContext, action: Literal["create", "release", "finish"]
     ) -> BrowserSession: ...

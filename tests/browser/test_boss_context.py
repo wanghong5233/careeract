@@ -10,7 +10,9 @@ from services.browser.site_adapters.boss_context import BossContextReader, BossC
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("changed", [None, "owner", "multiple", "site", "cookie_only"])
+@pytest.mark.parametrize(
+    "changed", [None, "owner", "multiple", "site", "cookie_only", "verify", "anonymous"]
+)
 async def test_context_capture_is_scoped_disconnects_and_uses_no_runtime_enable(
     monkeypatch: pytest.MonkeyPatch, changed: str | None
 ) -> None:
@@ -20,6 +22,8 @@ async def test_context_capture_is_scoped_disconnects_and_uses_no_runtime_enable(
         "targetId": "owned",
         "url": "https://example.com"
         if changed == "site"
+        else "https://www.zhipin.com/web/passport/zp/verify.html"
+        if changed == "verify"
         else "https://www.zhipin.com/web/geek/jobs",
     }
     cookies = [{"name": "synthetic", "value": "synthetic", "domain": ".zhipin.com"}]
@@ -41,7 +45,9 @@ async def test_context_capture_is_scoped_disconnects_and_uses_no_runtime_enable(
             ),
             DOM=SimpleNamespace(
                 getDocument=AsyncMock(return_value={"root": {"nodeId": 1}}),
-                querySelector=AsyncMock(return_value={"nodeId": 2}),
+                querySelector=AsyncMock(
+                    return_value={"nodeId": 0 if changed == "anonymous" else 2}
+                ),
             ),
         ),
     )
@@ -90,5 +96,6 @@ async def test_context_capture_is_scoped_disconnects_and_uses_no_runtime_enable(
             cdp.send.DOMStorage.getDOMStorageItems.assert_not_awaited()
         else:
             assert state["origins"][0]["origin"] == "https://www.zhipin.com"
+            assert state["authenticated"] is (changed not in {"verify", "anonymous"})
     if changed != "owner":
         cdp.stop.assert_awaited_once()

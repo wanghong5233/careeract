@@ -3,7 +3,13 @@ from uuid import UUID
 
 from services.api.application.browser_registration import BrowserRegistrationService
 from services.api.application.context import ActorContext
-from services.api.domain.execution import ExecutionConflict, LoginExecution
+from services.api.application.ports.browser_control import (
+    BrowserControlConflict,
+    BrowserControlContext,
+    BrowserControlRejected,
+    BrowserControlUncertain,
+)
+from services.api.domain.execution import ExecutionConflict, ExecutionUnavailable, LoginExecution
 
 
 class BossLoginService:
@@ -51,3 +57,42 @@ class BossLoginService:
         if result is None:
             raise ExecutionConflict("Login execution is unavailable")
         return result
+
+    async def finish(
+        self, actor: ActorContext, connection_id: UUID, *, expected_version: UUID
+    ) -> LoginExecution:
+        current = await self.read(actor, connection_id)
+        if current is None:
+            raise ExecutionConflict("Login execution has not started")
+        if current.attempt.status == "completed" and current.attempt.outcome == "browser_released":
+            return current
+        if (
+            current.attempt.status != "waiting"
+            or current.attempt.outcome != "browser_created"
+            or current.attempt.browser_session_id is None
+            or current.authorization.status != "active"
+            or current.authorization.expires_at <= datetime.now(UTC)
+        ):
+            raise ExecutionConflict("Login verification requires an active login")
+        await self.browser.revoke(actor, current.attempt.id, expected_version=expected_version)
+        context = BrowserControlContext(
+            actor.user_id,
+            current.attempt.browser_session_id,
+            current.task.id,
+            current.authorization.id,
+            current.authorization.expires_at,
+            current.attempt.id,
+            UUID(actor.request_id),
+            "boss-login",
+        )
+        try:
+            result = await self.browser.control.lifecycle(context, "finish")
+        except (BrowserControlConflict, BrowserControlRejected, BrowserControlUncertain):
+            raise ExecutionUnavailable("Login verification requires reconciliation") from None
+        await self.browser.repository.record_release(
+            actor, current.attempt.id, login_verified=result.login_verified is True
+        )
+        updated = await self.read(actor, connection_id)
+        if updated is None:
+            raise ExecutionConflict("Login execution is unavailable")
+        return updated

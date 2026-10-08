@@ -113,8 +113,20 @@ class BossContextReader:
                     },
                     session_id=attached["sessionId"],
                 )
+                messages = await cdp.send.DOM.querySelector(
+                    params={
+                        "nodeId": document["root"]["nodeId"],
+                        "selector": 'a[href*="/web/geek/chat"]',
+                    },
+                    session_id=attached["sessionId"],
+                )
                 return {
-                    "authenticated": account["nodeId"] > 0,
+                    "authenticated": account["nodeId"] > 0
+                    and messages["nodeId"] > 0
+                    and not any(
+                        marker in page_url.path
+                        for marker in ("/passport/", "/login", "/verify", "/security")
+                    ),
                     "cookies": cookies["cookies"],
                     "origins": [
                         {

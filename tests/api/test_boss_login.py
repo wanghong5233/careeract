@@ -1,3 +1,6 @@
+from types import SimpleNamespace
+from typing import cast
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import httpx
@@ -13,7 +16,9 @@ from services.api.infrastructure.execution import PostgresExecutionRepository
 from services.browser.app.factory import create_app as create_browser_app
 from services.browser.sessions.authentication import CommandVerifier
 from services.browser.sessions.postgres import PostgresLeaseStore
+from services.browser.sessions.profiles import PostgresBrowserProfileStore, ProfileCipher
 from services.browser.sessions.steel import SteelSessionManager
+from services.browser.site_adapters.boss_context import BOSS_SCOPE, BossContextReader
 from tests.api.test_execution_semantics import Scenario
 from tests.api.test_execution_semantics import pytestmark as pytestmark
 from tests.api.test_execution_semantics import scenario as scenario
@@ -21,6 +26,100 @@ from tests.api.test_health import FakeAgentRuntime, build_settings, use_signing_
 from tests.api.test_projects import token_for
 from tests.browser.test_postgres_leases import database_url as database_url
 from tests.browser.test_steel_sessions import SyntheticSteel
+
+
+@pytest.mark.parametrize("authenticated", [True, False])
+async def test_finish_login_updates_owned_business_state_only_after_verified_save(
+    scenario: Scenario, monkeypatch: pytest.MonkeyPatch, authenticated: bool
+) -> None:
+    key = Ed25519PrivateKey.generate()
+    use_signing_key(monkeypatch, key)
+    steel = SyntheticSteel()
+    connections = PostgresBossConnectionRepository(scenario.engine)
+    profiles = PostgresBrowserProfileStore(scenario.engine, ProfileCipher(b"f" * 32), BOSS_SCOPE)
+    reader = AsyncMock(
+        return_value={
+            "authenticated": authenticated,
+            "cookies": [{"name": "synthetic", "value": "value", "domain": ".zhipin.com"}],
+            "origins": [],
+        }
+    )
+    async with httpx.AsyncClient(
+        base_url="http://steel", transport=httpx.MockTransport(steel.respond)
+    ) as steel_client:
+        browser = create_browser_app(
+            verifier=CommandVerifier(key.public_key()),
+            store=PostgresLeaseStore(scenario.engine),
+            steel_sessions=SteelSessionManager(steel_client, scenario.engine),
+            profiles=profiles,
+            context_reader=lambda _session: cast(
+                BossContextReader, SimpleNamespace(storage_state=reader)
+            ),
+        )
+        async with httpx.AsyncClient(
+            base_url="http://browser", transport=httpx.ASGITransport(app=browser)
+        ) as browser_client:
+            app = create_app(build_settings(), lambda _settings: FakeAgentRuntime())
+            app.state.boss_login_service = BossLoginService(
+                BrowserRegistrationService(
+                    PostgresExecutionRepository(scenario.engine),
+                    BrowserControlClient(browser_client, BrowserCommandSigner(key)),
+                )
+            )
+            async with httpx.AsyncClient(
+                base_url="http://test", transport=httpx.ASGITransport(app=app)
+            ) as client:
+                path = f"/api/v1/connections/boss/{scenario.connection_id}/login"
+                headers = {
+                    "Authorization": "Bearer " + token_for(key, scenario.actor.user_id),
+                    "Idempotency-Key": str(uuid4()),
+                }
+                connection = await connections.get_current(scenario.actor)
+                assert connection is not None
+                await client.post(
+                    path,
+                    headers=headers,
+                    json={"version": str(connection.version), "authorize_login": True},
+                )
+                connection = await connections.get_current(scenario.actor)
+                assert connection is not None
+                body = {"version": str(connection.version)}
+                assert (await client.post(path + "/finish", json=body)).status_code == 401
+                assert (
+                    await client.post(
+                        path + "/finish",
+                        json=body,
+                        headers={
+                            "Authorization": "Bearer " + token_for(key, scenario.other.user_id)
+                        },
+                    )
+                ).status_code == 404
+                assert (
+                    await client.post(
+                        path + "/finish",
+                        headers=headers,
+                        json={"version": str(uuid4())},
+                    )
+                ).status_code == 409
+                reader.assert_not_awaited()
+                finished = await client.post(path + "/finish", headers=headers, json=body)
+                assert finished.status_code == 200
+                result = finished.json()
+                assert result["attempt_status"] == ("completed" if authenticated else "cancelled")
+                assert result["task_status"] == ("completed" if authenticated else "cancelled")
+                assert result["outcome"] == "browser_released"
+                assert result["authorization_status"] == "revoked"
+                assert finished.headers["cache-control"] == "no-store"
+                current = await connections.get_current(scenario.actor)
+                assert current is not None
+                assert current.status == ("connected" if authenticated else "revoked")
+                assert bool(await profiles.current(scenario.actor.user_id)) is authenticated
+                assert len(steel.writes) == 2
+                if authenticated:
+                    assert (
+                        await client.post(path + "/finish", headers=headers, json=body)
+                    ).json() == result
+                    assert len(steel.writes) == 2
 
 
 async def test_product_login_requires_explicit_scope_version_and_owned_connection(

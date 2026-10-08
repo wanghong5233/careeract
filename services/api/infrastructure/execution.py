@@ -642,7 +642,9 @@ class PostgresExecutionRepository:
         except (DBAPIError, PoolTimeoutError):
             raise ExecutionUnavailable("Execution state is unavailable") from None
 
-    async def record_release(self, actor: ActorContext, attempt_id: UUID) -> ExecutionAttempt:
+    async def record_release(
+        self, actor: ActorContext, attempt_id: UUID, *, login_verified: bool = False
+    ) -> ExecutionAttempt:
         try:
             async with self.engine.begin() as database:
                 row = await self._lock(database, actor, attempt_id)
@@ -654,11 +656,14 @@ class PostgresExecutionRepository:
                     (
                         await database.execute(
                             text(
-                                "UPDATE career.execution_attempts SET status='cancelled', "
+                                "UPDATE career.execution_attempts SET status=:status, "
                                 "outcome='browser_released', finished_at=clock_timestamp(), "
                                 "updated_at=clock_timestamp() WHERE id=:id RETURNING *"
                             ),
-                            {"id": attempt_id},
+                            {
+                                "id": attempt_id,
+                                "status": "completed" if login_verified else "cancelled",
+                            },
                         )
                     )
                     .mappings()
@@ -666,12 +671,27 @@ class PostgresExecutionRepository:
                 )
                 await database.execute(
                     text(
-                        "UPDATE career.boss_connections SET status='revoked', "
-                        "last_observed_state='browser_released', version=:version, "
+                        "UPDATE career.boss_connections SET status=:status, "
+                        "last_observed_state=:observed, version=:version, "
                         "updated_at=clock_timestamp() WHERE id=:id"
                     ),
-                    {"id": row["connection_id"], "version": uuid4()},
+                    {
+                        "id": row["connection_id"],
+                        "version": uuid4(),
+                        "status": "connected" if login_verified else "revoked",
+                        "observed": "login_verified_and_saved"
+                        if login_verified
+                        else "browser_released",
+                    },
                 )
+                if login_verified:
+                    await database.execute(
+                        text(
+                            "UPDATE career.execution_tasks SET status='completed', "
+                            "updated_at=clock_timestamp() WHERE id=:id"
+                        ),
+                        {"id": row["task_id"]},
+                    )
                 return attempt_from_row(updated)
         except (DBAPIError, PoolTimeoutError):
             raise ExecutionUnavailable("Execution state is unavailable") from None

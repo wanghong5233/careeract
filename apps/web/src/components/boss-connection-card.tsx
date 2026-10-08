@@ -30,7 +30,7 @@ export function BossConnectionCard() {
   const [connection, setConnection] = useState<Connection | null>(null);
   const [login, setLogin] = useState<LoginExecution | null>(null);
   const [loginAvailable, setLoginAvailable] = useState<boolean | null>(null);
-  const [busy, setBusy] = useState<"read" | "start" | "stop" | null>("read");
+  const [busy, setBusy] = useState<"read" | "start" | "stop" | "finish" | null>("read");
   const [error, setError] = useState<string | null>(null);
   const [needsReconciliation, setNeedsReconciliation] = useState(false);
   const requests = useRef(createLatestRequest());
@@ -157,6 +157,38 @@ export function BossConnectionCard() {
     }
   };
 
+  const finishLogin = async () => {
+    if (writing.current || busy || needsReconciliation || !connection) return;
+    writing.current = true;
+    const controller = requests.current.start();
+    setBusy("finish");
+    setError(null);
+    try {
+      const response = await fetch(`/api/connections/boss/${connection.id}/login/finish`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ version: connection.version }),
+        signal: AbortSignal.any([controller.signal, AbortSignal.timeout(60_000)]),
+      });
+      if (!response.ok) throw new Error("Login verification unconfirmed");
+      const finished = await response.json() as LoginExecution;
+      if (!requests.current.isCurrent(controller)) return;
+      setLogin(finished);
+      requestKey.current = null;
+      writing.current = false;
+      await load();
+      if (finished.attempt_status !== "completed") setError("未核验到已登录状态，请重新登录或完成平台安全验证。");
+    } catch (failure) {
+      if (!requests.current.isCurrent(controller)) return;
+      if (!(failure instanceof Error)) throw failure;
+      setNeedsReconciliation(true);
+      setError("未能确认登录核验或保存结果，请重新读取；不会自动重试。");
+    } finally {
+      writing.current = false;
+      if (requests.current.isCurrent(controller)) setBusy(null);
+    }
+  };
+
   const active = connection && !["revoked", "failed"].includes(connection.status);
   const browserReady = login?.attempt_status === "waiting" && login.outcome === "browser_created" && login.browser_session_id;
   const cleanupRequired = Boolean(login?.browser_session_id && login.outcome !== "browser_released");
@@ -169,12 +201,13 @@ export function BossConnectionCard() {
       </span>
     </div>
     <p className="mt-4 max-w-2xl text-xs leading-5 text-muted-foreground">密码、短信验证码和验证码只应由你在安全浏览器中输入，不会进入 Agent 对话或普通业务记录。</p>
-    <p className="mt-2 max-w-2xl text-xs leading-5 text-muted-foreground">登录会在隔离浏览器中进行。CareerAct 不接收密码、短信验证码或验证码；完成登录后会继续停留在等待核验状态。</p>
+    <p className="mt-2 max-w-2xl text-xs leading-5 text-muted-foreground">{connection?.status === "connected" ? "登录已核验并加密保存。后续恢复仍可能需要平台安全验证；尚未开启消息回复或简历发送。" : "登录会在隔离浏览器中进行。完成后点击“完成登录并保存”，系统将核验登录状态、加密保存并关闭本次浏览器。"}</p>
     <div className="mt-4 flex flex-wrap items-center gap-3">
       <Button disabled={busy !== null || needsReconciliation || loginAvailable === false || cleanupRequired || connection?.status === "connected"} variant="outline" onClick={() => void startLogin()}>
         {busy === "start" && <LoaderCircle className="size-3.5 animate-spin" />}{browserReady ? "等待登录" : active ? "开始安全登录" : "重新开始安全登录"}
       </Button>
       {viewerHref && <a className="inline-flex min-h-9 items-center gap-2 rounded-md border px-3 text-xs hover:bg-muted" href={viewerHref} target="_blank" rel="noreferrer"><ExternalLink className="size-3.5" />打开安全浏览器</a>}
+      {browserReady && <Button disabled={busy !== null || needsReconciliation} onClick={() => void finishLogin()}>{busy === "finish" && <LoaderCircle className="size-3.5 animate-spin" />}完成登录并保存</Button>}
       {cleanupRequired && <Button disabled={busy !== null || needsReconciliation} variant="ghost" onClick={() => void stopLogin()}>{busy === "stop" && <LoaderCircle className="size-3.5 animate-spin" />}停止登录</Button>}
       <Button disabled={busy !== null} variant="ghost" onClick={() => void load()}><RefreshCw className="size-3.5" />重新读取</Button>
     </div>

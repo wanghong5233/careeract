@@ -52,6 +52,38 @@ function card(fetch) {
 
 const settle = () => new Promise(resolve => setImmediate(resolve));
 
+test("finish reads connected state after verified save and never replays an uncertain save", async () => {
+  for (const lost of [false, true]) {
+    let saved = false;
+    let writes = 0;
+    const fixture = card(async (url, options = {}) => {
+      if (url.endsWith("/finish")) {
+        writes++;
+        assert.deepEqual(JSON.parse(options.body), { version: "v1" });
+        saved = true;
+        if (lost) throw new TypeError("Lost save response");
+        return Response.json({ attempt_status: "completed", outcome: "browser_released" });
+      }
+      if (url.endsWith("/login")) return Response.json(saved
+        ? { attempt_status: "completed", outcome: "browser_released" }
+        : { attempt_status: "waiting", outcome: "browser_created", browser_session_id: connectionId });
+      return Response.json({ id: connectionId, version: "v1", status: saved ? "connected" : "waiting_for_login" });
+    });
+    fixture.mount();
+    await settle();
+    fixture.click("完成登录并保存");
+    await settle();
+    if (lost) {
+      assert.match(text(fixture.render()), /未能确认登录核验或保存结果/);
+      fixture.click("重新读取");
+      await settle();
+    }
+    assert.match(text(fixture.render()), /登录已核验并加密保存/);
+    assert.equal(writes, 1);
+    assert.ok(!text(fixture.render()).includes("完成登录并保存"));
+  }
+});
+
 test("confirmed cleanup after an uncertain start uses a fresh key for the next login", async () => {
   const keys = [];
   let connection = { id: connectionId, version: "v1", status: "revoked" };
@@ -206,6 +238,7 @@ function bff({ authorized = true, upstream = () => Response.json(null) } = {}) {
     root: loadSource("app/api/connections/boss/route.ts", { "./_helpers": helper }),
     detail: loadSource("app/api/connections/boss/[connectionId]/route.ts", { "../_helpers": helper, "@/app/api/projects/_helpers": shared }),
     login: loadSource("app/api/connections/boss/[connectionId]/login/route.ts", { "../../_helpers": helper, "@/app/api/projects/_helpers": shared }),
+    finish: loadSource("app/api/connections/boss/[connectionId]/login/finish/route.ts", { "../../../_helpers": helper, "@/app/api/projects/_helpers": shared }),
     viewer: loadSource("app/api/browser/sessions/[sessionId]/viewer/route.ts", {
       "@/app/api/projects/_helpers": shared,
       "@/lib/server-env": { serverEnv: { apiBaseUrl: "https://api.example" } },
@@ -276,6 +309,21 @@ test("login BFF keeps explicit authorization, key, version and long-operation ti
   const lost = bff({ upstream: () => { throw new TypeError("Private lifecycle diagnostics"); } });
   assert.equal((await lost.login.POST(request("POST", body), context)).status, 502);
   assert.equal(lost.calls.length, 1);
+});
+
+test("finish BFF preserves version and rejects foreign origin, missing identity and invalid ID", async () => {
+  const context = { params: Promise.resolve({ connectionId }) };
+  const fixture = bff({ upstream: () => Response.json({ attempt_status: "completed" }) });
+  const body = { version: "v1" };
+  assert.equal((await fixture.finish.POST(request("POST", body, { Origin: "https://other.example" }), context)).status, 403);
+  assert.equal((await fixture.finish.POST(request("POST", body), { params: Promise.resolve({ connectionId: "../other" }) })).status, 422);
+  const denied = bff({ authorized: false });
+  assert.equal((await denied.finish.POST(request("POST", body), context)).status, 401);
+  assert.equal(denied.calls.length, 0);
+  assert.equal((await fixture.finish.POST(request("POST", body), context)).status, 200);
+  assert.equal(fixture.calls.length, 1);
+  assert.equal(new URL(fixture.calls[0].url).pathname, `/api/v1/connections/boss/${connectionId}/login/finish`);
+  assert.deepEqual(JSON.parse(fixture.calls[0].options.body), body);
 });
 
 test("viewer BFF keeps HTML same-origin and forwards the short-lived cookie", async () => {

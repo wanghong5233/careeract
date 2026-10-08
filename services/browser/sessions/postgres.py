@@ -230,7 +230,7 @@ class PostgresLeaseStore:
                 )
 
     async def authorize_lifecycle(self, command: BrowserCommand) -> None:
-        if command.action not in ("create", "release") or command.lease_id is not None:
+        if command.action not in ("create", "release", "finish") or command.lease_id is not None:
             raise CommandRejected("Not a lifecycle command")
         async with self.engine.begin() as connection:
             row = await self._lock(connection, command.session_id)
@@ -241,7 +241,7 @@ class PostgresLeaseStore:
                 or row["authorization_id"] != command.authorization_id
                 or not command.is_current(now.timestamp())
                 or (command.action == "create" and row["revoked"])
-                or (command.action == "release" and not row["revoked"])
+                or (command.action in ("release", "finish") and not row["revoked"])
             ):
                 raise CommandRejected("Browser lifecycle is no longer authorized")
             if row["lease_id"] is not None:
@@ -263,7 +263,7 @@ class PostgresLeaseStore:
                 raise CommandRejected("Browser command was already consumed")
 
     async def wait_for_viewer_stop(self, command: BrowserCommand) -> None:
-        if command.action != "release":
+        if command.action not in ("release", "finish"):
             raise CommandRejected("Only release can wait for disconnection")
         try:
             async with asyncio.timeout(7):
@@ -295,13 +295,13 @@ class PostgresLeaseStore:
             row = await self._lock(connection, command.session_id)
             now = cast(datetime, await connection.scalar(text("SELECT clock_timestamp()")))
             if (
-                command.action not in ("create", "release")
+                command.action not in ("create", "release", "finish")
                 or command.lease_id is not None
                 or row["user_id"] != command.sub
                 or row["task_id"] != command.task_id
                 or row["authorization_id"] != command.authorization_id
                 or not command.is_current(now.timestamp())
-                or row["revoked"] != (command.action == "release")
+                or row["revoked"] != (command.action in ("release", "finish"))
             ):
                 raise CommandRejected("Browser lifecycle is no longer authorized")
             if row["lease_id"] is not None:

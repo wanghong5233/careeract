@@ -205,7 +205,7 @@ def create_app(
         session_id: UUID,
         action: LifecycleAction,
         authorization: str = Header(default=""),
-    ) -> dict[str, str]:
+    ) -> dict[str, str | bool]:
         command = authenticate(session_id, action, authorization)
         if steel_sessions is None or store is None:
             raise HTTPException(503, "Browser lifecycle is not configured")
@@ -216,7 +216,12 @@ def create_app(
                 and command.owner_id != "boss-login"
             ):
                 raise CommandRejected("Login navigation requires the login executor")
-            if action == "release":
+            if action == "finish" and (
+                profiles is None or context_reader is None or command.owner_id != "boss-login"
+            ):
+                raise CommandRejected("Login verification is not configured")
+            login_verified = False
+            if action in ("release", "finish"):
                 await store.wait_for_viewer_stop(command)
             await store.authorize_lifecycle(command)
             async with store.lifecycle_guard(command):
@@ -233,6 +238,12 @@ def create_app(
                     try:
                         if profiles is not None and context_reader is not None:
                             physical = await steel_sessions.inspect(session_id)
+                            if action == "finish" and (
+                                physical is None or physical.status != "live"
+                            ):
+                                raise SteelSessionConflict(
+                                    "Login verification requires a live session"
+                                )
                             if physical is not None and physical.status == "live":
                                 captured = await context_reader(session_id).storage_state()
                                 if (
@@ -252,6 +263,11 @@ def create_app(
                                             snapshot,
                                             expected_version=current[0].version,
                                         )
+                                    login_verified = True
+                        if action == "finish" and not command.is_current(
+                            datetime.now(UTC).timestamp()
+                        ):
+                            raise CommandRejected("Login verification authorization expired")
                     finally:
                         session = await steel_sessions.release(session_id)
                 if action == "create" and login_navigator is not None:
@@ -276,7 +292,13 @@ def create_app(
             BossContextUnavailable,
         ):
             raise HTTPException(503, "Browser coordination unavailable") from None
-        return {"session_id": str(session.session_id), "status": session.status}
+        result: dict[str, str | bool] = {
+            "session_id": str(session.session_id),
+            "status": session.status,
+        }
+        if action == "finish":
+            result["login_verified"] = login_verified
+        return result
 
     @app.get("/internal/v1/sessions/{session_id}/viewer")
     async def viewer_document(
