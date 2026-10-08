@@ -603,6 +603,15 @@ try {
 迁移 0019 仅应用隔离库。正式适配读取 Playwright 的实时 canonical origin，避免 Steel 原生导出
 混入磁盘旧值；恢复复用 Steel 原生 `sessionContext`。支持范围、撤销含义和尚未装配的生产密钥见
 [加密 context 边界](../../services/browser/sessions/README.md#encrypted-context-snapshots)。
+
+产品登录态保存/恢复使用 Browser Service 的 `BROWSER_PROFILE_KEY_FILE`，指向独立的
+32 字节 AES-GCM 密钥文件；文件必须保持本机受限访问并留在 Git 忽略范围内，不复用
+API 签名或 Better Auth 密钥，不在文档写密钥内容。未配置该文件时不装配 Profile 保存/恢复。
+配置后，签名创建只导入当前用户未撤销、未到期的站点快照；停止登录先结束 Viewer，
+在生命周期锁内读取账号导航和站点 Cookie/localStorage，加密条件保存后释放浏览器。
+保存失败仍尝试物理释放并显式报告待核对，不能把停止成功推断为快照保存成功。
+本机真实人工登录、停止后完整加密快照和新产品会话恢复已通过；平台到期仍须重新登录，
+长期有效性、专门的忘记账号/联合撤销、部署环境与磁盘清理尚未验收。
 该入口不证明真实 BOSS 登录、浏览器进程重启恢复或磁盘 Profile 清理；不自动重试不确定操作。
 
 登录执行对象和 Browser Service 注册/撤销的内部链路检查：

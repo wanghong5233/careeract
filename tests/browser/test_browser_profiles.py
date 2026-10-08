@@ -70,6 +70,8 @@ async def test_encrypted_profile_survives_reconstruction_and_preserves_user_scop
     await engine.dispose()
     restarted = PostgresBrowserProfileStore(engine, ProfileCipher(key), scope())
     assert await restarted.read(user_id, profile.id) == (profile, context)
+    assert await restarted.current(user_id) == (profile, context)
+    assert await restarted.current(other_id) is None
     assert await restarted.read(other_id, profile.id) is None
     other_site = PostgresBrowserProfileStore(
         engine,
@@ -134,6 +136,7 @@ async def test_revocation_clears_ciphertext_and_blocks_late_saves(engine: AsyncE
     revoked = await store.revoke(user_id, profile.id, expected_version=profile.version)
     assert revoked.revoked
     assert await store.read(user_id, profile.id) is None
+    assert await store.current(user_id) is None
     assert await store.revoke(user_id, profile.id, expected_version=profile.version) == revoked
     async with engine.connect() as connection:
         assert await connection.scalar(

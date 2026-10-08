@@ -1,10 +1,14 @@
+import asyncio
+from collections.abc import Awaitable, Callable
+from time import monotonic
+from typing import cast
 from urllib.parse import urlsplit, urlunsplit
 from uuid import UUID
 
 import httpx
-from playwright.async_api import Error as PlaywrightError
-from playwright.async_api import async_playwright
+from cdp_use import CDPClient
 from pydantic import AnyHttpUrl
+from websockets.exceptions import WebSocketException
 
 from services.browser.sessions.viewer import ViewerRejected, resolve_viewer_page
 
@@ -43,24 +47,65 @@ class BossLoginNavigator:
                     "",
                 )
             )
-            async with async_playwright() as playwright:
-                browser = await playwright.chromium.connect_over_cdp(
-                    endpoint, headers={"Host": "localhost"}, timeout=5000
-                )
+            cdp_client = CDPClient(endpoint)
+            try:
+                async with asyncio.timeout(5):
+                    await cast(Callable[[], Awaitable[None]], cdp_client.start)()
+                    targets = await cdp_client.send.Target.getTargets()
+                pages = [target for target in targets["targetInfos"] if target["type"] == "page"]
+                if len(pages) != 1 or pages[0]["targetId"] != page_id:
+                    raise BossLoginUnavailable("Login browser requires its owned page")
+                if pages[0]["url"] != "about:blank":
+                    raise BossLoginUnavailable("Login browser page changed")
+                async with asyncio.timeout(20):
+                    attached = await cdp_client.send.Target.attachToTarget(
+                        params={"targetId": page_id, "flatten": True}
+                    )
+                    result = await cdp_client.send.Page.navigate(
+                        params={"url": BOSS_LOGIN_URL, "transitionType": "address_bar"},
+                        session_id=attached["sessionId"],
+                    )
+                if result.get("errorText"):
+                    raise BossLoginUnavailable("Login browser navigation failed")
+                deadline = monotonic() + 3
+                retained_site = False
+                async with asyncio.timeout(5):
+                    while True:
+                        info = await cdp_client.send.Target.getTargetInfo(
+                            params={"targetId": page_id}
+                        )
+                        current = urlsplit(info["targetInfo"]["url"])
+                        if current.scheme == "https" and current.hostname == "www.zhipin.com":
+                            retained_site = True
+                        elif info["targetInfo"]["url"] == "about:blank":
+                            retained_site = False
+                        else:
+                            raise BossLoginUnavailable(
+                                "Login browser did not retain the site: "
+                                + str(current.scheme)
+                                + "://"
+                                + str(current.hostname)
+                            )
+                        if monotonic() >= deadline:
+                            if not retained_site:
+                                raise BossLoginUnavailable("Login browser did not load the site")
+                            break
+                        await asyncio.sleep(0.25)
+            finally:
                 try:
-                    pages = [page for context in browser.contexts for page in context.pages]
-                    if len(pages) != 1:
-                        raise BossLoginUnavailable("Login browser requires one page")
-                    page = pages[0]
-                    target = await page.context.new_cdp_session(page)
-                    try:
-                        info = await target.send("Target.getTargetInfo")
-                    finally:
-                        await target.detach()
-                    if info["targetInfo"]["targetId"] != page_id or page.url != "about:blank":
-                        raise BossLoginUnavailable("Login browser page changed")
-                    await page.goto(BOSS_LOGIN_URL, wait_until="domcontentloaded", timeout=20000)
-                finally:
-                    await browser.close()
-        except (httpx.HTTPError, PlaywrightError, ViewerRejected, ValueError, KeyError, TypeError):
+                    async with asyncio.timeout(5):
+                        await cast(Callable[[], Awaitable[None]], cdp_client.stop)()
+                except (OSError, WebSocketException, TimeoutError):
+                    raise BossLoginUnavailable("Login browser disconnect unconfirmed") from None
+        except (
+            httpx.HTTPError,
+            WebSocketException,
+            OSError,
+            TimeoutError,
+            RuntimeError,
+            ViewerRejected,
+            ValueError,
+            KeyError,
+            TypeError,
+        ):
             raise BossLoginUnavailable("Login browser navigation unavailable") from None

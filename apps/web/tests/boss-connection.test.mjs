@@ -52,6 +52,44 @@ function card(fetch) {
 
 const settle = () => new Promise(resolve => setImmediate(resolve));
 
+test("confirmed cleanup after an uncertain start uses a fresh key for the next login", async () => {
+  const keys = [];
+  let connection = { id: connectionId, version: "v1", status: "revoked" };
+  let execution = null;
+  let starts = 0;
+  const fixture = card(async (url, options = {}) => {
+    if (url.endsWith("/login") && options.method === "POST") {
+      starts++;
+      execution = { attempt_status: "unknown", outcome: "creation_unconfirmed", browser_session_id: connectionId };
+      if (starts === 1) throw new TypeError("Lost response");
+      return Response.json(execution);
+    }
+    if (url.endsWith("/login") && options.method === "DELETE") {
+      execution = { attempt_status: "cancelled", outcome: "browser_released", browser_session_id: connectionId };
+      connection = { ...connection, status: "revoked" };
+      return Response.json(execution);
+    }
+    if (url.endsWith("/login")) return Response.json(execution);
+    if (options.method === "POST") {
+      keys.push(options.headers["Idempotency-Key"]);
+      connection = { ...connection, status: "pending" };
+    }
+    return Response.json(connection);
+  });
+  fixture.mount();
+  await settle();
+  fixture.click("重新开始安全登录");
+  await settle();
+  fixture.click("重新读取");
+  await settle();
+  fixture.click("停止登录");
+  await settle();
+  fixture.click("重新开始安全登录");
+  await settle();
+  assert.equal(keys.length, 2);
+  assert.notEqual(keys[0], keys[1]);
+});
+
 test("connection card starts and stops an explicitly authorized browser login", async () => {
   const calls = [];
   const fixture = card(async (url, options = {}) => {

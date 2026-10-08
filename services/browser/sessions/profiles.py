@@ -165,6 +165,20 @@ class PostgresBrowserProfileStore:
         except (DBAPIError, PoolTimeoutError):
             raise BrowserProfileUnavailable("Browser profile storage is unavailable") from None
 
+    async def current(self, user_id: str) -> tuple[BrowserProfile, BrowserContext] | None:
+        try:
+            async with self.engine.connect() as connection:
+                profile_id = await connection.scalar(
+                    text(
+                        "SELECT id FROM browser.profiles WHERE user_id=:user_id AND site=:site "
+                        "AND revoked=false AND expires_at>clock_timestamp()"
+                    ),
+                    {"user_id": user_id, "site": self.scope.site},
+                )
+            return None if profile_id is None else await self.read(user_id, profile_id)
+        except (DBAPIError, PoolTimeoutError):
+            raise BrowserProfileUnavailable("Browser profile storage is unavailable") from None
+
     async def save(
         self, user_id: str, profile_id: UUID, context: BrowserContext, *, expected_version: UUID
     ) -> BrowserProfile:

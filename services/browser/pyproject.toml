@@ -6,6 +6,7 @@ requires-python = ">=3.11,<3.14"
 dependencies = [
     "asyncpg",
     "browser-use",
+    "cdp-use",
     "cryptography",
     "fastapi",
     "httpx",

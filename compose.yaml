@@ -57,7 +57,8 @@ services:
       - ./data/temporal:/data
 
   steel:
-    image: ghcr.io/steel-dev/steel-browser:latest@sha256:6dd29f73c33bb0f5bc9d950e8e4492c3f8458a06313346fa1767f68936a36fc8
+    image: careeract-steel:0.5.3-compat
+    build: ./infra/steel
     environment:
       DOMAIN: 127.0.0.1:3001
     healthcheck:

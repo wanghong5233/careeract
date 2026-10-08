@@ -1,0 +1,8 @@
+{
+  "name": "careeract-steel-compat",
+  "version": "0.1.0",
+  "private": true,
+  "dependencies": {
+    "puppeteer-core": "npm:rebrowser-puppeteer-core@23.6.101"
+  }
+}

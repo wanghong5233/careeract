@@ -14,11 +14,12 @@ Raw Steel CDP and debug URLs are never returned to the public Web client.
 
 Internal encrypted Cookie/localStorage snapshots and Steel restore are described in
 [Sessions](sessions/README.md#encrypted-context-snapshots). They are verified with
-synthetic state. Signed internal physical creation/release now reuses the persistent
+synthetic state and local manual BOSS login; see the current evidence in
+[STATUS](../../docs/handbook/STATUS.md). Signed internal physical creation/release reuses the persistent
 Steel manager and registered session boundary; see
 [Sessions](sessions/README.md#signed-physical-lifecycle). Product HTTP/BFF, the Web
 login lifecycle, and same-origin Viewer proxy are wired for configured environments;
 Local authenticated single-page Steel WebSocket use, ticket renewal, and physical
-release have been verified. Production key configuration, real platform login,
-and joint browser/profile revocation still require deployment and manual-login
-verification.
+release have been verified. Encrypted state capture and one product-session restore
+have passed locally. Later restore stability, durable connection-state updates,
+joint browser/profile revocation and production configuration remain unverified.

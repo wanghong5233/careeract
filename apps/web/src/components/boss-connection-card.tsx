@@ -141,7 +141,9 @@ export function BossConnectionCard() {
         signal: AbortSignal.any([controller.signal, AbortSignal.timeout(20_000)]),
       });
       if (!response.ok) throw new Error("Login outcome unconfirmed");
-      setLogin(await response.json() as LoginExecution);
+      const stopped = await response.json() as LoginExecution;
+      setLogin(stopped);
+      if (stopped.outcome === "browser_released") requestKey.current = null;
       writing.current = false;
       await load();
     } catch (failure) {

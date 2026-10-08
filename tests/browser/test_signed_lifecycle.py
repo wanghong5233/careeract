@@ -1,9 +1,12 @@
 import asyncio
+import json
 import os
 from collections.abc import AsyncIterator
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
-from typing import Literal
+from types import SimpleNamespace
+from typing import Literal, cast
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import httpx
@@ -20,8 +23,15 @@ from services.api.application.ports.browser_control import (
 from services.api.infrastructure.browser_control import BrowserCommandSigner, BrowserControlClient
 from services.browser.app.factory import create_app
 from services.browser.sessions.authentication import CommandVerifier
+from services.browser.sessions.context import BrowserContext
 from services.browser.sessions.postgres import PostgresLeaseStore
+from services.browser.sessions.profiles import PostgresBrowserProfileStore
 from services.browser.sessions.steel import SteelSessionManager
+from services.browser.site_adapters.boss_context import (
+    BOSS_SCOPE,
+    BossContextReader,
+    BossContextUnavailable,
+)
 from tests.api.test_browser_control import control_context
 from tests.browser.test_postgres_leases import database_url as database_url
 from tests.browser.test_steel_sessions import SyntheticSteel
@@ -42,6 +52,72 @@ pytestmark = pytest.mark.skipif(
     os.environ.get("RUN_BROWSER_POSTGRES_TESTS") != "1",
     reason="Opt-in isolated PostgreSQL integration",
 )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("capture_fails", [False, True])
+async def test_saved_profile_restores_and_capture_failure_still_releases(
+    engine: AsyncEngine, capture_fails: bool
+) -> None:
+    steel = SyntheticSteel()
+    key = Ed25519PrivateKey.generate()
+    context = replace(control_context(), owner_id="boss-login")
+    snapshot = BrowserContext.from_steel(
+        {"cookies": [{"name": "synthetic", "value": "synthetic", "domain": ".zhipin.com"}]},
+        BOSS_SCOPE,
+    )
+    profiles = AsyncMock()
+    profiles.scope = BOSS_SCOPE
+    profile = SimpleNamespace(id=uuid4(), version=uuid4())
+    profiles.current.return_value = (profile, snapshot)
+    created_contexts: list[object] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST" and request.url.path == "/v1/sessions":
+            created_contexts.append(json.loads(request.content).get("sessionContext"))
+        return steel.respond(request)
+
+    reader = AsyncMock()
+    reader.storage_state.return_value = {
+        "authenticated": True,
+        "cookies": snapshot.to_steel()["cookies"],
+        "origins": [],
+    }
+    if capture_fails:
+        reader.storage_state.side_effect = BossContextUnavailable("unavailable")
+    async with httpx.AsyncClient(
+        base_url="http://steel", transport=httpx.MockTransport(respond)
+    ) as steel_client:
+        app = create_app(
+            verifier=CommandVerifier(key.public_key()),
+            store=PostgresLeaseStore(engine),
+            steel_sessions=SteelSessionManager(steel_client, engine),
+            profiles=cast(PostgresBrowserProfileStore, profiles),
+            context_reader=lambda _session: cast(BossContextReader, reader),
+        )
+        async with httpx.AsyncClient(
+            base_url="http://browser", transport=httpx.ASGITransport(app=app)
+        ) as client:
+            adapter = BrowserControlClient(client, BrowserCommandSigner(key))
+            await adapter.send(context, "register")
+            await adapter.lifecycle(context, "create")
+            assert created_contexts == [snapshot.to_steel()]
+            profiles.current.assert_awaited_once_with(context.user_id)
+            await adapter.send(context, "revoke")
+            if capture_fails:
+                with pytest.raises(BrowserControlUncertain):
+                    await adapter.lifecycle(context, "release")
+                profiles.create.assert_not_awaited()
+                profiles.save.assert_not_awaited()
+            else:
+                assert (await adapter.lifecycle(context, "release")).status == "released"
+                profiles.save.assert_awaited_once_with(
+                    context.user_id, profile.id, snapshot, expected_version=profile.version
+                )
+            assert any(
+                item["id"] == str(context.session_id) and item["status"] == "released"
+                for item in steel.sessions
+            )
 
 
 async def test_signed_lifecycle_rejects_wrong_owner_replay_and_active_writer(

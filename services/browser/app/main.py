@@ -7,7 +7,9 @@ from services.browser.app.factory import create_app
 from services.browser.app.settings import settings
 from services.browser.sessions.authentication import CommandVerifier
 from services.browser.sessions.postgres import PostgresLeaseStore
+from services.browser.sessions.profiles import PostgresBrowserProfileStore, ProfileCipher
 from services.browser.sessions.steel import SteelSessionManager
+from services.browser.site_adapters.boss_context import BOSS_SCOPE, BossContextReader
 from services.browser.site_adapters.boss_login import BossLoginNavigator
 
 if settings.browser_database_url is None and settings.browser_command_public_key_file is None:
@@ -38,5 +40,15 @@ else:
         steel_sessions=SteelSessionManager(steel_client, engine),
         viewer_public_origin=settings.viewer_public_origin,
         login_navigator=BossLoginNavigator(steel_client, settings.steel_cdp_url),
+        profiles=(
+            PostgresBrowserProfileStore(
+                engine, ProfileCipher.from_file(settings.browser_profile_key_file), BOSS_SCOPE
+            )
+            if settings.browser_profile_key_file is not None
+            else None
+        ),
+        context_reader=lambda session_id: BossContextReader(
+            steel_client, settings.steel_cdp_url, session_id
+        ),
     )
 app.state.settings = settings

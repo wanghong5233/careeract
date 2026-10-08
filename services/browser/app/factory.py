@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -24,8 +25,14 @@ from services.browser.sessions.authentication import (
     LifecycleAction,
     SessionAction,
 )
+from services.browser.sessions.context import BrowserContext, BrowserContextRejected
 from services.browser.sessions.lease import LeaseConflict, LeaseNotFound, SessionLease
 from services.browser.sessions.postgres import PostgresLeaseStore
+from services.browser.sessions.profiles import (
+    BrowserProfileConflict,
+    BrowserProfileUnavailable,
+    PostgresBrowserProfileStore,
+)
 from services.browser.sessions.steel import (
     SteelSessionConflict,
     SteelSessionManager,
@@ -42,6 +49,7 @@ from services.browser.sessions.viewer import (
     viewer_context,
     viewer_cookie_name,
 )
+from services.browser.site_adapters.boss_context import BossContextReader, BossContextUnavailable
 from services.browser.site_adapters.boss_login import BossLoginUnavailable
 
 
@@ -126,6 +134,8 @@ def create_app(
     steel_ws_connect: Callable[..., Any] | None = None,
     viewer_authorization_interval: float = 5.0,
     login_navigator: Callable[[UUID], Awaitable[None]] | None = None,
+    profiles: PostgresBrowserProfileStore | None = None,
+    context_reader: Callable[[UUID], BossContextReader] | None = None,
 ) -> FastAPI:
     if not 0 < viewer_authorization_interval <= 5:
         raise ValueError("Viewer authorization interval must be within 5 seconds")
@@ -202,7 +212,7 @@ def create_app(
         try:
             if (
                 action == "create"
-                and login_navigator is not None
+                and (login_navigator is not None or profiles is not None)
                 and command.owner_id != "boss-login"
             ):
                 raise CommandRejected("Login navigation requires the login executor")
@@ -210,11 +220,40 @@ def create_app(
                 await store.wait_for_viewer_stop(command)
             await store.authorize_lifecycle(command)
             async with store.lifecycle_guard(command):
-                session = (
-                    await steel_sessions.create(session_id)
-                    if action == "create"
-                    else await steel_sessions.release(session_id)
+                restored = (
+                    await profiles.current(command.sub)
+                    if action == "create" and profiles is not None
+                    else None
                 )
+                if action == "create":
+                    session = await steel_sessions.create(
+                        session_id, context=restored[1] if restored is not None else None
+                    )
+                else:
+                    try:
+                        if profiles is not None and context_reader is not None:
+                            physical = await steel_sessions.inspect(session_id)
+                            if physical is not None and physical.status == "live":
+                                captured = await context_reader(session_id).storage_state()
+                                if (
+                                    isinstance(captured, dict)
+                                    and captured.get("authenticated") is True
+                                ):
+                                    snapshot = BrowserContext.from_playwright(
+                                        captured, profiles.scope
+                                    )
+                                    current = await profiles.current(command.sub)
+                                    if current is None:
+                                        await profiles.create(command.sub, snapshot)
+                                    else:
+                                        await profiles.save(
+                                            command.sub,
+                                            current[0].id,
+                                            snapshot,
+                                            expected_version=current[0].version,
+                                        )
+                    finally:
+                        session = await steel_sessions.release(session_id)
                 if action == "create" and login_navigator is not None:
                     if not command.is_current(datetime.now(UTC).timestamp()):
                         raise CommandRejected("Login navigation authorization expired")
@@ -223,12 +262,18 @@ def create_app(
             raise HTTPException(403, "Browser lifecycle rejected") from None
         except (LeaseNotFound, LeaseConflict, SteelSessionConflict):
             raise HTTPException(409, "Browser lifecycle conflict") from None
+        except BossLoginUnavailable as error:
+            logging.getLogger(__name__).warning("Login navigation unavailable: %s", error)
+            raise HTTPException(503, "Browser coordination unavailable") from None
         except (
             DBAPIError,
             PoolTimeoutError,
             SteelSessionUnavailable,
             SteelSessionUncertain,
-            BossLoginUnavailable,
+            BrowserProfileUnavailable,
+            BrowserProfileConflict,
+            BrowserContextRejected,
+            BossContextUnavailable,
         ):
             raise HTTPException(503, "Browser coordination unavailable") from None
         return {"session_id": str(session.session_id), "status": session.status}

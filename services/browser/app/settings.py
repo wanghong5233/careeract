@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     viewer_public_origin: AnyHttpUrl = AnyHttpUrl("http://localhost:43110")
     browser_database_url: SecretStr | None = None
     browser_command_public_key_file: Path | None = None
+    browser_profile_key_file: Path | None = None
 
 
 settings = Settings()

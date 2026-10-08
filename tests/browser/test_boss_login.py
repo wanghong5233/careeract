@@ -1,5 +1,3 @@
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
@@ -16,30 +14,67 @@ from services.browser.site_adapters.boss_login import (
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("changed", [None, "target", "url", "multiple_pages", "discovery"])
+@pytest.mark.parametrize(
+    "changed",
+    [
+        None,
+        "initial_blank",
+        "redirect_blank",
+        "target",
+        "url",
+        "multiple_pages",
+        "discovery",
+        "navigation",
+        "blank",
+        "foreign",
+    ],
+)
 async def test_login_navigation_uses_owned_blank_page_and_disconnects(
     monkeypatch: pytest.MonkeyPatch, changed: str | None
 ) -> None:
     session_id = uuid4()
     page_id = "owned-page"
-    target = AsyncMock()
-    target.send.return_value = {
-        "targetInfo": {"targetId": "other" if changed == "target" else page_id}
+    target = {
+        "targetId": "other" if changed == "target" else page_id,
+        "url": "https://example.com" if changed == "url" else "about:blank",
+        "type": "page",
     }
-    page = SimpleNamespace(
-        url="https://example.com" if changed == "url" else "about:blank",
-        goto=AsyncMock(),
-        context=SimpleNamespace(new_cdp_session=AsyncMock(return_value=target)),
+    navigation = AsyncMock(return_value={"errorText": "private"} if changed == "navigation" else {})
+    retained_url = (
+        "about:blank"
+        if changed == "blank"
+        else "https://example.com"
+        if changed == "foreign"
+        else BOSS_LOGIN_URL
     )
-    browser = SimpleNamespace(
-        contexts=[SimpleNamespace(pages=[page, page] if changed == "multiple_pages" else [page])],
-        close=AsyncMock(),
+    client = SimpleNamespace(
+        start=AsyncMock(),
+        stop=AsyncMock(),
+        send=SimpleNamespace(
+            Target=SimpleNamespace(
+                getTargets=AsyncMock(
+                    return_value={
+                        "targetInfos": [target, target] if changed == "multiple_pages" else [target]
+                    }
+                ),
+                attachToTarget=AsyncMock(return_value={"sessionId": "owned-attachment"}),
+                getTargetInfo=AsyncMock(return_value={"targetInfo": {"url": retained_url}}),
+            ),
+            Page=SimpleNamespace(navigate=navigation),
+        ),
     )
-    connect = AsyncMock(return_value=browser)
-
-    @asynccontextmanager
-    async def playwright() -> AsyncIterator[SimpleNamespace]:
-        yield SimpleNamespace(chromium=SimpleNamespace(connect_over_cdp=connect))
+    constructor = Mock(return_value=client)
+    if changed == "initial_blank":
+        client.send.Target.getTargetInfo.side_effect = [
+            {"targetInfo": {"url": "about:blank"}},
+            {"targetInfo": {"url": BOSS_LOGIN_URL}},
+        ]
+    if changed == "redirect_blank":
+        client.send.Target.getTargetInfo.side_effect = [
+            {"targetInfo": {"url": BOSS_LOGIN_URL}},
+            {"targetInfo": {"url": "about:blank"}},
+            {"targetInfo": {"url": "https://www.zhipin.com/"}},
+        ]
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/v1/sessions":
@@ -57,7 +92,17 @@ async def test_login_navigation_uses_owned_blank_page_and_disconnects(
             },
         )
 
-    monkeypatch.setattr("services.browser.site_adapters.boss_login.async_playwright", playwright)
+    monkeypatch.setattr("services.browser.site_adapters.boss_login.CDPClient", constructor)
+    monkeypatch.setattr(
+        "services.browser.site_adapters.boss_login.monotonic",
+        Mock(
+            side_effect=[0, 0, 1, 4]
+            if changed == "redirect_blank"
+            else [0, 0, 4]
+            if changed == "initial_blank"
+            else [0, 4]
+        ),
+    )
     cdp_client = httpx.AsyncClient(
         base_url="http://cdp:9223", transport=httpx.MockTransport(handler)
     )
@@ -69,16 +114,19 @@ async def test_login_navigation_uses_owned_blank_page_and_disconnects(
     )
     async with steel_client:
         navigator = BossLoginNavigator(steel_client, AnyHttpUrl("http://cdp:9223"))
-        if changed is None:
+        if changed in {None, "initial_blank", "redirect_blank"}:
             await navigator(session_id)
-            page.goto.assert_awaited_once_with(
-                BOSS_LOGIN_URL, wait_until="domcontentloaded", timeout=20000
+            constructor.assert_called_once_with("ws://cdp:9223/devtools/browser/synthetic")
+            navigation.assert_awaited_once_with(
+                params={"url": BOSS_LOGIN_URL, "transitionType": "address_bar"},
+                session_id="owned-attachment",
             )
         else:
             with pytest.raises(BossLoginUnavailable):
                 await navigator(session_id)
-            page.goto.assert_not_awaited()
+            if changed not in {"navigation", "blank", "foreign"}:
+                navigation.assert_not_awaited()
     if changed == "discovery":
-        connect.assert_not_awaited()
+        constructor.assert_not_called()
     else:
-        browser.close.assert_awaited_once()
+        client.stop.assert_awaited_once()

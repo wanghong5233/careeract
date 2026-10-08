@@ -93,6 +93,24 @@ async def check(api_url: str, cdp_url: str, viewer_channel: str | None = None) -
                     await page.get_by_role("button", name="Save").click()
                     if await page.locator("output").inner_text() != "CareerAct smoke":
                         raise RuntimeError("Page verification failed")
+                    page_session = await page.context.new_cdp_session(page)
+                    page_info = await page_session.send("Target.getTargetInfo")
+                    await page_session.detach()
+                    page_id = page_info["targetInfo"]["targetId"]
+                    for _attempt in range(3):
+                        details = await client.get(f"/v1/sessions/{session_id}/live-details")
+                        details.raise_for_status()
+                        payload = details.json()
+                        if page_id not in {item["id"] for item in payload["pages"]}:
+                            raise RuntimeError("Repeated page discovery lost the owned page")
+                        version_info = payload["browserState"]["browserVersion"]
+                        if not isinstance(version_info, str) or not version_info.startswith(
+                            ("Chrome/", "HeadlessChrome/")
+                        ):
+                            raise RuntimeError(
+                                "Page discovery must return browser version metadata"
+                            )
+                    print("PASS: Repeated page discovery retains ownership and version metadata")
                     viewer = await client.get("/v1/sessions/debug")
                     viewer.raise_for_status()
                     if "text/html" not in viewer.headers.get("content-type", ""):
