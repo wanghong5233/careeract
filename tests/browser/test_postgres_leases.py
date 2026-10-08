@@ -41,6 +41,28 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 @pytest.mark.asyncio
+async def test_release_waits_for_confirmed_viewer_disconnect(database_url: str) -> None:
+    engine = create_async_engine(database_url)
+    store = PostgresLeaseStore(engine)
+    command = BrowserCommand.model_validate(
+        command_payload() | {"action": "viewer", "owner_id": "viewer"}
+    )
+    await store.register(command.session_id, command.sub, command.task_id, command.authorization_id)
+    try:
+        lease = await store.acquire_viewer(command)
+        await store.revoke(command.session_id)
+        release = command.model_copy(update={"action": "release", "jti": uuid4()})
+        waiting = asyncio.create_task(store.wait_for_viewer_stop(release))
+        await asyncio.sleep(0.2)
+        assert not waiting.done()
+        await store.confirm_stopped(command.session_id, lease.lease_id)
+        await waiting
+        await store.authorize_lifecycle(release)
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_viewer_lease_excludes_executors_and_requires_confirmed_stop(
     database_url: str,
 ) -> None:
@@ -57,6 +79,12 @@ async def test_viewer_lease_excludes_executors_and_requires_confirmed_stop(
             await store.acquire_viewer(command.model_copy(update={"jti": uuid4()}))
         await store.renew_viewer(command, lease.lease_id)
         await store.check_viewer(command, lease.lease_id)
+        refreshed = command.model_copy(update={"jti": uuid4()})
+        await store.refresh_viewer(refreshed, lease.lease_id)
+        with pytest.raises(CommandRejected):
+            await store.refresh_viewer(refreshed, lease.lease_id)
+        with pytest.raises(LeaseConflict):
+            await store.refresh_viewer(command.model_copy(update={"jti": uuid4()}), uuid4())
         with pytest.raises(LeaseConflict):
             await store.drain_viewer(
                 command.model_copy(update={"attempt_id": uuid4()}), lease.lease_id

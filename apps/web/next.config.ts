@@ -6,8 +6,8 @@ const nextConfig: NextConfig = {
   async rewrites() {
     return [
       {
-        source: "/api/browser/sessions/:path*",
-        destination: `${process.env.BROWSER_BASE_URL ?? "http://localhost:8001"}/internal/v1/sessions/:path*`,
+        source: "/api/browser/sessions/:sessionId/cast",
+        destination: `${process.env.BROWSER_BASE_URL ?? "http://localhost:8001"}/internal/v1/sessions/:sessionId/cast`,
       },
     ];
   },

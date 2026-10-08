@@ -127,6 +127,7 @@ services:
     restart: unless-stopped
     environment:
       STEEL_BASE_URL: http://steel:3000
+      STEEL_CDP_URL: http://steel:9223
       ANONYMIZED_TELEMETRY: "false"
       BROWSER_USE_CLOUD_SYNC: "false"
     depends_on:

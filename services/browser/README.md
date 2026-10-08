@@ -18,5 +18,7 @@ synthetic state. Signed internal physical creation/release now reuses the persis
 Steel manager and registered session boundary; see
 [Sessions](sessions/README.md#signed-physical-lifecycle). Product HTTP/BFF, the Web
 login lifecycle, and same-origin Viewer proxy are wired for configured environments;
-production key configuration, real Steel WebSocket use, and joint browser/profile
-revocation still require deployment and manual-login verification.
+Local authenticated single-page Steel WebSocket use, ticket renewal, and physical
+release have been verified. Production key configuration, real platform login,
+and joint browser/profile revocation still require deployment and manual-login
+verification.

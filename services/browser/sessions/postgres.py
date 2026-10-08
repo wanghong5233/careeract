@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
@@ -149,6 +150,11 @@ class PostgresLeaseStore:
             raise CommandRejected("Not a viewer command")
         await self.execute(command.model_copy(update={"action": "check", "lease_id": lease_id}))
 
+    async def refresh_viewer(self, command: BrowserCommand, lease_id: UUID) -> None:
+        if command.action != "viewer" or command.lease_id is not None:
+            raise CommandRejected("Not a viewer command")
+        await self.execute(command.model_copy(update={"action": "renew", "lease_id": lease_id}))
+
     async def drain_viewer(self, command: BrowserCommand, lease_id: UUID) -> None:
         if command.action != "viewer" or command.lease_id is not None:
             raise CommandRejected("Not a viewer command")
@@ -255,6 +261,33 @@ class PostgresLeaseStore:
             )
             if consumed is None:
                 raise CommandRejected("Browser command was already consumed")
+
+    async def wait_for_viewer_stop(self, command: BrowserCommand) -> None:
+        if command.action != "release":
+            raise CommandRejected("Only release can wait for disconnection")
+        try:
+            async with asyncio.timeout(7):
+                while True:
+                    async with self.engine.begin() as connection:
+                        row = await self._lock(connection, command.session_id)
+                        now = cast(
+                            datetime, await connection.scalar(text("SELECT clock_timestamp()"))
+                        )
+                        if (
+                            not row["revoked"]
+                            or row["user_id"] != command.sub
+                            or row["task_id"] != command.task_id
+                            or row["authorization_id"] != command.authorization_id
+                            or not command.is_current(now.timestamp())
+                        ):
+                            raise CommandRejected("Release is no longer authorized")
+                        if row["lease_id"] is None:
+                            return
+                        if row["owner_id"] != "viewer":
+                            raise LeaseConflict("Automatic executor requires reconciliation")
+                    await asyncio.sleep(0.1)
+        except TimeoutError:
+            raise LeaseConflict("Viewer disconnection requires reconciliation") from None
 
     @asynccontextmanager
     async def lifecycle_guard(self, command: BrowserCommand) -> AsyncIterator[None]:

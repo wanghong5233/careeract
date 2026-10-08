@@ -65,3 +65,14 @@ async def issue_viewer_ticket(
 ) -> ViewerTicketResponse:
     response.headers["Cache-Control"] = "no-store"
     return serialize(await issuer.issue(actor, session_id))
+
+
+@router.post("/{session_id}/viewer-renew", status_code=204)
+async def renew_viewer_ticket(
+    session_id: UUID,
+    response: Response,
+    issuer: Annotated[BrowserViewerTicketIssuer, Depends(get_issuer)],
+    actor: Annotated[ActorContext, Depends(get_actor)],
+) -> None:
+    response.headers["Cache-Control"] = "no-store"
+    await issuer.renew(actor, session_id)

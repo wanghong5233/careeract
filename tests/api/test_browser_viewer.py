@@ -28,6 +28,7 @@ def test_viewer_ticket_requires_authentication_and_configuration() -> None:
         assert (
             client.post(f"/api/v1/browser/sessions/{session_id}/viewer-ticket").status_code == 401
         )
+        assert client.post(f"/api/v1/browser/sessions/{session_id}/viewer-renew").status_code == 401
 
 
 def test_viewer_ticket_is_short_lived_and_uses_signed_viewer_command(
@@ -120,3 +121,26 @@ def test_viewer_document_proxies_html_and_cookie_with_page_scope(
     assert actor.user_id == "user-123"
     assert requested_session == session_id
     assert requested_page == "page-a"
+
+
+def test_viewer_renewal_uses_authenticated_actor_without_returning_ticket(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    private_key = Ed25519PrivateKey.generate()
+    use_signing_key(monkeypatch, private_key)
+    app = create_app(build_settings(), lambda _settings: FakeAgentRuntime())
+    issuer = AsyncMock()
+    app.state.browser_viewer_ticket_issuer = cast(BrowserViewerTicketIssuer, issuer)
+    session_id = uuid4()
+    with TestClient(app) as client:
+        response = client.post(
+            f"/api/v1/browser/sessions/{session_id}/viewer-renew",
+            headers={"Authorization": "Bearer " + create_token(private_key)},
+            json={},
+        )
+    assert response.status_code == 204
+    assert response.content == b""
+    assert response.headers["cache-control"] == "no-store"
+    actor, requested_session = issuer.renew.await_args.args
+    assert actor.user_id == "user-123"
+    assert requested_session == session_id

@@ -57,6 +57,9 @@ class _ViewerStore:
     async def check_viewer(self, command: BrowserCommand, lease_id: UUID) -> None:
         await self.authorize_viewer(command)
 
+    async def refresh_viewer(self, command: BrowserCommand, lease_id: UUID) -> None:
+        await self.authorize_viewer(command)
+
     async def drain_viewer(self, command: BrowserCommand, lease_id: UUID) -> None:
         self.drained = True
 
@@ -88,10 +91,21 @@ def _token(private_key: Ed25519PrivateKey, session_id: UUID) -> str:
     )
 
 
-def _steel_client(handler: Callable[[httpx.Request], httpx.Response]) -> httpx.AsyncClient:
+def _steel_client(
+    handler: Callable[[httpx.Request], httpx.Response], session_id: UUID | None = None
+) -> httpx.AsyncClient:
+    def handle(request: httpx.Request) -> httpx.Response:
+        if session_id is not None and request.url.path == "/v1/sessions":
+            return httpx.Response(
+                200, json={"sessions": [{"id": str(session_id), "status": "live"}]}
+            )
+        if session_id is not None and request.url.path.endswith("/live-details"):
+            return httpx.Response(200, json={"pages": [{"id": "page-a"}]})
+        return handler(request)
+
     return httpx.AsyncClient(
         base_url="http://steel:3000",
-        transport=httpx.MockTransport(handler),
+        transport=httpx.MockTransport(handle),
     )
 
 
@@ -120,6 +134,7 @@ def test_viewer_route_rewrites_steel_html_and_sets_browser_headers() -> None:
         assert request.method == "GET"
         assert request.url.path == "/v1/sessions/debug"
         assert request.url.params["pageId"] == page_id
+        assert request.url.params["interactive"] == "true"
         return httpx.Response(
             200,
             headers={"content-type": "text/html; charset=utf-8"},
@@ -128,11 +143,10 @@ def test_viewer_route_rewrites_steel_html_and_sets_browser_headers() -> None:
 
     private_key = Ed25519PrivateKey.generate()
     store = _ViewerStore()
-    steel_client = _steel_client(handler)
+    steel_client = _steel_client(handler, session_id)
     with TestClient(_app(private_key, store, steel_client)) as client:
         response = client.get(
             f"/internal/v1/sessions/{session_id}/viewer",
-            params={"pageId": page_id},
             headers={
                 "Authorization": "Bearer " + _token(private_key, session_id),
                 "Origin": "https://careeract.example",
@@ -149,13 +163,41 @@ def test_viewer_route_rewrites_steel_html_and_sets_browser_headers() -> None:
     assert len(store.commands) == 1
 
 
+@pytest.mark.parametrize(
+    "query", ["", "?tabInfo=true", "?pageId=page-a&tabInfo=true", "?pageIndex=1"]
+)
+def test_viewer_cast_rejects_multi_channel_and_unselected_requests(query: str) -> None:
+    session_id = uuid4()
+    private_key = Ed25519PrivateKey.generate()
+    store = _ViewerStore()
+    connector = _Connector(_Upstream())
+    with (
+        TestClient(
+            _app(private_key, store, _steel_client(lambda _: httpx.Response(500)), connector)
+        ) as client,
+        pytest.raises(WebSocketDisconnect),
+        client.websocket_connect(
+            f"/internal/v1/sessions/{session_id}/cast{query}",
+            headers={
+                "Origin": "https://careeract.example",
+                "Cookie": f"{viewer_cookie_name(session_id)}={_token(private_key, session_id)}",
+            },
+        ),
+    ):
+        pass
+    assert store.calls == 0
+    assert connector.url == ""
+
+
 def test_viewer_route_rejects_wrong_origin_before_fetch() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         raise AssertionError("Steel must not be contacted for a rejected origin")
 
     session_id = uuid4()
     private_key = Ed25519PrivateKey.generate()
-    with TestClient(_app(private_key, _ViewerStore(), _steel_client(handler))) as client:
+    with TestClient(
+        _app(private_key, _ViewerStore(), _steel_client(handler, session_id))
+    ) as client:
         response = client.get(
             f"/internal/v1/sessions/{session_id}/viewer?pageId=page-a",
             headers={
@@ -257,7 +299,8 @@ def test_viewer_cast_uses_cookie_ticket_and_rewrites_upstream_session() -> None:
             200,
             headers={"content-type": "text/html"},
             text='<script>const ws="ws://steel:3000/v1/sessions/cast"</script>',
-        )
+        ),
+        session_id,
     )
     with (
         TestClient(_app(private_key, _ViewerStore(), steel_client, connector)) as client,
@@ -274,6 +317,56 @@ def test_viewer_cast_uses_cookie_ticket_and_rewrites_upstream_session() -> None:
 
     assert connector.url.endswith(f"/v1/sessions/cast?pageId=page-a&sessionId={session_id}")
     assert upstream.sent == ["from-viewer"]
+
+
+def test_viewer_renewal_updates_active_channel_and_rejects_changed_scope() -> None:
+    session_id = uuid4()
+    private_key = Ed25519PrivateKey.generate()
+    original = _token(private_key, session_id)
+    payload = CommandVerifier(private_key.public_key()).verify(original, session_id, "viewer")
+    renewed = jwt.encode(
+        payload.model_dump(mode="json") | {"jti": str(uuid4())}, private_key, algorithm="EdDSA"
+    )
+    wrong_scope = jwt.encode(
+        payload.model_dump(mode="json") | {"attempt_id": str(uuid4())},
+        private_key,
+        algorithm="EdDSA",
+    )
+    store = _ViewerStore()
+    with TestClient(
+        _app(
+            private_key,
+            store,
+            _steel_client(lambda _: httpx.Response(500), session_id),
+            _Connector(_Upstream()),
+        )
+    ) as client:
+        renewal_url = f"/internal/v1/sessions/{session_id}/viewer/renew"
+        assert (
+            client.post(renewal_url, headers={"Authorization": "Bearer " + renewed}).status_code
+            == 409
+        )
+        with client.websocket_connect(
+            f"/internal/v1/sessions/{session_id}/cast?pageId=page-a",
+            headers={
+                "Origin": "https://careeract.example",
+                "Cookie": f"{viewer_cookie_name(session_id)}={original}",
+            },
+        ) as socket:
+            assert socket.receive_text() == "from-steel"
+            assert (
+                client.post(
+                    renewal_url, headers={"Authorization": "Bearer " + wrong_scope}
+                ).status_code
+                == 403
+            )
+            assert (
+                client.post(renewal_url, headers={"Authorization": "Bearer " + renewed}).status_code
+                == 204
+            )
+            assert store.commands[-1].jti != payload.jti
+            socket.send_text("finish")
+    assert store.drained and store.released
 
 
 def test_viewer_cast_rejects_missing_cookie() -> None:
@@ -303,7 +396,7 @@ def test_viewer_cast_closes_when_session_is_revoked_after_connect() -> None:
     upstream = _Upstream()
     connector = _Connector(upstream)
     store = _ViewerStore(reject_after=2)
-    steel_client = _steel_client(lambda _: httpx.Response(500))
+    steel_client = _steel_client(lambda _: httpx.Response(500), session_id)
     with (
         TestClient(
             _app(
@@ -336,7 +429,13 @@ def test_viewer_cast_keeps_lease_when_upstream_disconnect_is_uncertain() -> None
     connector = _Connector(_Upstream(), uncertain_close=True)
     with (
         TestClient(
-            _app(private_key, store, _steel_client(lambda _: httpx.Response(500)), connector, 0.01)
+            _app(
+                private_key,
+                store,
+                _steel_client(lambda _: httpx.Response(500), session_id),
+                connector,
+                0.01,
+            )
         ) as client,
         client.websocket_connect(
             f"/internal/v1/sessions/{session_id}/cast?pageId=page-a",
@@ -368,7 +467,7 @@ def test_viewer_cast_closes_when_coordination_becomes_unavailable() -> None:
             _app(
                 private_key,
                 store,
-                _steel_client(lambda _: httpx.Response(500)),
+                _steel_client(lambda _: httpx.Response(500), session_id),
                 _Connector(_Upstream()),
                 0.01,
             )
@@ -396,7 +495,7 @@ def test_viewer_cast_rechecks_authorization_after_upstream_connect_before_accept
             _app(
                 private_key,
                 store,
-                _steel_client(lambda _: httpx.Response(500)),
+                _steel_client(lambda _: httpx.Response(500), session_id),
                 _Connector(_Upstream()),
             )
         ) as client,

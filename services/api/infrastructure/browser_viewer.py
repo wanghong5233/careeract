@@ -135,3 +135,21 @@ class PostgresBrowserViewerTicketIssuer:
                 "Browser viewer authorization is unavailable"
             ) from None
         return BrowserViewerTicket(session_id, token, expires_at)
+
+    async def renew(self, actor: ActorContext, session_id: UUID) -> None:
+        if self.browser_client is None:
+            raise BrowserViewerTicketUnavailable("Browser viewer is not configured")
+        ticket = await self.issue(actor, session_id)
+        try:
+            response = await self.browser_client.post(
+                f"/internal/v1/sessions/{session_id}/viewer/renew",
+                headers={"Authorization": "Bearer " + ticket.token},
+                follow_redirects=False,
+                timeout=5,
+            )
+        except httpx.TransportError:
+            raise BrowserViewerTicketUnavailable("Viewer renewal unavailable") from None
+        if response.status_code in (401, 403, 404, 409):
+            raise BrowserViewerTicketRejected("Viewer renewal rejected")
+        if response.status_code != 204:
+            raise BrowserViewerTicketUnavailable("Viewer renewal unconfirmed")

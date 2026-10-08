@@ -8,6 +8,7 @@ from services.browser.app.settings import settings
 from services.browser.sessions.authentication import CommandVerifier
 from services.browser.sessions.postgres import PostgresLeaseStore
 from services.browser.sessions.steel import SteelSessionManager
+from services.browser.site_adapters.boss_login import BossLoginNavigator
 
 if settings.browser_database_url is None and settings.browser_command_public_key_file is None:
     app = create_app()
@@ -36,5 +37,6 @@ else:
         steel_client=steel_client,
         steel_sessions=SteelSessionManager(steel_client, engine),
         viewer_public_origin=settings.viewer_public_origin,
+        login_navigator=BossLoginNavigator(steel_client, settings.steel_cdp_url),
     )
 app.state.settings = settings

@@ -58,6 +58,8 @@ export function BossConnectionCard() {
         } else if (loginResponse.status === 503) {
           setLoginAvailable(false);
           setLogin(null);
+        } else {
+          throw new Error("Login state unavailable");
         }
       } else {
         setLoginAvailable(null);
@@ -90,7 +92,7 @@ export function BossConnectionCard() {
     requestKey.current ??= crypto.randomUUID();
     try {
       let current = connection;
-      if (!current) {
+      if (!current || ["revoked", "failed"].includes(current.status)) {
         const response = await fetch("/api/connections/boss", {
           method: "POST",
           headers: { "Content-Type": "application/json", "Idempotency-Key": requestKey.current },
@@ -155,6 +157,7 @@ export function BossConnectionCard() {
 
   const active = connection && !["revoked", "failed"].includes(connection.status);
   const browserReady = login?.attempt_status === "waiting" && login.outcome === "browser_created" && login.browser_session_id;
+  const cleanupRequired = Boolean(login?.browser_session_id && login.outcome !== "browser_released");
   const viewerHref = browserReady ? `/api/browser/sessions/${login.browser_session_id}/viewer` : null;
   return <section aria-labelledby="boss-connection-title" className="mb-5 rounded-xl border bg-muted/20 p-5">
     <div className="flex flex-wrap items-start justify-between gap-3">
@@ -166,11 +169,11 @@ export function BossConnectionCard() {
     <p className="mt-4 max-w-2xl text-xs leading-5 text-muted-foreground">密码、短信验证码和验证码只应由你在安全浏览器中输入，不会进入 Agent 对话或普通业务记录。</p>
     <p className="mt-2 max-w-2xl text-xs leading-5 text-muted-foreground">登录会在隔离浏览器中进行。CareerAct 不接收密码、短信验证码或验证码；完成登录后会继续停留在等待核验状态。</p>
     <div className="mt-4 flex flex-wrap items-center gap-3">
-      <Button disabled={busy !== null || needsReconciliation || loginAvailable === false || Boolean(browserReady) || connection?.status === "connected"} variant="outline" onClick={() => void startLogin()}>
+      <Button disabled={busy !== null || needsReconciliation || loginAvailable === false || cleanupRequired || connection?.status === "connected"} variant="outline" onClick={() => void startLogin()}>
         {busy === "start" && <LoaderCircle className="size-3.5 animate-spin" />}{browserReady ? "等待登录" : active ? "开始安全登录" : "重新开始安全登录"}
       </Button>
       {viewerHref && <a className="inline-flex min-h-9 items-center gap-2 rounded-md border px-3 text-xs hover:bg-muted" href={viewerHref} target="_blank" rel="noreferrer"><ExternalLink className="size-3.5" />打开安全浏览器</a>}
-      {browserReady && <Button disabled={busy !== null || needsReconciliation} variant="ghost" onClick={() => void stopLogin()}>{busy === "stop" && <LoaderCircle className="size-3.5 animate-spin" />}停止登录</Button>}
+      {cleanupRequired && <Button disabled={busy !== null || needsReconciliation} variant="ghost" onClick={() => void stopLogin()}>{busy === "stop" && <LoaderCircle className="size-3.5 animate-spin" />}停止登录</Button>}
       <Button disabled={busy !== null} variant="ghost" onClick={() => void load()}><RefreshCw className="size-3.5" />重新读取</Button>
     </div>
     {loginAvailable === false && <p role="status" className="mt-3 text-xs text-amber-700 dark:text-amber-300">安全登录服务尚未配置；当前不会启动浏览器。配置 Browser Service 后重新读取即可。</p>}

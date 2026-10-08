@@ -104,7 +104,8 @@ and require cleanup/reconciliation. Viewer tickets now require `browser_created`
 the exact connection/session relationship and a `live` Steel reservation.
 
 `release` first disables domain authorization and sends Browser revocation, then
-requests physical release. Active or uncertain writer leases block it; only trusted
+requests physical release. It waits up to seven seconds for a revoked human Viewer
+to confirm disconnection; automatic or uncertain writer leases still block it. Only trusted
 disconnect confirmation can clear the lease. Confirmed physical release records
 `browser_released` and revokes the connection. This does not delete encrypted
 snapshots, platform credentials, disk profiles or backups. Product HTTP orchestration
@@ -216,12 +217,27 @@ It checks authorization before forwarding input and renews the lease every five 
 expiry, revocation, draining, or unavailable coordination stops the relay. Trusted cleanup
 marks it draining and releases ownership only after the upstream WebSocket has closed.
 Uncertain connection or disconnect outcomes retain ownership for reconciliation.
-Caddy forwards only the exact Viewer and cast path shapes; the UI login entry and
-automatic ticket renewal remain unimplemented. A ticket currently limits one takeover
-connection to at most 60 seconds plus the periodic check interval.
+Caddy and Next forward only the exact cast path. Viewer HTML and renewal go through
+the authenticated Web BFF and API. The pinned Steel single-page interactive template
+is selected after checking the active inventory and page ownership; discovery and
+extra cast parameters are rejected to preserve one exclusive writer channel.
 
-This increment is verified with synthetic sessions only. The pinned implementation
-uses shared Profile paths and does not honor arbitrary `userDataDir` as an isolated
-directory. No Profile parameter, credentials, real login, or public Viewer is wired
-to this adapter. Account isolation and Profile cleanup require a separate verified
-path before the product can use real recruitment accounts.
+The Viewer calls same-origin renewal every 20 seconds. The API rechecks the persisted
+login task, authorization, attempt, connection and live reservation, then sends a fresh
+60-second signed command to `POST /internal/v1/sessions/{id}/viewer/renew`. Browser
+Service requires the existing channel with matching identity/scope and lease, consumes
+the new command, and renews without extending the original login authorization. A
+process-local channel registry only locates the running relay; PostgreSQL remains the
+lease authority. Process restart cannot revive an unknown lease. Failed renewal stops
+the UI and the relay expires within its existing signed deadline. Reopening after a
+confirmed disconnect obtains a new ticket through the authenticated HTML route.
+
+Local product create/release, same-origin single-page cast and renewal beyond one
+minute have been verified. BOSS navigation still ends at a blank page; real login and
+encrypted login-state persistence remain unverified.
+
+The pinned implementation uses shared Profile paths and does not honor arbitrary
+`userDataDir` as an isolated directory. No real credentials or encrypted recruitment
+snapshot have been saved in the local product verification. The product Viewer is
+now wired; account isolation, Profile cleanup and real login-state persistence still
+require separate verification before real recruitment accounts are retained.
