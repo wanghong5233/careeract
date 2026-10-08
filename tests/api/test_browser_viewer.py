@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from services.api.app.factory import create_app
 from services.api.application.ports.browser_viewer import (
+    BrowserViewerDocument,
     BrowserViewerTicket,
     BrowserViewerTicketIssuer,
     BrowserViewerTicketRejected,
@@ -91,3 +92,31 @@ def test_viewer_ticket_rejection_does_not_expose_session_details(
     assert response.status_code == 403
     assert response.json()["error"]["code"] == "browser_viewer_rejected"
     assert "internal session details" not in response.text
+
+
+def test_viewer_document_proxies_html_and_cookie_with_page_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    private_key = Ed25519PrivateKey.generate()
+    use_signing_key(monkeypatch, private_key)
+    app = create_app(build_settings(), lambda _settings: FakeAgentRuntime())
+    session_id = uuid4()
+    issuer = AsyncMock()
+    issuer.document.return_value = BrowserViewerDocument(
+        b"<html>viewer</html>", "text/html", "careeract_viewer=redacted; HttpOnly"
+    )
+    app.state.browser_viewer_ticket_issuer = cast(BrowserViewerTicketIssuer, issuer)
+    with TestClient(app) as client:
+        response = client.get(
+            f"/api/v1/browser/sessions/{session_id}/viewer?pageId=page-a",
+            headers={"Authorization": "Bearer " + create_token(private_key)},
+        )
+
+    assert response.status_code == 200
+    assert response.content == b"<html>viewer</html>"
+    assert response.headers["content-type"].startswith("text/html")
+    assert response.headers["set-cookie"].startswith("careeract_viewer=")
+    actor, requested_session, requested_page = issuer.document.await_args.args
+    assert actor.user_id == "user-123"
+    assert requested_session == session_id
+    assert requested_page == "page-a"

@@ -1,5 +1,6 @@
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from typing import Literal
 from uuid import uuid4
 
 import httpx
@@ -84,3 +85,44 @@ async def test_unconfirmed_results_are_not_retried_or_exposed(failure: str) -> N
             await adapter.send(context, "acquire")
         assert "untrusted" not in str(failure_info.value)
         assert calls == 1
+
+
+@pytest.mark.parametrize("action", ["create", "release"])
+@pytest.mark.parametrize(
+    "failure", ["timeout", "redirect", "server", "invalid", "wrong-session", "wrong-state"]
+)
+async def test_lifecycle_unconfirmed_response_never_retries(
+    action: Literal["create", "release"], failure: str
+) -> None:
+    context = control_context()
+    calls = 0
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        assert request.url.path.endswith("/lifecycle/" + action)
+        if failure == "timeout":
+            raise httpx.ReadTimeout("private browser diagnostics", request=request)
+        if failure == "redirect":
+            return httpx.Response(307, headers={"Location": "http://untrusted.invalid"})
+        if failure == "server":
+            return httpx.Response(503, text="private browser diagnostics")
+        if failure == "invalid":
+            return httpx.Response(200, text="private browser diagnostics")
+        return httpx.Response(
+            200,
+            json={
+                "session_id": str(uuid4() if failure == "wrong-session" else context.session_id),
+                "status": ("live" if action == "create" else "released")
+                if failure != "wrong-state"
+                else ("released" if action == "create" else "live"),
+            },
+        )
+
+    async with httpx.AsyncClient(
+        base_url="http://browser", transport=httpx.MockTransport(respond)
+    ) as client:
+        adapter = BrowserControlClient(client, BrowserCommandSigner(Ed25519PrivateKey.generate()))
+        with pytest.raises(BrowserControlUncertain) as result:
+            await adapter.lifecycle(context, action)
+        assert calls == 1 and "private" not in str(result.value)

@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 from uuid import UUID
 
+import httpx
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.exc import TimeoutError as PoolTimeoutError
@@ -12,6 +13,7 @@ from services.api.application.ports.browser_control import (
     BrowserControlRejected,
 )
 from services.api.application.ports.browser_viewer import (
+    BrowserViewerDocument,
     BrowserViewerTicket,
     BrowserViewerTicketRejected,
     BrowserViewerTicketUnavailable,
@@ -20,9 +22,49 @@ from services.api.infrastructure.browser_control import BrowserCommandSigner
 
 
 class PostgresBrowserViewerTicketIssuer:
-    def __init__(self, engine: AsyncEngine, signer: BrowserCommandSigner) -> None:
+    def __init__(
+        self,
+        engine: AsyncEngine,
+        signer: BrowserCommandSigner,
+        browser_client: httpx.AsyncClient | None = None,
+        viewer_origin: str | None = None,
+    ) -> None:
         self.engine = engine
         self.signer = signer
+        self.browser_client = browser_client
+        self.viewer_origin = str(viewer_origin).rstrip("/") if viewer_origin else None
+
+    async def document(
+        self, actor: ActorContext, session_id: UUID, page_id: str | None
+    ) -> BrowserViewerDocument:
+        if self.browser_client is None or self.viewer_origin is None:
+            raise BrowserViewerTicketUnavailable("Browser viewer is not configured")
+        ticket = await self.issue(actor, session_id)
+        try:
+            response = await self.browser_client.get(
+                f"/internal/v1/sessions/{session_id}/viewer",
+                params={"pageId": page_id} if page_id is not None else None,
+                headers={
+                    "Authorization": "Bearer " + ticket.token,
+                    "Origin": self.viewer_origin,
+                },
+                follow_redirects=False,
+                timeout=20,
+            )
+        except httpx.TransportError:
+            raise BrowserViewerTicketUnavailable("Browser viewer is unavailable") from None
+        if response.status_code in (401, 403, 404, 409):
+            raise BrowserViewerTicketRejected("Browser session is not available")
+        if (
+            response.status_code != 200
+            or response.headers.get("content-type", "").split(";", 1)[0] != "text/html"
+        ):
+            raise BrowserViewerTicketUnavailable("Browser viewer response is invalid")
+        return BrowserViewerDocument(
+            response.content,
+            response.headers.get("content-type", "text/html"),
+            response.headers.get("set-cookie"),
+        )
 
     async def issue(self, actor: ActorContext, session_id: UUID) -> BrowserViewerTicket:
         try:
@@ -43,11 +85,15 @@ class PostgresBrowserViewerTicketIssuer:
                                 "JOIN career.execution_attempts a ON a.task_id=t.id "
                                 "AND a.authorization_id=z.id AND a.user_id=s.user_id "
                                 "AND a.browser_session_id=s.session_id "
+                                "JOIN browser.steel_operations o ON o.session_id=s.session_id "
+                                "AND o.state='live' "
                                 "WHERE s.session_id=:session_id AND s.user_id=:user_id "
                                 "AND s.revoked=false AND z.status='active' "
                                 "AND z.expires_at>clock_timestamp() AND z.scope='boss.login' "
                                 "AND t.kind='boss_login' AND t.status='waiting' "
-                                "AND a.status='waiting' AND a.outcome='browser_registered'"
+                                "AND c.browser_session_id=s.session_id "
+                                "AND c.status='waiting_for_login' "
+                                "AND a.status='waiting' AND a.outcome='browser_created'"
                             ),
                             {"session_id": session_id, "user_id": actor.user_id},
                         )

@@ -81,8 +81,41 @@ Registration confirms only the ownership registry, not Steel creation or login.
 Lost responses and interrupted attempts survive reconstruction and block resending.
 Revocation first disables the domain authorization, then sends the signed Browser
 Service revoke command; started attempts retain `cleanup_required` and writer leases
-remain until trusted disconnect is confirmed. These application use cases are not
-yet wired to product connection POST/DELETE, Web login, or physical Steel lifecycle.
+remain until trusted disconnect is confirmed. Product connection POST/GET/DELETE,
+the Web login card, and the same-origin Viewer proxy now call these application use
+cases. Physical lifecycle wiring is described below.
+
+## Signed physical lifecycle
+
+`POST /internal/v1/sessions/{id}/lifecycle/{create|release}` accepts dedicated
+EdDSA commands with no client body. It checks registered ownership, current command
+time and absence of any writer lease. Release also requires prior revocation.
+Command consumption commits before external I/O; a second transaction locks the
+session through Steel mutation and readback, excluding acquisition and revocation
+while the physical operation is in flight. The existing persistent Steel reservation
+blocks reconstruction or a fresh token from replaying uncertain operations.
+
+`BrowserRegistrationService.create` reserves creation in the domain database before
+calling the route. Revision `0021_browser_lifecycle` adds creation/release outcomes;
+confirmed creation associates the connection with the exact session and enters
+`waiting_for_login`, which still does not prove a page has loaded or login succeeded.
+Lost responses, interrupted creation and concurrent domain revocation retain evidence
+and require cleanup/reconciliation. Viewer tickets now require `browser_created`,
+the exact connection/session relationship and a `live` Steel reservation.
+
+`release` first disables domain authorization and sends Browser revocation, then
+requests physical release. Active or uncertain writer leases block it; only trusted
+disconnect confirmation can clear the lease. Confirmed physical release records
+`browser_released` and revokes the connection. This does not delete encrypted
+snapshots, platform credentials, disk profiles or backups. Product HTTP orchestration
+is wired, while automatic cleanup and deployment configuration remain pending.
+
+The API optionally configures `BROWSER_BASE_URL` and its private command key to
+construct the existing internal control client. Browser Service constructs the
+manager from its configured Steel client/database. Missing configuration keeps the
+internal lifecycle unavailable. The signed ASGI route is verified against isolated
+PostgreSQL and the pinned real Steel create/release path, plus synthetic failure and
+concurrency cases; it has not been verified in a deployed product login flow.
 
 ## Executor lifecycle
 

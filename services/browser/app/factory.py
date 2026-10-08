@@ -19,10 +19,17 @@ from services.browser.sessions.authentication import (
     CommandRejected,
     CommandVerifier,
     LeaseAction,
+    LifecycleAction,
     SessionAction,
 )
 from services.browser.sessions.lease import LeaseConflict, LeaseNotFound, SessionLease
 from services.browser.sessions.postgres import PostgresLeaseStore
+from services.browser.sessions.steel import (
+    SteelSessionConflict,
+    SteelSessionManager,
+    SteelSessionUnavailable,
+    SteelSessionUncertain,
+)
 from services.browser.sessions.viewer import (
     ViewerRejected,
     cast_websocket_url,
@@ -104,6 +111,7 @@ def create_app(
     verifier: CommandVerifier | None = None,
     store: PostgresLeaseStore | None = None,
     steel_client: httpx.AsyncClient | None = None,
+    steel_sessions: SteelSessionManager | None = None,
     viewer_public_origin: AnyHttpUrl | None = None,
     steel_ws_connect: Callable[..., Any] | None = None,
     viewer_authorization_interval: float = 5.0,
@@ -170,10 +178,35 @@ def create_app(
         except (DBAPIError, PoolTimeoutError):
             raise HTTPException(503, "Browser coordination unavailable") from None
 
+    @app.post("/internal/v1/sessions/{session_id}/lifecycle/{action}")
+    async def lifecycle_command(
+        session_id: UUID,
+        action: LifecycleAction,
+        authorization: str = Header(default=""),
+    ) -> dict[str, str]:
+        command = authenticate(session_id, action, authorization)
+        if steel_sessions is None or store is None:
+            raise HTTPException(503, "Browser lifecycle is not configured")
+        try:
+            await store.authorize_lifecycle(command)
+            async with store.lifecycle_guard(command):
+                session = (
+                    await steel_sessions.create(session_id)
+                    if action == "create"
+                    else await steel_sessions.release(session_id)
+                )
+        except CommandRejected:
+            raise HTTPException(403, "Browser lifecycle rejected") from None
+        except (LeaseNotFound, LeaseConflict, SteelSessionConflict):
+            raise HTTPException(409, "Browser lifecycle conflict") from None
+        except (DBAPIError, PoolTimeoutError, SteelSessionUnavailable, SteelSessionUncertain):
+            raise HTTPException(503, "Browser coordination unavailable") from None
+        return {"session_id": str(session.session_id), "status": session.status}
+
     @app.get("/internal/v1/sessions/{session_id}/viewer")
     async def viewer_document(
         session_id: UUID,
-        page_id: str = Query(alias="pageId"),
+        page_id: str | None = Query(default=None, alias="pageId"),
         origin: str | None = Header(default=None),
         authorization: str = Header(default=""),
     ) -> Response:
@@ -242,7 +275,7 @@ def create_app(
             if not token:
                 raise ViewerRejected("Viewer command required")
             command = verifier.verify(token, session_id, "viewer")
-            page_id = validate_page_id(websocket.query_params.get("pageId", ""))
+            page_id = validate_page_id(websocket.query_params.get("pageId"))
             lease = await store.acquire_viewer(command)
         except (CommandRejected, ViewerRejected, LeaseNotFound, LeaseConflict):
             await websocket.close(code=1008)
@@ -251,7 +284,15 @@ def create_app(
             await websocket.close(code=1013)
             return
 
-        upstream_url = cast_websocket_url(context, page_id)
+        upstream_url = cast_websocket_url(
+            context,
+            page_id,
+            {
+                key: value
+                for key, value in websocket.query_params.multi_items()
+                if key not in {"pageId", "sessionId"}
+            },
+        )
         connector = steel_ws_connect or connect
         try:
             close_code = 1000

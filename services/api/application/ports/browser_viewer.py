@@ -13,6 +13,13 @@ class BrowserViewerTicket:
     expires_at: datetime
 
 
+@dataclass(frozen=True, slots=True)
+class BrowserViewerDocument:
+    content: bytes
+    content_type: str
+    set_cookie: str | None
+
+
 class BrowserViewerTicketRejected(Exception):
     pass
 
@@ -23,3 +30,7 @@ class BrowserViewerTicketUnavailable(Exception):
 
 class BrowserViewerTicketIssuer(Protocol):
     async def issue(self, actor: ActorContext, session_id: UUID) -> BrowserViewerTicket: ...
+
+    async def document(
+        self, actor: ActorContext, session_id: UUID, page_id: str | None
+    ) -> BrowserViewerDocument: ...

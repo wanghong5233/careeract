@@ -155,8 +155,8 @@ Docker CLI 存在不代表 Linux 引擎已启动。检查可用内存、Docker �
 本地 Compose 的数据库、模型网关、Temporal 和 Steel 端口仅绑定回环地址，不可直接当公网部署配置。
 生产拓扑在 `deploy/compose.yaml`，对宿主机只发布 Caddy 端口，仍需独立公网验收。
 生产 Caddy 将 `/api/browser/sessions/*` 在同源下转发到 Browser Service 的内部 Viewer
-HTML/WebSocket 路由；本地 `43110` 开发服务器尚未接入这条产品浏览器入口，不能把 `8001`
-或 Steel `3001/9223` 直接暴露给用户。
+HTML/WebSocket 路由；本地 Web 通过 `BROWSER_BASE_URL` 配置的服务端代理和 Next rewrite
+复用同一路径，不能把 `8001` 或 Steel `3001/9223` 直接暴露给用户。
 
 本地开发使用 Web `43110`、API `43111` 作为主调试端口，组合启动器会在固定的
 `43110/43111`、`43120/43121` … `43180/43181` 端口池中按“成对”退避。
@@ -519,10 +519,15 @@ Uvicorn Browser 子进程，由真实 API 签名/HTTP 适配器经回环 TCP 访
 
 - `BROWSER_DATABASE_URL`：SQLAlchemy 的 `postgresql+asyncpg` URL，指向已迁移数据库。
 - `BROWSER_COMMAND_PUBLIC_KEY_FILE`：容器内 Ed25519 PEM 公钥文件路径，只用于 API 命令验证。
+- API 的 `BROWSER_BASE_URL` 与 `BROWSER_COMMAND_PRIVATE_KEY_FILE` 配置内部控制客户端；
+  后者是独立 Ed25519 PEM 私钥，不是 Better Auth 密钥。只有 URL 而没有私钥时拒绝启动。
+  未配置 URL 时保持产品物理会话控制关闭。Browser Service 配置上述数据库/公钥后会复用
+  `STEEL_BASE_URL` 装配专用内部创建/释放路由；Web 登录仍须经过产品登录任务和 Viewer 授权。
 
 API 私钥不放在 Browser，密钥不得复用用户登录或模型供应商密钥。
-当前 Compose 不自动开启控制入口。API 内部已有签名/HTTP 适配器，但尚无产品级
-授权校验、签发、注册或撤销用例，不可直接把用户请求转换成可信控制上下文。
+当前 Compose 不自动开启控制入口。API 已有登录任务授权、签名注册/创建/释放和同源
+Viewer HTML 代理；产品仍要求独立的 Browser Service 配置、可见登录核验和真实站点只读复验，
+不能把合成创建证据当成已登录。
 开放条件见[浏览器开放前检查](#浏览器开放前检查)。真实执行器已有下述隔离测试，尚不支持产品级浏览器执行或人工接管。
 
 ### 浏览器开放前检查
@@ -609,6 +614,23 @@ try { uv run pytest tests/api/test_execution_semantics.py -q } finally {
 
 该入口创建隔离 PostgreSQL 并升级/回退至 0020；实际校验签名和 Browser Service ASGI 路由，
 丢失响应/拒绝/取消为故障替身，不访问 Steel 或招聘平台。日常库不会随测试迁移；装配产品前须先升级。
+
+签名物理会话路由及领域创建证据检查：
+
+```powershell
+$env:RUN_BROWSER_POSTGRES_TESTS = '1'
+$env:RUN_STEEL_SESSION_TEST = '1'
+try {
+    uv run pytest tests/browser/test_signed_lifecycle.py tests/api/test_execution_semantics.py tests/api/test_browser_control.py -q
+} finally {
+    Remove-Item Env:RUN_BROWSER_POSTGRES_TESTS
+    Remove-Item Env:RUN_STEEL_SESSION_TEST
+}
+```
+
+第二个开关仅增加一项固定 Steel 的真实创建/释放，不打开 BOSS。存在活动会话时拒绝干扰；
+其余检查使用隔离 PostgreSQL/ASGI 与合成 Steel 故障响应。0021 迁移不应用日常库，
+尚未验证产品 HTTP、同源 Viewer 或人工登录。
 登录授权最长 15 分钟，同键重放不会续期；内部注册只建立会话归属记录，不代表浏览器已启动或已登录。
 未知/中断尝试不能重发，撤销后仍须核对浏览器断连和 Profile 清理。具体范围见招聘沟通专题。
 

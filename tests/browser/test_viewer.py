@@ -6,6 +6,7 @@ from pydantic import AnyHttpUrl
 from services.browser.sessions.viewer import (
     ViewerContext,
     ViewerRejected,
+    cast_websocket_url,
     rewrite_viewer_html,
     validate_origin,
     viewer_context,
@@ -28,6 +29,12 @@ def test_rewrites_only_the_configured_steel_cast_endpoint() -> None:
     assert "pageId=page-a" in rewritten
     assert "sessionId=" + str(current.session_id) in rewritten
     assert "steel:3000" not in rewritten
+
+
+def test_cast_url_preserves_multi_page_discovery_without_exposing_steel() -> None:
+    current = context()
+    url = cast_websocket_url(current, None, {"tabInfo": "true"})
+    assert url.endswith("/v1/sessions/cast?tabInfo=true&sessionId=" + str(current.session_id))
 
 
 @pytest.mark.parametrize(

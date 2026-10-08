@@ -9,12 +9,14 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from services.api.application.context import ActorContext
 from services.api.application.ports.browser_control import BrowserControlContext
+from services.api.domain.boss_connection import BossConnectionNotFound
 from services.api.domain.execution import (
     ExecutionAttempt,
     ExecutionAuthorization,
     ExecutionConflict,
     ExecutionTask,
     ExecutionUnavailable,
+    LoginExecution,
 )
 
 
@@ -74,6 +76,7 @@ class PostgresExecutionRepository:
         scope: str,
         authorization_expires_at: datetime,
         request_id: UUID,
+        expected_version: UUID | None = None,
     ) -> tuple[ExecutionTask, ExecutionAuthorization, ExecutionAttempt]:
         if kind != "boss_login" or scope != "boss.login":
             raise ExecutionConflict("Unsupported execution scope")
@@ -144,10 +147,12 @@ class PostgresExecutionRepository:
                     .mappings()
                     .one_or_none()
                 )
+                if connection is None:
+                    raise BossConnectionNotFound("BOSS connection does not exist")
                 if (
-                    connection is None
-                    or connection["status"] != "pending"
+                    connection["status"] != "pending"
                     or connection["browser_session_id"] is not None
+                    or (expected_version is not None and connection["version"] != expected_version)
                 ):
                     raise ExecutionConflict("BOSS connection is unavailable for login")
                 now = await database.scalar(text("SELECT clock_timestamp()"))
@@ -263,6 +268,7 @@ class PostgresExecutionRepository:
                     text(
                         "SELECT a.*, t.status AS task_status, t.connection_id, "
                         "c.status AS connection_status, "
+                        "c.version AS connection_version, "
                         "z.status AS authorization_status, "
                         "z.expires_at AS authorization_expires_at "
                         "FROM career.execution_tasks t "
@@ -392,12 +398,16 @@ class PostgresExecutionRepository:
         except (DBAPIError, PoolTimeoutError):
             raise ExecutionUnavailable("Execution state is unavailable") from None
 
-    async def revoke(self, actor: ActorContext, attempt_id: UUID) -> ExecutionAttempt:
+    async def revoke(
+        self, actor: ActorContext, attempt_id: UUID, *, expected_version: UUID | None = None
+    ) -> ExecutionAttempt:
         try:
             async with self.engine.begin() as database:
                 row = await self._lock(database, actor, attempt_id)
                 if row["authorization_status"] == "revoked":
                     return attempt_from_row(row)
+                if expected_version is not None and row["connection_version"] != expected_version:
+                    raise ExecutionConflict("BOSS connection has changed")
                 await database.execute(
                     text(
                         "UPDATE career.execution_authorizations SET status='revoked', "
@@ -432,6 +442,235 @@ class PostgresExecutionRepository:
                     )
                     .mappings()
                     .one()
+                )
+                await database.execute(
+                    text(
+                        "UPDATE career.boss_connections SET status=:status, "
+                        "last_observed_state=:outcome, version=:version, "
+                        "updated_at=clock_timestamp() WHERE id=:id"
+                    ),
+                    {
+                        "id": row["connection_id"],
+                        "status": "revoked" if row["started_at"] is None else "blocked",
+                        "outcome": "cancelled_before_start"
+                        if row["started_at"] is None
+                        else "cleanup_required",
+                        "version": uuid4(),
+                    },
+                )
+                return attempt_from_row(updated)
+        except (DBAPIError, PoolTimeoutError):
+            raise ExecutionUnavailable("Execution state is unavailable") from None
+
+    async def read_login(self, actor: ActorContext, connection_id: UUID) -> LoginExecution | None:
+        try:
+            async with self.engine.begin() as database:
+                await database.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ"))
+                owned = await database.scalar(
+                    text("SELECT id FROM career.boss_connections WHERE id=:id AND user_id=:user"),
+                    {"id": connection_id, "user": actor.user_id},
+                )
+                if owned is None:
+                    raise BossConnectionNotFound("BOSS connection does not exist")
+                task = (
+                    (
+                        await database.execute(
+                            text(
+                                "SELECT * FROM career.execution_tasks t "
+                                "WHERE t.connection_id=:id AND t.user_id=:user"
+                            ),
+                            {"id": connection_id, "user": actor.user_id},
+                        )
+                    )
+                    .mappings()
+                    .one_or_none()
+                )
+                if task is None:
+                    return None
+                parameters = {"task": task["id"], "user": actor.user_id}
+                authorization = (
+                    (
+                        await database.execute(
+                            text(
+                                "SELECT * FROM career.execution_authorizations "
+                                "WHERE task_id=:task AND user_id=:user"
+                            ),
+                            parameters,
+                        )
+                    )
+                    .mappings()
+                    .one()
+                )
+                attempt = (
+                    (
+                        await database.execute(
+                            text(
+                                "SELECT * FROM career.execution_attempts "
+                                "WHERE task_id=:task AND user_id=:user"
+                            ),
+                            parameters,
+                        )
+                    )
+                    .mappings()
+                    .one()
+                )
+                return LoginExecution(
+                    task_from_row(task),
+                    authorization_from_row(authorization),
+                    attempt_from_row(attempt),
+                )
+        except (DBAPIError, PoolTimeoutError):
+            raise ExecutionUnavailable("Execution state is unavailable") from None
+
+    async def reserve_creation(
+        self, actor: ActorContext, attempt_id: UUID
+    ) -> BrowserControlContext:
+        try:
+            async with self.engine.begin() as database:
+                row = await self._lock(database, actor, attempt_id)
+                now = await database.scalar(text("SELECT clock_timestamp()"))
+                if (
+                    row["browser_session_id"] is None
+                    or row["status"] != "waiting"
+                    or row["task_status"] != "waiting"
+                    or row["outcome"] != "browser_registered"
+                    or row["connection_status"] != "pending"
+                    or row["authorization_status"] != "active"
+                    or row["authorization_expires_at"] <= now
+                ):
+                    raise ExecutionConflict("Browser creation cannot start or be retried")
+                await database.execute(
+                    text(
+                        "UPDATE career.execution_attempts SET status='running', "
+                        "outcome='browser_creating', updated_at=clock_timestamp() WHERE id=:id"
+                    ),
+                    {"id": attempt_id},
+                )
+                await database.execute(
+                    text(
+                        "UPDATE career.execution_tasks SET status='running', "
+                        "updated_at=clock_timestamp() WHERE id=:id"
+                    ),
+                    {"id": row["task_id"]},
+                )
+                await database.execute(
+                    text(
+                        "UPDATE career.boss_connections SET browser_session_id=:session, "
+                        "version=:version, last_observed_state='browser_creating', "
+                        "updated_at=clock_timestamp() WHERE id=:id"
+                    ),
+                    {
+                        "id": row["connection_id"],
+                        "session": row["browser_session_id"],
+                        "version": uuid4(),
+                    },
+                )
+                return BrowserControlContext(
+                    user_id=actor.user_id,
+                    session_id=row["browser_session_id"],
+                    task_id=row["task_id"],
+                    authorization_id=row["authorization_id"],
+                    authorization_expires_at=row["authorization_expires_at"],
+                    attempt_id=attempt_id,
+                    request_id=row["request_id"],
+                    owner_id="boss-login",
+                )
+        except (DBAPIError, PoolTimeoutError):
+            raise ExecutionUnavailable("Execution state is unavailable") from None
+
+    async def record_creation(
+        self,
+        actor: ActorContext,
+        attempt_id: UUID,
+        outcome: Literal["browser_created", "creation_unconfirmed", "creation_rejected"],
+    ) -> ExecutionAttempt:
+        if outcome not in ("browser_created", "creation_unconfirmed", "creation_rejected"):
+            raise ExecutionConflict("Unsupported browser creation evidence")
+        try:
+            async with self.engine.begin() as database:
+                row = await self._lock(database, actor, attempt_id)
+                if row["outcome"] not in ("browser_creating", "cleanup_required"):
+                    raise ExecutionConflict("Creation result cannot replace existing evidence")
+                now = await database.scalar(text("SELECT clock_timestamp()"))
+                evidence: str = outcome
+                status = "waiting" if outcome == "browser_created" else "unknown"
+                if (
+                    row["task_status"] == "cancelled"
+                    or row["connection_status"] in ("revoked", "failed")
+                    or row["authorization_status"] != "active"
+                    or row["authorization_expires_at"] <= now
+                ):
+                    status, evidence = "unknown", "cleanup_required"
+                updated = (
+                    (
+                        await database.execute(
+                            text(
+                                "UPDATE career.execution_attempts SET status=:status, "
+                                "outcome=:outcome, finished_at=CASE WHEN :status='waiting' "
+                                "THEN NULL ELSE clock_timestamp() END, "
+                                "updated_at=clock_timestamp() WHERE id=:id RETURNING *"
+                            ),
+                            {"id": attempt_id, "status": status, "outcome": evidence},
+                        )
+                    )
+                    .mappings()
+                    .one()
+                )
+                if row["task_status"] != "cancelled":
+                    await database.execute(
+                        text(
+                            "UPDATE career.execution_tasks SET status='waiting', "
+                            "updated_at=clock_timestamp() WHERE id=:id"
+                        ),
+                        {"id": row["task_id"]},
+                    )
+                if row["connection_status"] not in ("revoked", "failed"):
+                    await database.execute(
+                        text(
+                            "UPDATE career.boss_connections SET status=:status, "
+                            "last_observed_state=:outcome, version=:version, "
+                            "updated_at=clock_timestamp() WHERE id=:id"
+                        ),
+                        {
+                            "id": row["connection_id"],
+                            "status": "waiting_for_login" if status == "waiting" else "blocked",
+                            "outcome": evidence,
+                            "version": uuid4(),
+                        },
+                    )
+                return attempt_from_row(updated)
+        except (DBAPIError, PoolTimeoutError):
+            raise ExecutionUnavailable("Execution state is unavailable") from None
+
+    async def record_release(self, actor: ActorContext, attempt_id: UUID) -> ExecutionAttempt:
+        try:
+            async with self.engine.begin() as database:
+                row = await self._lock(database, actor, attempt_id)
+                if row["outcome"] == "browser_released":
+                    return attempt_from_row(row)
+                if row["authorization_status"] != "revoked" or row["outcome"] != "cleanup_required":
+                    raise ExecutionConflict("Browser release is not authorized")
+                updated = (
+                    (
+                        await database.execute(
+                            text(
+                                "UPDATE career.execution_attempts SET status='cancelled', "
+                                "outcome='browser_released', finished_at=clock_timestamp(), "
+                                "updated_at=clock_timestamp() WHERE id=:id RETURNING *"
+                            ),
+                            {"id": attempt_id},
+                        )
+                    )
+                    .mappings()
+                    .one()
+                )
+                await database.execute(
+                    text(
+                        "UPDATE career.boss_connections SET status='revoked', "
+                        "last_observed_state='browser_released', version=:version, "
+                        "updated_at=clock_timestamp() WHERE id=:id"
+                    ),
+                    {"id": row["connection_id"], "version": uuid4()},
                 )
                 return attempt_from_row(updated)
         except (DBAPIError, PoolTimeoutError):

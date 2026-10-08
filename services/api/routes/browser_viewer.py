@@ -1,7 +1,7 @@
 from typing import Annotated, cast
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ConfigDict
 
 from services.api.application.context import ActorContext
@@ -40,6 +40,20 @@ def serialize(ticket: BrowserViewerTicket) -> ViewerTicketResponse:
         token=ticket.token,
         expires_at=ticket.expires_at.isoformat(),
     )
+
+
+@router.get("/{session_id}/viewer")
+async def viewer_document(
+    session_id: UUID,
+    issuer: Annotated[BrowserViewerTicketIssuer, Depends(get_issuer)],
+    actor: Annotated[ActorContext, Depends(get_actor)],
+    page_id: Annotated[str | None, Query(alias="pageId")] = None,
+) -> Response:
+    document = await issuer.document(actor, session_id, page_id)
+    headers = {"Cache-Control": "no-store"}
+    if document.set_cookie is not None:
+        headers["Set-Cookie"] = document.set_cookie
+    return Response(content=document.content, media_type=document.content_type, headers=headers)
 
 
 @router.post("/{session_id}/viewer-ticket", response_model=ViewerTicketResponse)

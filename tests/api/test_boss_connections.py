@@ -225,9 +225,13 @@ async def test_connection_migration_down_and_up(database_url: str) -> None:
     execution_migration = importlib.import_module(
         "services.api.migrations.versions.0020_execution_semantics"
     )
+    lifecycle_migration = importlib.import_module(
+        "services.api.migrations.versions.0021_browser_lifecycle"
+    )
 
     def roundtrip(database: Connection) -> None:
         with Operations.context(MigrationContext.configure(database)):
+            lifecycle_migration.downgrade()
             execution_migration.downgrade()
             migration.downgrade()
             assert database.scalar(text("SELECT to_regclass('career.boss_connections')")) is None
@@ -236,6 +240,7 @@ async def test_connection_migration_down_and_up(database_url: str) -> None:
                 database.scalar(text("SELECT to_regclass('career.boss_connections')")) is not None
             )
             execution_migration.upgrade()
+            lifecycle_migration.upgrade()
 
     try:
         async with engine.begin() as database:

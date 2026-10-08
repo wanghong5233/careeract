@@ -1,3 +1,5 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from typing import cast
 from uuid import UUID, uuid4
@@ -220,6 +222,58 @@ class PostgresLeaseStore:
                     ),
                     {"session": command.session_id},
                 )
+
+    async def authorize_lifecycle(self, command: BrowserCommand) -> None:
+        if command.action not in ("create", "release") or command.lease_id is not None:
+            raise CommandRejected("Not a lifecycle command")
+        async with self.engine.begin() as connection:
+            row = await self._lock(connection, command.session_id)
+            now = cast(datetime, await connection.scalar(text("SELECT clock_timestamp()")))
+            if (
+                row["user_id"] != command.sub
+                or row["task_id"] != command.task_id
+                or row["authorization_id"] != command.authorization_id
+                or not command.is_current(now.timestamp())
+                or (command.action == "create" and row["revoked"])
+                or (command.action == "release" and not row["revoked"])
+            ):
+                raise CommandRejected("Browser lifecycle is no longer authorized")
+            if row["lease_id"] is not None:
+                raise LeaseConflict("Previous writer must disconnect before lifecycle changes")
+            consumed = await connection.scalar(
+                text(
+                    "INSERT INTO browser.commands (command_id, session_id, request_id, action) "
+                    "VALUES (:command, :session, :request, :action) "
+                    "ON CONFLICT (command_id) DO NOTHING RETURNING command_id"
+                ),
+                {
+                    "command": command.jti,
+                    "session": command.session_id,
+                    "request": command.request_id,
+                    "action": command.action,
+                },
+            )
+            if consumed is None:
+                raise CommandRejected("Browser command was already consumed")
+
+    @asynccontextmanager
+    async def lifecycle_guard(self, command: BrowserCommand) -> AsyncIterator[None]:
+        async with self.engine.begin() as connection:
+            row = await self._lock(connection, command.session_id)
+            now = cast(datetime, await connection.scalar(text("SELECT clock_timestamp()")))
+            if (
+                command.action not in ("create", "release")
+                or command.lease_id is not None
+                or row["user_id"] != command.sub
+                or row["task_id"] != command.task_id
+                or row["authorization_id"] != command.authorization_id
+                or not command.is_current(now.timestamp())
+                or row["revoked"] != (command.action == "release")
+            ):
+                raise CommandRejected("Browser lifecycle is no longer authorized")
+            if row["lease_id"] is not None:
+                raise LeaseConflict("Previous writer must disconnect before lifecycle changes")
+            yield
 
     async def revoke(self, session_id: UUID) -> None:
         async with self.engine.begin() as connection:

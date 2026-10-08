@@ -80,7 +80,7 @@ Temporal Workflow 触发 `OutreachAutomation`，每次运行生成独立的 `Com
 
 - PRD 已将 BOSS 主动沟通列为正式能力，要求保存沟通内容、发送依据和处理结果。
 - CareerAct 已有 Agno AgentOS/AG-UI 文本 Runtime、职业上下文工具、PostgreSQL 领域状态、Temporal 基础 Workflow 和 Browser Service 的会话租约边界。
-- Browser Service 已有底座、内部控制契约、加密 context 和合成 BOSS 快照解析器；内部登录任务/授权/尝试可持久化并绑定会话注册，产品登录入口、实时站点读取、沟通领域对象和生产执行入口尚未接入。
+- Browser Service 已有底座、内部控制契约、加密 context 和合成 BOSS 快照解析器；内部登录任务/授权/尝试可持久化并绑定会话注册，产品登录任务、同源 Viewer 和停止入口已接入，实时站点读取、沟通领域对象和生产执行入口仍未接入。
 - 浏览器执行必须通过 CareerAct 的用户归属、任务、授权、尝试和请求标识；原始 CDP/调试地址不能交给 Web 客户端。
 
 ### 2.2 历史 Pulse 的参考证据（非实现来源）
@@ -328,8 +328,26 @@ HttpOnly Cookie/localStorage 恢复与下一空会话不继承标记。后台合
 
 1. 已完成内部加密 context 保存/恢复/撤销；生产密钥与联合停止/撤销随产品登录生命周期装配。
 2. 已完成内部登录任务/授权/尝试及 Browser Service 归属注册绑定；实际 Steel 创建、产品请求回写与公开登录用例随下一项装配。
-3. 装配产品同源登录入口、会话票据续期和停止/退出清理，让用户人工登录一次。
-4. 用确定性只读验证登录、重建后的恢复与跨用户隔离，再进入 Phase 1 的真实站点适配。
+3. **已完成装配：** 产品同源登录入口、短时 Viewer 票据、HTML/WebSocket 代理和停止/退出清理，
+   让用户可以在隔离浏览器中人工登录一次。
+4. 用确定性只读验证登录、重建后的恢复与跨用户隔离，再进入 Phase 1 的真实站点适配；
+   真实可见登录仍需用户在配置好的 Browser Service 中完成。
+
+**内部物理会话装配（2026-10-07）：** 0021 迁移加入创建/释放证据，
+API 配置 `BROWSER_BASE_URL` 和独立签名私钥后装配现有控制客户端；Browser Service 复用
+SteelSessionManager 提供专用签名创建/释放路由，不增加驱动或 Harness。
+命令消费在外部副作用前独立提交，之后以会话行锁排除活跃 Viewer/执行器；释放还要求先撤销。
+创建先绑定连接与尝试，回读确认后进入 `waiting_for_login`；该状态仅说明浏览器已创建，
+尚未导航 BOSS，更不说明登录成功。Viewer 票据改为要求真实 `browser_created` 和 live 占用。
+
+62 项专项通过，覆盖领域单消费者、跨用户、取消、撤销、丢失响应、重建不重发、命令重放和活跃租约
+阻止释放；其中一项实际运行固定 Steel 的签名创建/释放，其余是隔离 PostgreSQL/ASGI/故障替身。
+0021 的升级/回退只在隔离库，日常库未迁移。没有访问 BOSS、输入真实凭据或发送消息。
+当前产品已接入登录任务 POST/GET/DELETE、同源 Viewer HTML 代理和登录卡片；只有真实 Browser
+Service 配置、Steel live 会话和 `browser_created` 证据存在时才显示“打开安全浏览器”。
+Viewer 页面通过短时票据和 HttpOnly cookie 进入同源 cast 路由；未配置 Browser Service 时仍保持安全关闭，
+不会把连接请求或 `pending` 状态称为已登录。票据续期由 Viewer WebSocket 的服务端复核负责，真实登录和
+Profile 持久化仍待用户人工完成后验收。
 
 ### Phase 1：只读 BOSS 适配器
 

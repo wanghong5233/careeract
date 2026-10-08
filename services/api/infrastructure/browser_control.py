@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from typing import Literal
 from uuid import UUID, uuid4
 
 import httpx
@@ -13,6 +14,7 @@ from services.api.application.ports.browser_control import (
     BrowserControlRejected,
     BrowserControlUncertain,
     BrowserLease,
+    BrowserSession,
 )
 
 
@@ -26,6 +28,13 @@ class LeaseResponse(BaseModel):
     draining: bool
 
 
+class SessionResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: UUID
+    status: Literal["live", "released"]
+
+
 class BrowserCommandSigner:
     def __init__(self, private_key: Ed25519PrivateKey) -> None:
         self.private_key = private_key
@@ -37,12 +46,13 @@ class BrowserCommandSigner:
             not context.user_id.strip()
             or not context.owner_id.strip()
             or context.authorization_expires_at.utcoffset() is None
-            or (action in ("register", "revoke", "acquire", "viewer")) != (lease_id is None)
+            or (action in ("register", "revoke", "acquire", "viewer", "create", "release"))
+            != (lease_id is None)
         ):
             raise BrowserControlRejected("Invalid browser control context")
         issued_at = int(datetime.now(UTC).timestamp())
         expires_at = issued_at + 60
-        if action != "revoke":
+        if action not in ("revoke", "release"):
             expires_at = min(expires_at, int(context.authorization_expires_at.timestamp()))
         if expires_at <= issued_at:
             raise BrowserControlRejected("Browser authorization has expired")
@@ -76,8 +86,8 @@ class BrowserControlClient:
     async def send(
         self, context: BrowserControlContext, action: BrowserAction, lease_id: UUID | None = None
     ) -> BrowserLease | None:
-        if action == "viewer":
-            raise BrowserControlRejected("Viewer commands require a document ticket")
+        if action in ("viewer", "create", "release"):
+            raise BrowserControlRejected("Browser action requires its dedicated adapter")
         token = self.signer.sign(context, action, lease_id)
         prefix = "" if action in ("register", "revoke") else "lease/"
         try:
@@ -117,3 +127,32 @@ class BrowserControlClient:
         return BrowserLease(
             result.session_id, result.lease_id, result.owner_id, result.expires_at, result.draining
         )
+
+    async def lifecycle(
+        self, context: BrowserControlContext, action: Literal["create", "release"]
+    ) -> BrowserSession:
+        token = self.signer.sign(context, action)
+        try:
+            response = await self.client.post(
+                f"/internal/v1/sessions/{context.session_id}/lifecycle/{action}",
+                headers={"Authorization": "Bearer " + token},
+                follow_redirects=False,
+                timeout=50,
+            )
+        except httpx.TransportError:
+            raise BrowserControlUncertain("Browser lifecycle requires reconciliation") from None
+        if response.status_code in (401, 403):
+            raise BrowserControlRejected("Browser lifecycle rejected")
+        if response.status_code in (404, 409):
+            raise BrowserControlConflict("Browser lifecycle requires reconciliation")
+        if response.status_code != 200:
+            raise BrowserControlUncertain("Browser lifecycle result unconfirmed")
+        try:
+            result = SessionResponse.model_validate_json(response.content)
+        except ValidationError:
+            raise BrowserControlUncertain("Browser lifecycle response invalid") from None
+        if result.session_id != context.session_id or result.status != (
+            "live" if action == "create" else "released"
+        ):
+            raise BrowserControlUncertain("Browser lifecycle response does not match command")
+        return BrowserSession(result.session_id, result.status)

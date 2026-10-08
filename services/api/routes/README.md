@@ -22,6 +22,12 @@ These use cases only persist `pending`/`revoked`, create no browser session and 
 not authorize platform access or messaging. Future browser-backed revocation must
 stop the trusted executor and verify disconnection before claiming completion.
 
+`GET/POST/DELETE /api/v1/connections/boss/{id}/login` manages the short-lived,
+explicitly authorized `boss.login` execution. It creates or reads the durable task,
+authorization and attempt; it does not accept credentials. The browser Viewer is
+available at `GET /api/v1/browser/sessions/{session_id}/viewer` only after confirmed
+physical creation and returns same-origin HTML with a short-lived HttpOnly cookie.
+
 `GET /api/v1/profile` reads the authenticated user's singleton confirmed profile;
 an absent profile returns empty content and a null version. `PUT /api/v1/profile`
 requires content, explicit confirmation and the version returned by the last read.

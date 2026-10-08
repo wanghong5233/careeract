@@ -3,7 +3,9 @@ from datetime import datetime
 from typing import Literal, Protocol
 from uuid import UUID
 
-BrowserAction = Literal["register", "revoke", "acquire", "renew", "stop", "check", "viewer"]
+BrowserAction = Literal[
+    "register", "revoke", "acquire", "renew", "stop", "check", "viewer", "create", "release"
+]
 
 
 @dataclass(frozen=True)
@@ -29,6 +31,12 @@ class BrowserLease:
     draining: bool
 
 
+@dataclass(frozen=True)
+class BrowserSession:
+    session_id: UUID
+    status: Literal["live", "released"]
+
+
 class BrowserControlRejected(Exception):
     pass
 
@@ -45,3 +53,7 @@ class BrowserSessionControl(Protocol):
     async def send(
         self, context: BrowserControlContext, action: BrowserAction, lease_id: UUID | None = None
     ) -> BrowserLease | None: ...
+
+    async def lifecycle(
+        self, context: BrowserControlContext, action: Literal["create", "release"]
+    ) -> BrowserSession: ...

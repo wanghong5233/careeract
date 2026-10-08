@@ -14,6 +14,7 @@ from services.api.domain.boss_connection import (
     BossConnectionNotFound,
     BossConnectionUnavailable,
 )
+from services.api.domain.execution import ExecutionConflict, ExecutionUnavailable
 from services.api.domain.material import (
     MaterialConflict,
     MaterialInvalid,
@@ -157,6 +158,26 @@ async def browser_viewer_error(request: Request, error: Exception) -> JSONRespon
                 "request_id": getattr(request.state, "request_id", str(uuid4())),
             }
         },
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+async def execution_error(request: Request, error: Exception) -> JSONResponse:
+    if isinstance(error, ExecutionConflict):
+        status, code, message = 409, "execution_conflict", "执行已有变化，请读取并核对当前状态。"
+    elif isinstance(error, ExecutionUnavailable):
+        status, code, message = 503, "execution_unavailable", "执行结果待核对，不会自动重试。"
+    else:
+        raise error
+    return JSONResponse(
+        {
+            "error": {
+                "code": code,
+                "message": message,
+                "request_id": getattr(request.state, "request_id", str(uuid4())),
+            }
+        },
+        status_code=status,
         headers={"Cache-Control": "no-store"},
     )
 

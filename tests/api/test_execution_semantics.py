@@ -14,7 +14,11 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from services.api.application.browser_registration import BrowserRegistrationService
 from services.api.application.context import ActorContext
+from services.api.application.ports.browser_control import (
+    BrowserControlContext,
+)
 from services.api.application.ports.browser_viewer import BrowserViewerTicketRejected
+from services.api.domain.boss_connection import BossConnectionNotFound
 from services.api.domain.execution import (
     ExecutionAttempt,
     ExecutionAuthorization,
@@ -29,7 +33,9 @@ from services.api.infrastructure.execution import PostgresExecutionRepository
 from services.browser.app.factory import create_app
 from services.browser.sessions.authentication import CommandRejected, CommandVerifier
 from services.browser.sessions.postgres import PostgresLeaseStore
+from services.browser.sessions.steel import SteelSessionManager
 from tests.browser.test_postgres_leases import database_url as database_url
+from tests.browser.test_steel_sessions import SyntheticSteel
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("RUN_BROWSER_POSTGRES_TESTS") != "1",
@@ -63,6 +69,7 @@ async def scenario(database_url: str) -> AsyncIterator[Scenario]:
     users = ["execution-test-" + uuid4().hex for _ in range(2)]
     try:
         async with engine.begin() as database:
+            await database.execute(text("DELETE FROM browser.steel_operations"))
             for user_id in users:
                 await database.execute(
                     text(
@@ -202,9 +209,13 @@ async def test_registration_uses_real_semantics_and_viewer_ticket_checks_authori
     task, authorization, attempt = await scenario.accept()
     private_key = Ed25519PrivateKey.generate()
     signer = BrowserCommandSigner(private_key)
+    steel_client = httpx.AsyncClient(
+        base_url="http://steel", transport=httpx.MockTransport(SyntheticSteel().respond)
+    )
     app = create_app(
         verifier=CommandVerifier(private_key.public_key()),
         store=PostgresLeaseStore(scenario.engine),
+        steel_sessions=SteelSessionManager(steel_client, scenario.engine),
     )
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://browser"
@@ -214,6 +225,10 @@ async def test_registration_uses_real_semantics_and_viewer_ticket_checks_authori
         assert registered.status == "waiting" and registered.outcome == "browser_registered"
         assert registered.browser_session_id is not None
         issuer = PostgresBrowserViewerTicketIssuer(scenario.engine, signer)
+        with pytest.raises(BrowserViewerTicketRejected):
+            await issuer.issue(scenario.actor, registered.browser_session_id)
+        created = await service.create(scenario.actor, attempt.id)
+        assert created.status == "waiting" and created.outcome == "browser_created"
         ticket = await issuer.issue(scenario.actor, registered.browser_session_id)
         claims = jwt.decode(
             ticket.token,
@@ -249,6 +264,10 @@ async def test_registration_uses_real_semantics_and_viewer_ticket_checks_authori
             )
         with pytest.raises(CommandRejected):
             await store.check_viewer(viewer_command, viewer_lease.lease_id)
+        await store.drain_viewer(viewer_command, viewer_lease.lease_id)
+        await store.confirm_stopped(registered.browser_session_id, viewer_lease.lease_id)
+        assert (await service.release(scenario.actor, attempt.id)).outcome == "browser_released"
+    await steel_client.aclose()
 
 
 @pytest.mark.asyncio
@@ -321,7 +340,8 @@ async def test_accept_refuses_invalid_scope_deadline_or_connection(
                 text("UPDATE career.boss_connections SET browser_session_id=:session WHERE id=:id"),
                 {"id": scenario.connection_id, "session": uuid4()},
             )
-    with pytest.raises(ExecutionConflict):
+    expected_error = BossConnectionNotFound if invalid == "other_connection" else ExecutionConflict
+    with pytest.raises(expected_error):
         await PostgresExecutionRepository(scenario.engine).accept(
             scenario.actor,
             connection_id=(
@@ -419,13 +439,21 @@ async def test_viewer_ticket_cannot_outlive_login_authorization_or_use_unbound_i
     await store.register(legacy_session, scenario.actor.user_id, uuid4(), uuid4())
     with pytest.raises(BrowserViewerTicketRejected):
         await issuer.issue(scenario.actor, legacy_session)
-    app = create_app(verifier=CommandVerifier(key.public_key()), store=store)
+    steel_client = httpx.AsyncClient(
+        base_url="http://steel", transport=httpx.MockTransport(SyntheticSteel().respond)
+    )
+    app = create_app(
+        verifier=CommandVerifier(key.public_key()),
+        store=store,
+        steel_sessions=SteelSessionManager(steel_client, scenario.engine),
+    )
     async with httpx.AsyncClient(
         base_url="http://browser", transport=httpx.ASGITransport(app=app)
     ) as client:
-        registered = await BrowserRegistrationService(
-            repository, BrowserControlClient(client, signer)
-        ).register(scenario.actor, attempt.id)
+        service = BrowserRegistrationService(repository, BrowserControlClient(client, signer))
+        registered = await service.register(scenario.actor, attempt.id)
+        await service.create(scenario.actor, attempt.id)
+    await steel_client.aclose()
     assert registered.browser_session_id is not None
     async with scenario.engine.begin() as database:
         deadline = await database.scalar(text("SELECT clock_timestamp() + interval '20 seconds'"))
@@ -449,3 +477,101 @@ async def test_viewer_ticket_cannot_outlive_login_authorization_or_use_unbound_i
         )
     with pytest.raises(BrowserViewerTicketRejected):
         await issuer.issue(scenario.actor, registered.browser_session_id)
+
+
+@pytest.mark.parametrize("failure", ["lost-response", "cancelled", "revoked"])
+async def test_creation_failure_or_revoke_preserves_evidence_and_blocks_replay(
+    scenario: Scenario, failure: str
+) -> None:
+    repository = PostgresExecutionRepository(scenario.engine)
+    _, _, attempt = await scenario.accept()
+    key = Ed25519PrivateKey.generate()
+    entered, finish = asyncio.Event(), asyncio.Event()
+    verifier = CommandVerifier(key.public_key())
+    store = PostgresLeaseStore(scenario.engine)
+    writes = 0
+
+    async def respond(request: httpx.Request) -> httpx.Response:
+        nonlocal writes
+        token = request.headers["authorization"].partition(" ")[2]
+        session_id = UUID(request.url.path.split("/")[4])
+        if request.url.path.endswith("/register"):
+            await store.manage(verifier.verify(token, session_id, "register"))
+            return httpx.Response(204)
+        writes += 1
+        entered.set()
+        await finish.wait()
+        if failure == "lost-response":
+            raise httpx.ReadTimeout("private browser diagnostics", request=request)
+        return httpx.Response(200, json={"session_id": str(session_id), "status": "live"})
+
+    async with httpx.AsyncClient(
+        base_url="http://browser", transport=httpx.MockTransport(respond)
+    ) as client:
+        service = BrowserRegistrationService(
+            repository, BrowserControlClient(client, BrowserCommandSigner(key))
+        )
+        registered = await service.register(scenario.actor, attempt.id)
+        assert registered.browser_session_id is not None
+        creating = asyncio.create_task(service.create(scenario.actor, attempt.id))
+        await asyncio.wait_for(entered.wait(), 5)
+        if failure == "cancelled":
+            creating.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await creating
+        else:
+            if failure == "revoked":
+                await repository.revoke(scenario.actor, attempt.id)
+            finish.set()
+            if failure == "lost-response":
+                with pytest.raises(ExecutionUnavailable):
+                    await creating
+            else:
+                assert (await creating).outcome == "cleanup_required"
+        current = await repository.read_attempt(scenario.actor, attempt.id)
+        assert current is not None
+        assert (
+            current.outcome
+            == {
+                "lost-response": "creation_unconfirmed",
+                "cancelled": "browser_creating",
+                "revoked": "cleanup_required",
+            }[failure]
+        )
+        with pytest.raises(ExecutionConflict):
+            await BrowserRegistrationService(
+                PostgresExecutionRepository(scenario.engine), service.control
+            ).create(scenario.actor, attempt.id)
+        assert writes == 1
+        with pytest.raises(BrowserViewerTicketRejected):
+            await PostgresBrowserViewerTicketIssuer(
+                scenario.engine, BrowserCommandSigner(key)
+            ).issue(scenario.actor, registered.browser_session_id)
+
+
+async def test_creation_reservation_checks_owner_and_has_one_consumer(scenario: Scenario) -> None:
+    repository = PostgresExecutionRepository(scenario.engine)
+    _, _, attempt = await scenario.accept()
+    context = await repository.bind_browser_session(scenario.actor, attempt.id, uuid4())
+    await repository.record_registration(scenario.actor, attempt.id, "browser_registered")
+    with pytest.raises(ExecutionConflict):
+        await repository.reserve_creation(scenario.other, attempt.id)
+    candidates = await asyncio.gather(
+        *(repository.reserve_creation(scenario.actor, attempt.id) for _number in range(3)),
+        return_exceptions=True,
+    )
+    assert sum(isinstance(candidate, BrowserControlContext) for candidate in candidates) == 1
+    assert sum(isinstance(candidate, ExecutionConflict) for candidate in candidates) == 2
+    async with scenario.engine.connect() as database:
+        row = (
+            (
+                await database.execute(
+                    text("SELECT * FROM career.boss_connections WHERE id=:id"),
+                    {"id": scenario.connection_id},
+                )
+            )
+            .mappings()
+            .one()
+        )
+        assert row["status"] == "pending" and row["last_observed_state"] == "browser_creating"
+        assert row["browser_session_id"] == context.session_id

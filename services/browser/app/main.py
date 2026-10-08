@@ -7,6 +7,7 @@ from services.browser.app.factory import create_app
 from services.browser.app.settings import settings
 from services.browser.sessions.authentication import CommandVerifier
 from services.browser.sessions.postgres import PostgresLeaseStore
+from services.browser.sessions.steel import SteelSessionManager
 
 if settings.browser_database_url is None and settings.browser_command_public_key_file is None:
     app = create_app()
@@ -33,6 +34,7 @@ else:
         verifier=CommandVerifier(public_key),
         store=PostgresLeaseStore(engine),
         steel_client=steel_client,
+        steel_sessions=SteelSessionManager(steel_client, engine),
         viewer_public_origin=settings.viewer_public_origin,
     )
 app.state.settings = settings

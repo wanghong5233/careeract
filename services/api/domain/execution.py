@@ -51,6 +51,13 @@ class ExecutionAttempt:
     outcome: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class LoginExecution:
+    task: ExecutionTask
+    authorization: ExecutionAuthorization
+    attempt: ExecutionAttempt
+
+
 class ExecutionConflict(Exception):
     pass
 

@@ -4,6 +4,7 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, suppress
 from typing import Protocol
 
+import httpx
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from fastapi import FastAPI
@@ -12,6 +13,8 @@ from fastapi.exceptions import RequestValidationError
 from services.api.app.settings import Settings
 from services.api.application.agent_context import AgentContextService
 from services.api.application.boss_connections import BossConnectionService
+from services.api.application.boss_login import BossLoginService
+from services.api.application.browser_registration import BrowserRegistrationService
 from services.api.application.conversation_branches import ConversationBranchService
 from services.api.application.materials import MaterialService
 from services.api.application.memories import MemoryService
@@ -28,6 +31,7 @@ from services.api.domain.boss_connection import (
     BossConnectionNotFound,
     BossConnectionUnavailable,
 )
+from services.api.domain.execution import ExecutionConflict, ExecutionUnavailable
 from services.api.domain.material import (
     MaterialConflict,
     MaterialInvalid,
@@ -68,12 +72,13 @@ from services.api.infrastructure.agent_tools import (
 )
 from services.api.infrastructure.authentication import JwtAuthenticationMiddleware
 from services.api.infrastructure.boss_connections import PostgresBossConnectionRepository
-from services.api.infrastructure.browser_control import BrowserCommandSigner
+from services.api.infrastructure.browser_control import BrowserCommandSigner, BrowserControlClient
 from services.api.infrastructure.browser_viewer import PostgresBrowserViewerTicketIssuer
 from services.api.infrastructure.conversation_branches import AgnoConversationBranches
 from services.api.infrastructure.conversation_deletion import AgnoConversationDeletion
 from services.api.infrastructure.conversation_titles import AgnoConversationTitleGenerator
 from services.api.infrastructure.database import create_engine
+from services.api.infrastructure.execution import PostgresExecutionRepository
 from services.api.infrastructure.materials import PostgresMaterialRepository
 from services.api.infrastructure.memories import PostgresMemoryRepository
 from services.api.infrastructure.privacy import PrivacyBoundaryMiddleware
@@ -87,6 +92,7 @@ from services.api.routes.browser_viewer import router as browser_viewer_router
 from services.api.routes.errors import (
     boss_connection_error,
     browser_viewer_error,
+    execution_error,
     material_error,
     memory_error,
     privacy_error,
@@ -118,6 +124,7 @@ def create_app(
     agent_os = runtime_factory(settings)
     app = agent_os.get_app()
     engine = create_engine(settings)
+    browser_client: httpx.AsyncClient | None = None
     runtime_lifespan = app.router.lifespan_context
 
     @asynccontextmanager
@@ -145,6 +152,8 @@ def create_app(
                 with suppress(asyncio.CancelledError):
                     await cleanup_task
             await engine.dispose()
+            if browser_client is not None:
+                await browser_client.aclose()
 
     app.router.lifespan_context = lifespan
     app.state.profile_service = ProfileService(PostgresProfileRepository(engine))
@@ -152,15 +161,34 @@ def create_app(
         PostgresBossConnectionRepository(engine)
     )
     app.state.browser_viewer_ticket_issuer = None
+    app.state.browser_registration_service = None
+    app.state.boss_login_service = None
+    app.state.browser_control = None
+    if settings.browser_base_url is not None and settings.browser_command_private_key_file is None:
+        raise RuntimeError("Browser control requires a private signing key")
     if settings.browser_command_private_key_file is not None:
         private_key = serialization.load_pem_private_key(
             settings.browser_command_private_key_file.read_bytes(), password=None
         )
         if not isinstance(private_key, Ed25519PrivateKey):
             raise RuntimeError("Browser command private key must be Ed25519")
-        app.state.browser_viewer_ticket_issuer = PostgresBrowserViewerTicketIssuer(
-            engine, BrowserCommandSigner(private_key)
-        )
+        signer = BrowserCommandSigner(private_key)
+        if settings.browser_base_url is not None:
+            browser_client = httpx.AsyncClient(
+                base_url=str(settings.browser_base_url), follow_redirects=False, timeout=50
+            )
+            app.state.browser_viewer_ticket_issuer = PostgresBrowserViewerTicketIssuer(
+                engine, signer, browser_client, settings.auth_issuer
+            )
+            app.state.browser_control = BrowserControlClient(browser_client, signer)
+            app.state.browser_registration_service = BrowserRegistrationService(
+                PostgresExecutionRepository(engine), app.state.browser_control
+            )
+            app.state.boss_login_service = BossLoginService(app.state.browser_registration_service)
+        else:
+            app.state.browser_viewer_ticket_issuer = PostgresBrowserViewerTicketIssuer(
+                engine, signer
+            )
     project_repository = PostgresProjectRepository(engine)
     app.state.project_service = ProjectService(project_repository)
     app.state.memory_service = MemoryService(PostgresMemoryRepository(engine))
@@ -258,6 +286,8 @@ def create_app(
     app.add_exception_handler(BossConnectionNotFound, boss_connection_error)
     app.add_exception_handler(BossConnectionConflict, boss_connection_error)
     app.add_exception_handler(BossConnectionUnavailable, boss_connection_error)
+    app.add_exception_handler(ExecutionConflict, execution_error)
+    app.add_exception_handler(ExecutionUnavailable, execution_error)
     app.add_exception_handler(BrowserViewerTicketRejected, browser_viewer_error)
     app.add_exception_handler(BrowserViewerTicketUnavailable, browser_viewer_error)
     return app

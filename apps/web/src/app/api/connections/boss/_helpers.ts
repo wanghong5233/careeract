@@ -32,7 +32,7 @@ async function readBody(request: NextRequest, requestId: string): Promise<string
   }
 }
 
-export async function forward(request: NextRequest, path: string, method: "GET" | "POST" | "DELETE") {
+export async function forward(request: NextRequest, path: string, method: "GET" | "POST" | "DELETE", timeout = 15_000) {
   const requestId = crypto.randomUUID();
   if (method !== "GET" && !hasTrustedOrigin(request)) {
     return failure(403, "forbidden", "请求来源无效，请从 CareerAct 招聘沟通发起。", requestId);
@@ -59,7 +59,7 @@ export async function forward(request: NextRequest, path: string, method: "GET" 
       body,
       cache: "no-store",
       redirect: "error",
-      signal: AbortSignal.any([request.signal, AbortSignal.timeout(15_000)]),
+      signal: AbortSignal.any([request.signal, AbortSignal.timeout(timeout)]),
     });
     if (upstream.status === 401 || upstream.status === 403) {
       return failure(upstream.status, "unauthorized", "登录验证失败，请重新登录。", requestId);

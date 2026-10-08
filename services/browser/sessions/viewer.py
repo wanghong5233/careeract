@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from dataclasses import dataclass
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import UUID
@@ -27,7 +28,9 @@ def validate_origin(context: ViewerContext, origin: str | None) -> None:
         raise ViewerRejected("Viewer origin rejected")
 
 
-def _validate_page_id(page_id: str) -> str:
+def _validate_page_id(page_id: str | None) -> str | None:
+    if page_id is None:
+        return None
     if not page_id or len(page_id.encode("utf-8")) > MAX_VIEWER_PAGE_ID_BYTES:
         raise ViewerRejected("Viewer page is invalid")
     if any(ord(character) < 0x20 for character in page_id):
@@ -35,7 +38,7 @@ def _validate_page_id(page_id: str) -> str:
     return page_id
 
 
-def validate_page_id(page_id: str) -> str:
+def validate_page_id(page_id: str | None) -> str | None:
     return _validate_page_id(page_id)
 
 
@@ -43,22 +46,28 @@ def viewer_cookie_name(session_id: UUID) -> str:
     return VIEWER_COOKIE_PREFIX + session_id.hex
 
 
-def cast_websocket_url(context: ViewerContext, page_id: str) -> str:
+def cast_websocket_url(
+    context: ViewerContext, page_id: str | None, query: Mapping[str, str] | None = None
+) -> str:
     page_id = _validate_page_id(page_id)
     steel = urlsplit(context.steel_origin)
-    query = urlencode({"pageId": page_id, "sessionId": str(context.session_id)})
+    parameters = dict(query or {})
+    if page_id is not None:
+        parameters["pageId"] = page_id
+    parameters["sessionId"] = str(context.session_id)
+    query_string = urlencode(parameters)
     scheme = "wss" if steel.scheme == "https" else "ws"
-    return urlunsplit((scheme, steel.netloc, CAST_PATH, query, ""))
+    return urlunsplit((scheme, steel.netloc, CAST_PATH, query_string, ""))
 
 
 async def fetch_viewer_document(
-    client: httpx.AsyncClient, page_id: str, context: ViewerContext
+    client: httpx.AsyncClient, page_id: str | None, context: ViewerContext
 ) -> str:
     page_id = _validate_page_id(page_id)
     try:
         response = await client.get(
             "/v1/sessions/debug",
-            params={"pageId": page_id},
+            params={"pageId": page_id} if page_id is not None else None,
             follow_redirects=False,
             timeout=20,
         )
