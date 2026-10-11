@@ -264,7 +264,14 @@ def create_app(
                     await site.prepare(session_id)
         except CommandRejected:
             raise HTTPException(403, "Browser lifecycle rejected") from None
-        except (LeaseNotFound, LeaseConflict, SteelSessionConflict):
+        except (LeaseNotFound, LeaseConflict, SteelSessionConflict) as failure:
+            logging.getLogger(__name__).warning(
+                "Browser lifecycle conflict session=%s action=%s boundary=%s reason=%s",
+                session_id,
+                action,
+                type(failure).__name__,
+                str(failure),
+            )
             raise HTTPException(409, "Browser lifecycle conflict") from None
         except (
             DBAPIError,

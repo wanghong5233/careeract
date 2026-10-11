@@ -86,8 +86,81 @@ async def wait_ready(client: httpx.AsyncClient) -> None:
             await asyncio.sleep(0.5)
 
 
+async def verify_viewer_clicks(
+    browser: Any, page: Page, page_id: str, api_url: str
+) -> list[dict[str, Any]]:
+    await page.set_content(
+        "<title>CareerAct coordinate canary</title>"
+        "<style>body{margin:0;background:#eef2ff}"
+        "button{position:absolute;left:60%;top:55%;width:160px;height:90px}</style>"
+        "<h1>Coordinate canary</h1><button>Coordinate target</button><output></output>"
+        "<script>document.addEventListener('click',e=>{"
+        "document.querySelector('output').textContent=JSON.stringify({"
+        "x:e.clientX,y:e.clientY,target:e.target.tagName})})</script>"
+    )
+    results = []
+    for width, height, density, scale in (
+        (1440, 900, 1, 1),
+        (640, 700, 1, 1),
+        (860, 500, 2, 1),
+        (860, 500, 1, 1.25),
+    ):
+        context = await browser.new_context(
+            viewport={"width": width, "height": height}, device_scale_factor=density
+        )
+        try:
+            viewer = await context.new_page()
+            frames: list[dict[str, Any]] = []
+            viewer.on(
+                "websocket",
+                lambda stream, received=frames: stream.on(
+                    "framereceived", lambda payload: received.append(json.loads(payload))
+                ),
+            )
+
+            await viewer.goto(
+                api_url
+                + "/v1/sessions/debug?"
+                + urlencode({"pageId": page_id, "interactive": "true"})
+            )
+            canvas = viewer.locator(".canvas-container.active canvas")
+            await viewer.wait_for_function(
+                "document.querySelector('.canvas-container.active canvas')?.width > 300"
+            )
+            remote = await page.context.new_cdp_session(page)
+            await remote.send("Emulation.setPageScaleFactor", {"pageScaleFactor": scale})
+            await remote.detach()
+            async with asyncio.timeout(12):
+                while not any(
+                    frame.get("metadata", {}).get("pageScaleFactor") == scale for frame in frames
+                ):
+                    await asyncio.sleep(0.1)
+            await page.locator("output").evaluate("element => element.textContent = ''")
+            target = await page.get_by_role("button", name="Coordinate target").bounding_box()
+            assert target is not None
+            viewport = await page.evaluate("({width:innerWidth,height:innerHeight})")
+            rendered = await canvas.bounding_box()
+            assert rendered is not None
+            expected_x = target["x"] + target["width"] / 2
+            expected_y = target["y"] + target["height"] / 2
+            await viewer.mouse.click(
+                rendered["x"] + expected_x * scale / viewport["width"] * rendered["width"],
+                rendered["y"] + expected_y * scale / viewport["height"] * rendered["height"],
+            )
+            await page.wait_for_function("document.querySelector('output').textContent !== ''")
+            hit = json.loads(await page.locator("output").inner_text())
+            assert hit["target"] == "BUTTON"
+            assert abs(hit["x"] - expected_x) <= 2 and abs(hit["y"] - expected_y) <= 2
+            results.append(
+                {"width": width, "height": height, "density": density, "scale": scale, "hit": hit}
+            )
+        finally:
+            await context.close()
+    return results
+
+
 async def probe(
-    api_url: str, cdp_url: str, report_directory: Path, visible: bool
+    api_url: str, cdp_url: str, report_directory: Path, visible: bool, viewer_channel: str | None
 ) -> dict[str, Any]:
     report: dict[str, Any] = {"scope": "isolated synthetic Steel OSS viewer capabilities"}
     async with httpx.AsyncClient(base_url=api_url, timeout=30) as client:
@@ -217,6 +290,13 @@ async def probe(
                     async with connect(stream_url, max_size=2 * 1024 * 1024) as replacement:
                         await receive_frame(replacement, page_id, "CareerAct remaining viewer")
                         report["fresh_stream_receives_frames"] = True
+                    viewer_browser = await playwright.chromium.launch(channel=viewer_channel)
+                    try:
+                        report["rendered_viewer_clicks"] = await verify_viewer_clicks(
+                            viewer_browser, page, page_id, api_url
+                        )
+                    finally:
+                        await viewer_browser.close()
                     await page.evaluate(
                         "document.title='CareerAct Phase 1.0';"
                         "document.querySelector('h1').textContent='CareerAct Phase 1.0';"
@@ -262,6 +342,7 @@ def main() -> None:
     parser.add_argument("--image", default="careeract-steel:0.5.3-compat")
     parser.add_argument("--report-directory", type=Path, required=True)
     parser.add_argument("--visible", action="store_true")
+    parser.add_argument("--viewer-channel", choices=("chrome", "msedge"))
     arguments = parser.parse_args()
     if arguments.report_directory.exists():
         parser.error("Use a new report directory to avoid stale inspection gates")
@@ -290,7 +371,15 @@ def main() -> None:
         created = True
         api_url = f"http://127.0.0.1:{published_port(container, 3000)}"
         cdp_url = f"http://127.0.0.1:{published_port(container, 9223)}"
-        report = asyncio.run(probe(api_url, cdp_url, arguments.report_directory, arguments.visible))
+        report = asyncio.run(
+            probe(
+                api_url,
+                cdp_url,
+                arguments.report_directory,
+                arguments.visible,
+                arguments.viewer_channel,
+            )
+        )
         report["image_id"] = image_id
         report["elapsed_seconds"] = round(time.monotonic() - started, 2)
         (arguments.report_directory / "capabilities.json").write_text(

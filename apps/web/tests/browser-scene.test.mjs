@@ -9,7 +9,7 @@ function elements(value) {
   return [value, ...elements(value.props.children)];
 }
 
-function scene() {
+function scene(allowLoginControl = false) {
   const states = [], refs = [], effects = [], timers = new Map();
   let stateIndex = 0, refIndex = 0, listener;
   const Button = props => React.createElement("button", props);
@@ -37,7 +37,7 @@ function scene() {
     setTimeout: callback => { const id = timers.size + 1; timers.set(id, callback); return id; },
     clearTimeout: id => timers.delete(id),
   });
-  const render = () => { stateIndex = 0; refIndex = 0; return BrowserScene({ sessionId: "session-a" }); };
+  const render = () => { stateIndex = 0; refIndex = 0; return BrowserScene({ sessionId: "session-a", allowLoginControl }); };
   const frameWindow = {};
   const iframe = elements(render()).find(element => element.type === "iframe");
   iframe.props.ref.current = { contentWindow: frameWindow };
@@ -78,4 +78,22 @@ test("viewer missing its handshake stops loading and offers an explicit reconnec
   assert.equal(fixture.status(), "loading");
   assert.notEqual(elements(fixture.render()).find(element => element.type === "iframe").key, before);
   fixture.cleanup();
+});
+
+test("human login explicitly replaces the watch connection and returns to watch, with no control on read-only tasks", () => {
+  const readonly = scene();
+  assert.equal(elements(readonly.render()).some(element => element.props.children === "操作登录浏览器"), false);
+  readonly.cleanup();
+  const login = scene(true);
+  const button = label => elements(login.render()).find(element => element.props.children === label);
+  const frame = () => elements(login.render()).find(element => element.type === "iframe");
+  assert.ok(frame().props.src.endsWith("mode=watch"));
+  const watching = frame().key;
+  button("操作登录浏览器").props.onClick();
+  assert.ok(frame().props.src.endsWith("mode=control"));
+  assert.notEqual(frame().key, watching);
+  assert.equal(frame().props.title, "人工登录浏览器");
+  button("返回观看").props.onClick();
+  assert.ok(frame().props.src.endsWith("mode=watch"));
+  login.cleanup();
 });

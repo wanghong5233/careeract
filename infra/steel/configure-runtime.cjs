@@ -1,4 +1,5 @@
 const fs = require("node:fs");
+const { viewerCoordinates } = require("./viewer-coordinates.cjs");
 
 const sourcePath = "/app/api/build/services/cdp/instrumentation/target-manager.js";
 const source = fs.readFileSync(sourcePath, "utf8");
@@ -98,4 +99,45 @@ readonlyCasting = readonlyCasting.replace(
   "                    });\n" +
   "                }",
 );
+const frameMarker = 'targetClient.on("Page.screencastFrame", async ({ data, sessionId }) => {';
+const frameData = "                                data,\n";
+if (readonlyCasting.split(frameMarker).length - 1 !== 1 ||
+    readonlyCasting.split(frameData).length - 1 !== 1) {
+  throw new Error("Pinned Steel frame metadata layout changed");
+}
+readonlyCasting = readonlyCasting.replace(frameMarker,
+  'targetClient.on("Page.screencastFrame", async ({ data, sessionId, metadata }) => {');
+readonlyCasting = readonlyCasting.replace(frameData, `${frameData}                                metadata,\n`);
 fs.writeFileSync(castingPath, readonlyCasting);
+
+const templatePath = "/app/api/build/templates/live-session-streamer.ejs";
+const template = fs.readFileSync(templatePath, "utf8");
+const coordinates = /function getScaledCoordinates\(e, canvas, pageId\) \{[\s\S]*?\n              \}/;
+const frameSize = "tabs[pageId].currentImageWidth = img.naturalWidth;";
+const heightFit = "const targetHeight = parentHeight;";
+const widthStyle = "canvas.style.width = 'auto';";
+const heightStyle = "canvas.style.height = '100%';";
+const inputCoordinates = "const coords = getScaledCoordinates(e, canvas, pageId);";
+if ((template.match(coordinates)?.length ?? 0) !== 1 ||
+    template.split(frameSize).length - 1 !== 1 ||
+    template.split(heightFit).length - 1 !== 1 ||
+    template.split(widthStyle).length - 1 !== 1 ||
+    template.split(heightStyle).length - 1 !== 1 ||
+    template.split(inputCoordinates).length - 1 !== 5) {
+  throw new Error("Pinned Steel viewer coordinate layout changed");
+}
+let fittedTemplate = template.replace(coordinates,
+  `${viewerCoordinates.toString()}\n` +
+  "              function getScaledCoordinates(e, canvas, pageId) {\n" +
+  "                  return viewerCoordinates(e, canvas, tabs[pageId]?.frameMetadata);\n" +
+  "              }");
+fittedTemplate = fittedTemplate.replace(frameSize,
+  "tabs[pageId].frameMetadata = payload.metadata;\n                          " + frameSize);
+fittedTemplate = fittedTemplate.replaceAll(inputCoordinates,
+  `${inputCoordinates}\n                  if (!coords) return;`);
+fittedTemplate = fittedTemplate.replace(heightFit,
+  "const targetHeight = Math.min(parentHeight, container.clientWidth * " +
+  "tabData.currentImageHeight / tabData.currentImageWidth);");
+fittedTemplate = fittedTemplate.replace(widthStyle, "canvas.style.width = targetWidth + 'px';");
+fittedTemplate = fittedTemplate.replace(heightStyle, "canvas.style.height = targetHeight + 'px';");
+fs.writeFileSync(templatePath, fittedTemplate);

@@ -358,8 +358,8 @@ export function BossConnectionCard() {
       {savedViewerActive && <Button disabled={busy !== null || needsReconciliation} variant="ghost" onClick={() => void closeSavedViewer()}>{busy === "close-viewer" && <LoaderCircle className="size-3.5 animate-spin" />}{savedViewer?.status === "live" ? "关闭浏览器现场" : "停止浏览器现场"}</Button>}
       <Button disabled={busy !== null} variant="ghost" onClick={() => void load()}><RefreshCw className="size-3.5" />重新读取</Button>
     </div>
-    {browserReady && <p className="mt-3 text-xs text-muted-foreground">下方是只读现场。扫码、输入验证码或点击登录，请使用上方“打开安全浏览器（可操作）”。</p>}
-    {browserReady && <BrowserScene key={browserReady} sessionId={browserReady} />}
+    {browserReady && <p className="mt-3 text-xs text-muted-foreground">在下方点击“操作登录浏览器”即可扫码或输入验证码；也可单独打开安全浏览器。请只保留一个操作窗口。</p>}
+    {browserReady && <BrowserScene key={browserReady} sessionId={browserReady} allowLoginControl />}
     {savedViewerReady && <BrowserScene key={savedViewerReady} sessionId={savedViewerReady} />}
     {savedViewerExpired && savedViewerActive && <p role="status" className="mt-3 text-xs text-muted-foreground">浏览器现场已到期，已保存登录仍保留。重新打开会先关闭旧现场，再恢复新的只读现场。</p>}
     {connection?.status === "connected" && <BossReadTask key={connection.id} connectionId={connection.id} version={connection.version} blocked={savedViewerActive || cleanupRequired || busy !== null || needsReconciliation} />}

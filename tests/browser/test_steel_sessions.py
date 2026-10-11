@@ -131,13 +131,23 @@ async def test_uncertain_operation_survives_adapter_reconstruction_without_repla
             await restarted.inspect(session_id)
             with pytest.raises(SteelSessionConflict):
                 await restarted.create(uuid4())
-            with pytest.raises(SteelSessionConflict):
-                await restarted.release(session_id)
+            confirmed_release = operation == "release" and failure != "readback"
+            if confirmed_release:
+                assert (await restarted.release(session_id)).status == "released"
+            else:
+                with pytest.raises(SteelSessionConflict):
+                    await restarted.release(session_id)
             async with restarted_engine.connect() as connection:
                 assert await connection.scalar(
                     text("SELECT state FROM browser.steel_operations WHERE session_id = :id"),
                     {"id": session_id},
-                ) == ("creating" if operation == "create" else "releasing")
+                ) == (
+                    "released"
+                    if confirmed_release
+                    else "creating"
+                    if operation == "create"
+                    else "releasing"
+                )
         finally:
             await restarted_engine.dispose()
         assert len(steel.writes) == (1 if operation == "create" else 2)

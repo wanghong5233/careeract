@@ -6,6 +6,7 @@ RUN npm ci --prefix /opt/compat --ignore-scripts --no-audit --no-fund \
     && ln -s /opt/compat/node_modules/puppeteer-core /app/node_modules/puppeteer-core
 
 COPY configure-runtime.cjs /opt/compat/configure-runtime.cjs
+COPY viewer-coordinates.cjs /opt/compat/viewer-coordinates.cjs
 RUN node /opt/compat/configure-runtime.cjs
 
 ENV CAREERACT_STEEL_RUNTIME_OBSERVATION=false

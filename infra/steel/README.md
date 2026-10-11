@@ -54,3 +54,16 @@ Build through the development Compose file. Production Compose still uses the
 stock image and is not validated for BOSS login; publish and pin a verified
 derived image before deploying this path. An image upgrade must rerun login,
 Viewer interaction, snapshot restore, isolation and physical release checks.
+
+The pinned viewer used decoded image pixels as CDP input coordinates and fitted
+the canvas only by height. The compatibility layer carries screencast metadata
+with each frame, maps the actual canvas rectangle to CSS viewport coordinates,
+and fits both available dimensions. Missing metadata and points outside the
+rendered canvas cannot dispatch input. The isolated rendered-viewer canary
+verifies button hits at wide/narrow sizes, host DPR 2 and page scale 1.25, alongside
+the watch isolation and release checks. Run `node --test
+infra/steel/viewer-coordinates.test.cjs` and `uv run python
+scripts/smoke_steel_viewer.py --report-directory data/dev/<new-report-directory>`;
+on Windows an installed Edge can be selected with `--viewer-channel msedge`.
+The canary uses synthetic pages and a separate Steel container; it does not
+verify BOSS login persistence or complete product control handoff.

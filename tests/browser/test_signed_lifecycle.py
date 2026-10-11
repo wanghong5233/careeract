@@ -216,8 +216,11 @@ async def test_lost_lifecycle_response_cannot_replay_after_restart(
                 base_url="http://browser", transport=httpx.ASGITransport(app=rebuilt)
             ) as next_client:
                 next_adapter = BrowserControlClient(next_client, BrowserCommandSigner(key))
-                with pytest.raises(BrowserControlConflict):
-                    await next_adapter.lifecycle(context, action)
+                if action == "release":
+                    assert (await next_adapter.lifecycle(context, action)).status == "released"
+                else:
+                    with pytest.raises(BrowserControlConflict):
+                        await next_adapter.lifecycle(context, action)
             assert len(steel.writes) == (1 if action == "create" else 2)
 
 

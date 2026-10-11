@@ -188,6 +188,20 @@ class SteelSessionManager:
             )
             if state == "released":
                 return SteelSession(session_id, "released")
+            if state == "releasing":
+                sessions = await self._sessions()
+                target = next((session for session in sessions if session.id == session_id), None)
+                if target is None or target.status != "released":
+                    raise SteelSessionConflict("Steel release is not confirmed by inventory")
+                await connection.execute(
+                    text(
+                        "UPDATE browser.steel_operations SET state='released', "
+                        "updated_at=clock_timestamp() WHERE session_id=:session_id "
+                        "AND state='releasing'"
+                    ),
+                    {"session_id": session_id},
+                )
+                return SteelSession(session_id, "released")
             if state != "live":
                 raise SteelSessionConflict("Steel session is unowned or requires reconciliation")
             sessions = await self._sessions()
