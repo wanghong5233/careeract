@@ -1,3 +1,4 @@
+from contextlib import suppress
 from dataclasses import replace
 from datetime import timedelta
 from uuid import UUID, uuid4
@@ -14,6 +15,7 @@ from services.api.application.ports.browser_control import (
 from services.api.application.ports.read_execution import ReadExecutionRepository, ReadPageResult
 from services.api.domain.execution import (
     BossReadTarget,
+    ExecutionConflict,
     ExecutionNotFound,
     ExecutionUnavailable,
     MaterialReadTarget,
@@ -84,10 +86,42 @@ class ReadExecutionService:
         return execution
 
     async def cancel_boss(
-        self, actor: ActorContext, connection_id: UUID, task_id: UUID
+        self,
+        actor: ActorContext,
+        connection_id: UUID,
+        task_id: UUID,
+        *,
+        control: BrowserSessionControl | None = None,
     ) -> ReadExecution:
         await self.read_boss(actor, connection_id, task_id)
-        return await self.cancel(actor, task_id)
+        execution = await self.cancel(actor, task_id)
+        if execution.task.status != "waiting" or control is None:
+            return execution
+        session_id = execution.attempt.browser_session_id
+        if session_id is None:
+            raise ExecutionUnavailable("Read browser identity is unavailable")
+        context = BrowserControlContext(
+            actor.user_id,
+            session_id,
+            task_id,
+            execution.authorization.id,
+            execution.authorization.expires_at,
+            execution.attempt.id,
+            execution.attempt.request_id,
+            "boss-read",
+        )
+        try:
+            await control.send(context, "revoke")
+            with suppress(BrowserControlConflict, BrowserControlRejected, BrowserControlUncertain):
+                await control.lifecycle(context, "release")
+            return await self.repository.reconcile_released(actor, task_id)
+        except (
+            BrowserControlConflict,
+            BrowserControlRejected,
+            BrowserControlUncertain,
+            ExecutionConflict,
+        ):
+            return await self.read_boss(actor, connection_id, task_id)
 
     async def reconcile_boss(
         self,
@@ -98,6 +132,11 @@ class ReadExecutionService:
         control: BrowserSessionControl | None = None,
     ) -> ReadExecution:
         execution = await self.read_boss(actor, connection_id, task_id)
+        if (
+            execution.task.status == "waiting"
+            and execution.attempt.outcome == "read_stop_requested"
+        ):
+            return await self.cancel_boss(actor, connection_id, task_id, control=control)
         allow_absent = False
         if execution.task.status == "unknown" and control is not None:
             session_id = execution.attempt.browser_session_id
@@ -183,9 +222,15 @@ class ReadExecutionService:
                         outcome = "read_failed"
                 except (BrowserControlConflict, BrowserControlRejected, BrowserControlUncertain):
                     outcome = "read_unknown"
-            await self.repository.finish_browser(
+            finished = await self.repository.finish_browser(
                 actor, task_id, outcome=outcome, observation=observation
             )
+            if (
+                finished.task.status == "waiting"
+                and finished.attempt.outcome == "read_stop_requested"
+            ):
+                with suppress(ExecutionConflict):
+                    await self.repository.reconcile_released(actor, task_id)
         if observation is None or outcome != "read_completed":
             if outcome == "read_failed":
                 raise ExecutionUnavailable("BOSS read execution was rejected")

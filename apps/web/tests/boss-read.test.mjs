@@ -180,4 +180,35 @@ test("read BFF validates both IDs and forwards only its fixed API path", async (
   await readRequest(request, { params: Promise.resolve({ connectionId, taskId }) }, "POST", "run");
   assert.equal(calls[0][1], `/api/v1/connections/boss/${connectionId}/read/${taskId}/run`);
   assert.equal(calls[0][3], 120_000);
+  await readRequest(request, { params: Promise.resolve({ connectionId, taskId }) }, "DELETE", "task");
+  assert.equal(calls[1][3], 75_000);
+});
+
+test("stop uses a separate request during a running read and restores waiting release without rerun", async () => {
+  let current = { ...accepted, task_status: "running", browser_session_id: "scene" };
+  let released = false;
+  const writes = [];
+  const fixture = taskCard(async (url, options = {}) => {
+    if (options.method === "DELETE") {
+      writes.push({ url, options });
+      assert.equal(options.body, "{}");
+      assert.equal(options.headers["Content-Type"], "application/json");
+      current = { ...current, task_status: released ? "cancelled" : "waiting", outcome: released ? "cancelled_after_stop" : "read_stop_requested" };
+    } else {
+      assert.ok(!options.method || options.method === "GET");
+    }
+    return Response.json(url.endsWith("/result") ? null : current);
+  });
+  await settle();
+  fixture.button("停止读取").props.onClick();
+  await settle();
+  assert.match(text(fixture.render()), /等待浏览器释放核验/);
+  assert.equal(fixture.button("读取 BOSS 页面").props.disabled, true);
+  released = true;
+  fixture.button("核对停止并释放").props.onClick();
+  await settle();
+  assert.match(text(fixture.render()), /已取消/);
+  assert.equal(fixture.button("读取 BOSS 页面").props.disabled, false);
+  assert.equal(writes.length, 2);
+  fixture.cleanup();
 });

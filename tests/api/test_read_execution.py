@@ -524,12 +524,126 @@ async def test_read_browser_reservation_rechecks_authorization_and_persists_outc
         scenario.actor, accepted.task.id, outcome="read_completed"
     )
     assert completed.task.status == "completed"
+    assert completed.authorization.status == "revoked"
     assert completed.attempt.status == "completed"
     assert completed.attempt.outcome == "read_completed"
     assert (
         await repository.finish_browser(scenario.actor, accepted.task.id, outcome="read_completed")
         == completed
     )
+
+
+@integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage", ["reserved", "registered", "live", "uncertain"])
+async def test_started_read_stop_fences_late_runner_and_requires_physical_release(
+    scenario: Scenario, stage: str
+) -> None:
+    async with scenario.engine.begin() as database:
+        version = await database.scalar(
+            text(
+                "UPDATE career.boss_connections SET status='connected', "
+                "browser_session_id=:session WHERE id=:id RETURNING version"
+            ),
+            {"id": scenario.connection_id, "session": uuid4()},
+        )
+    repository = PostgresReadExecutionRepository(scenario.engine)
+    service = ReadExecutionService(repository)
+    accepted = await service.accept_boss(
+        scenario.actor,
+        connection_id=scenario.connection_id,
+        expected_version=version,
+        request_key=uuid4(),
+    )
+    context = await repository.reserve_browser(scenario.actor, accepted.task.id, uuid4())
+    key, steel = Ed25519PrivateKey.generate(), SyntheticSteel()
+    async with httpx.AsyncClient(
+        base_url="http://steel", transport=httpx.MockTransport(steel.respond)
+    ) as steel_client:
+        browser = create_browser_app(
+            verifier=CommandVerifier(key.public_key()),
+            store=PostgresLeaseStore(scenario.engine),
+            steel_sessions=SteelSessionManager(steel_client, scenario.engine),
+        )
+        async with httpx.AsyncClient(
+            base_url="http://browser", transport=httpx.ASGITransport(app=browser)
+        ) as client:
+            control = BrowserControlClient(client, BrowserCommandSigner(key))
+            if stage != "reserved":
+                await control.send(context, "register")
+            if stage in {"live", "uncertain"}:
+                await control.lifecycle(context, "create")
+            if stage == "uncertain":
+                async with scenario.engine.begin() as database:
+                    await database.execute(
+                        text(
+                            "UPDATE browser.steel_operations SET state='releasing' "
+                            "WHERE session_id=:session"
+                        ),
+                        {"session": context.session_id},
+                    )
+            with pytest.raises(ExecutionConflict):
+                await repository.cancel(scenario.other, accepted.task.id)
+            stopping = await repository.cancel(scenario.actor, accepted.task.id)
+            assert stopping.task.status == "waiting"
+            assert stopping.authorization.status == "revoked"
+            assert stopping.attempt.finished_at is None
+            assert await repository.cancel(scenario.actor, accepted.task.id) == stopping
+            newer = await service.accept_boss(
+                replace(scenario.actor, request_id=str(uuid4())),
+                connection_id=scenario.connection_id,
+                expected_version=version,
+                request_key=uuid4(),
+            )
+            await repository.cancel(scenario.actor, newer.task.id)
+            assert (
+                await repository.read_latest_boss(scenario.actor, scenario.connection_id)
+                == stopping
+            )
+            assert (
+                await repository.finish_browser(
+                    scenario.actor, accepted.task.id, outcome="read_completed"
+                )
+                == stopping
+            )
+            with pytest.raises(ExecutionConflict):
+                await repository.reconcile_released(scenario.actor, accepted.task.id)
+            stopped = await service.cancel_boss(
+                scenario.actor,
+                scenario.connection_id,
+                accepted.task.id,
+                control=control,
+            )
+            assert stopped.task.status == ("waiting" if stage == "uncertain" else "cancelled")
+            if stage == "uncertain":
+                assert stopped.attempt.finished_at is None
+                assert (
+                    await service.reconcile_boss(
+                        scenario.actor,
+                        scenario.connection_id,
+                        accepted.task.id,
+                        control=control,
+                    )
+                    == stopped
+                )
+            else:
+                assert stopped.attempt.outcome == "cancelled_after_stop"
+                assert stopped.attempt.finished_at is not None
+                assert (
+                    await service.cancel_boss(
+                        scenario.actor,
+                        scenario.connection_id,
+                        accepted.task.id,
+                        control=control,
+                    )
+                    == stopped
+                )
+            with pytest.raises(BrowserControlConflict):
+                await control.send(context, "register")
+            with pytest.raises(ExecutionConflict):
+                await repository.reserve_browser(scenario.actor, accepted.task.id, uuid4())
+            if stage in {"reserved", "registered"}:
+                assert steel.writes == []
 
 
 @integration

@@ -342,11 +342,15 @@ async def cancel_read_execution(
     connection_id: UUID,
     task_id: UUID,
     response: Response,
+    request: Request,
     service: Annotated[ReadExecutionService, Depends(get_read_service)],
     actor: Annotated[ActorContext, Depends(get_actor)],
 ) -> ReadExecutionResponse:
     response.headers["Cache-Control"] = "no-store"
-    return serialize_read(await service.cancel_boss(actor, connection_id, task_id))
+    control = cast(
+        BrowserSessionControl | None, getattr(request.app.state, "browser_control", None)
+    )
+    return serialize_read(await service.cancel_boss(actor, connection_id, task_id, control=control))
 
 
 @router.get("/{connection_id}/login", response_model=LoginResponse | None)

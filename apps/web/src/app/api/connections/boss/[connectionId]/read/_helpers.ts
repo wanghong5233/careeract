@@ -11,5 +11,6 @@ export async function readRequest(request: NextRequest, context: ReadContext, me
     return failure(422, "invalid_read_execution", "读取任务标识无效。", crypto.randomUUID());
   }
   const suffix = operation ? `/${taskId}${operation === "task" ? "" : `/${operation}`}` : "";
-  return forward(request, `/api/v1/connections/boss/${connectionId}/read${suffix}`, method, operation === "run" ? 120_000 : 15_000);
+  const timeout = operation === "run" ? 120_000 : method === "DELETE" || operation === "reconcile" ? 75_000 : 15_000;
+  return forward(request, `/api/v1/connections/boss/${connectionId}/read${suffix}`, method, timeout);
 }

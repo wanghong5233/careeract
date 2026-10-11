@@ -789,6 +789,13 @@ Browser Service 开发重载仅监控 `services/browser`，后续该服务源码
 
 ### Phase 1：可观看、可接管的只读 BOSS 会话
 
+2026-10-12 控制恢复增量：读取任务的停止意图持久化为 `waiting/read_stop_requested`，
+先撤销授权与浏览器准入，再按已有生命周期释放。仅在归属一致、已撤销、无租约和物理释放
+证据成立后记为 `cancelled/cancelled_after_stop`；不确定释放保持 waiting，迟到 runner 结果
+不能覆盖停止意图。注册前停止建立撤销 tombstone，旧注册不能复活；未结束读取优先回读，
+避免较新的失败记录遮住阻塞登录的旧任务。0026 迁移与隔离 PostgreSQL/合成 Steel 专项 28 项通过，
+Web 专项 6 项通过；真实 HR 标识、业务接管/交还及发送仍未完成。
+
 当前已落地只读解析的第一条增量：`services/browser/site_adapters/boss.py` 的
 `parse_boss_page` 只处理调用方提供的页面快照，分类登录、风控、加载中和未知结构，
 并从合成岗位卡提取岗位 ID、标题、公司、地点、薪资和来源 URL；会话/消息解析同样只有合成 fixture 证据，

@@ -296,9 +296,20 @@ class PostgresReadExecutionRepository:
                     raise ExecutionConflict("Read execution is unavailable")
                 if current.task.status == "cancelled":
                     return current
-                if current.task.status != "accepted" or current.attempt.status != "accepted":
+                stopping = (
+                    current.task.status == "waiting"
+                    and current.attempt.outcome == "read_stop_requested"
+                )
+                if stopping:
+                    return current
+                if current.task.status not in {"accepted", "running"}:
                     raise ExecutionConflict("Started read execution requires reconciliation")
+                started = current.attempt.browser_session_id is not None
                 parameters = {"task": task_id, "user": actor.user_id}
+                parameters.update(
+                    status="waiting" if started else "cancelled",
+                    outcome="read_stop_requested" if started else "cancelled_before_start",
+                )
                 await database.execute(
                     text(
                         "UPDATE career.execution_authorizations SET status='revoked', "
@@ -308,15 +319,16 @@ class PostgresReadExecutionRepository:
                 )
                 await database.execute(
                     text(
-                        "UPDATE career.execution_tasks SET status='cancelled', "
+                        "UPDATE career.execution_tasks SET status=:status, "
                         "updated_at=clock_timestamp() WHERE id=:task AND user_id=:user"
                     ),
                     parameters,
                 )
                 await database.execute(
                     text(
-                        "UPDATE career.execution_attempts SET status='cancelled', "
-                        "outcome='cancelled_before_start', finished_at=clock_timestamp(), "
+                        "UPDATE career.execution_attempts SET status=:status, "
+                        "outcome=:outcome, finished_at=CASE WHEN :status='cancelled' "
+                        "THEN clock_timestamp() ELSE finished_at END, "
                         "updated_at=clock_timestamp() WHERE task_id=:task AND user_id=:user"
                     ),
                     parameters,
@@ -335,9 +347,16 @@ class PostgresReadExecutionRepository:
                 execution = await self._read(database, actor, task_id, lock=True)
                 if execution is None or not isinstance(execution.target, BossReadTarget):
                     raise ExecutionConflict("BOSS read execution is unavailable")
-                if execution.task.status == "failed":
+                if execution.task.status in {"failed", "cancelled"}:
                     return execution
-                if execution.task.status != "unknown" or execution.attempt.status != "unknown":
+                stopping = (
+                    execution.task.status == "waiting"
+                    and execution.attempt.status == "waiting"
+                    and execution.attempt.outcome == "read_stop_requested"
+                )
+                if not stopping and (
+                    execution.task.status != "unknown" or execution.attempt.status != "unknown"
+                ):
                     raise ExecutionConflict("Read execution does not require reconciliation")
                 released = await database.scalar(
                     text(
@@ -363,7 +382,12 @@ class PostgresReadExecutionRepository:
                     released = not registered
                 if not released:
                     raise ExecutionConflict("Browser release is not confirmed")
-                parameters = {"task": task_id, "user": actor.user_id}
+                parameters = {
+                    "task": task_id,
+                    "user": actor.user_id,
+                    "status": "cancelled" if stopping else "failed",
+                    "outcome": "cancelled_after_stop" if stopping else "read_failed",
+                }
                 await database.execute(
                     text(
                         "UPDATE career.execution_authorizations SET status='revoked', "
@@ -373,15 +397,16 @@ class PostgresReadExecutionRepository:
                 )
                 await database.execute(
                     text(
-                        "UPDATE career.execution_attempts SET status='failed', "
-                        "outcome='read_failed', updated_at=clock_timestamp() "
+                        "UPDATE career.execution_attempts SET status=:status, "
+                        "outcome=:outcome, finished_at=COALESCE(finished_at,clock_timestamp()), "
+                        "updated_at=clock_timestamp() "
                         "WHERE task_id=:task AND user_id=:user"
                     ),
                     parameters,
                 )
                 await database.execute(
                     text(
-                        "UPDATE career.execution_tasks SET status='failed', "
+                        "UPDATE career.execution_tasks SET status=:status, "
                         "updated_at=clock_timestamp() WHERE id=:task AND user_id=:user"
                     ),
                     parameters,
@@ -459,6 +484,11 @@ class PostgresReadExecutionRepository:
                     raise ExecutionConflict("Read execution is unavailable")
                 if execution.task.status in {"completed", "failed", "timed_out", "cancelled"}:
                     return execution
+                if (
+                    execution.task.status == "waiting"
+                    and execution.attempt.outcome == "read_stop_requested"
+                ):
+                    return execution
                 if execution.task.status != "running" or execution.attempt.status != "running":
                     raise ExecutionConflict("Read execution is not running")
                 if observation is not None:
@@ -472,6 +502,14 @@ class PostgresReadExecutionRepository:
                         ),
                         {"task": task_id, "user": actor.user_id, "page": payload},
                     )
+                await database.execute(
+                    text(
+                        "UPDATE career.execution_authorizations SET status='revoked', "
+                        "revoked_at=COALESCE(revoked_at,clock_timestamp()) "
+                        "WHERE task_id=:task AND user_id=:user"
+                    ),
+                    {"task": task_id, "user": actor.user_id},
+                )
                 await database.execute(
                     text(
                         "UPDATE career.execution_attempts SET status=:status, outcome=:outcome, "
@@ -510,7 +548,8 @@ class PostgresReadExecutionRepository:
                         "AND r.user_id=t.user_id "
                         "WHERE t.user_id=:user AND t.kind='boss_read' "
                         "AND r.kind='boss_connection' AND r.connection_id=:connection "
-                        "ORDER BY t.created_at DESC, t.id DESC LIMIT 1"
+                        "ORDER BY CASE WHEN t.status IN ('accepted','running','waiting','unknown') "
+                        "THEN 0 ELSE 1 END, t.created_at DESC, t.id DESC LIMIT 1"
                     ),
                     {"user": actor.user_id, "connection": connection_id},
                 )

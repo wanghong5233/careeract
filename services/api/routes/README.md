@@ -42,7 +42,10 @@ navigation to the fixed BOSS conversation page during guarded session creation;
 login and messaging permissions remain separate. The authenticated Web BFF is connected.
 `GET /api/v1/connections/boss/{id}/read/{task_id}` reads that task;
 `DELETE` cancels an unstarted task and revokes its authorization, preserving history.
-Cancellation replays safely; started tasks return 409 for reconciliation.
+For a started task, DELETE persists a stop request and revokes read authorization; the
+browser session is revoked and released before the task becomes `cancelled`. Until
+physical release is confirmed it remains `waiting` and can be reconciled after refresh
+or a process interruption. Cancellation replays safely and never reruns the read.
 Missing, other-owned or differently bound task IDs return the same 404 error envelope.
 These responses use `Cache-Control: no-store`.
 

@@ -31,10 +31,12 @@ export function BossReadTask({ connectionId, version, blocked }: { connectionId:
   const [result, setResult] = useState<ReadResult | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [executing, setExecuting] = useState(false);
+  const [stopping, setStopping] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const reads = useRef(createLatestRequest());
   const writes = useRef<AbortController | null>(null);
+  const stops = useRef<AbortController | null>(null);
   const requestKey = useRef<string | null>(null);
   const base = `/api/connections/boss/${connectionId}/read`;
 
@@ -69,11 +71,11 @@ export function BossReadTask({ connectionId, version, blocked }: { connectionId:
   useEffect(() => {
     const requests = reads.current;
     void refresh();
-    return () => { requests.cancel(); writes.current?.abort(); };
+    return () => { requests.cancel(); writes.current?.abort(); stops.current?.abort(); };
   }, [refresh]);
 
   useEffect(() => {
-    if (!executing && task?.task_status !== "running") return;
+    if (!executing && task?.task_status !== "running" && task?.task_status !== "waiting") return;
     let stopped = false;
     let timer: ReturnType<typeof setTimeout>;
     const poll = async () => {
@@ -93,7 +95,7 @@ export function BossReadTask({ connectionId, version, blocked }: { connectionId:
   };
 
   const start = async (resume = false) => {
-    if (writes.current || blocked || loading || task?.task_status === "running" || task?.task_status === "unknown") return;
+    if (writes.current || stops.current || blocked || loading || task?.task_status === "running" || task?.task_status === "waiting" || task?.task_status === "unknown") return;
     const controller = new AbortController();
     writes.current = controller;
     setConfirmOpen(false);
@@ -132,9 +134,36 @@ export function BossReadTask({ connectionId, version, blocked }: { connectionId:
     }
   };
 
-  const active = executing || task?.task_status === "running" || task?.task_status === "unknown";
+  const active = executing || stopping || task?.task_status === "running" || task?.task_status === "waiting" || task?.task_status === "unknown";
+  const stop = async () => {
+    if (stops.current || !task || !["accepted", "running", "waiting"].includes(task.task_status)) return;
+    const controller = new AbortController();
+    stops.current = controller;
+    setStopping(true);
+    setError(null);
+    try {
+      const response = await fetch(`${base}/${task.task_id}`, {
+        method: "DELETE", headers: { "Content-Type": "application/json" }, body: "{}",
+        signal: AbortSignal.any([controller.signal, AbortSignal.timeout(75_000)]),
+      });
+      if (!response.ok) throw new Error("Read stop unconfirmed");
+      const current = await response.json() as ReadTask;
+      if (controller.signal.aborted) return;
+      reads.current.cancel();
+      setTask(current);
+      await refresh();
+    } catch (failure) {
+      if (controller.signal.aborted) return;
+      if (!(failure instanceof Error)) throw failure;
+      await refresh();
+      if (!controller.signal.aborted) setError("停止结果尚未确认，请核对状态；不会重新执行读取。");
+    } finally {
+      if (stops.current === controller) stops.current = null;
+      if (!controller.signal.aborted) setStopping(false);
+    }
+  };
   const reconcile = async () => {
-    if (writes.current || !task || task.task_status !== "unknown") return;
+    if (writes.current || stops.current || !task || task.task_status !== "unknown") return;
     const controller = new AbortController();
     writes.current = controller;
     setExecuting(true);
@@ -160,12 +189,13 @@ export function BossReadTask({ connectionId, version, blocked }: { connectionId:
       <div className="flex items-center gap-2">
         <Button disabled={blocked || active || loading} variant="outline" onClick={() => task?.task_status === "accepted" ? void start(true) : setConfirmOpen(true)}>{executing && <LoaderCircle className="size-3.5 animate-spin" />}{task?.task_status === "accepted" ? "执行已受理读取" : "读取 BOSS 页面"}</Button>
         <Button variant="ghost" onClick={() => void refresh()}><RefreshCw className="size-3.5" />核对读取结果</Button>
-        {task?.task_status === "unknown" && <Button disabled={executing} variant="outline" onClick={() => void reconcile()}>核对释放并结束</Button>}
+        {task && ["accepted", "running", "waiting"].includes(task.task_status) && <Button disabled={stopping} variant="outline" onClick={() => void stop()}>{stopping ? "正在停止" : task.task_status === "waiting" ? "核对停止并释放" : "停止读取"}</Button>}
+        {task?.task_status === "unknown" && <Button disabled={executing || stopping} variant="outline" onClick={() => void reconcile()}>核对释放并结束</Button>}
       </div>
     </div>
     {blocked && <p className="mt-2 text-xs text-muted-foreground">请先关闭上方观看现场，以释放本机浏览器会话。</p>}
-    {task && <p role="status" className="mt-3 text-xs">{labels[task.task_status]}{executing && task.task_status === "accepted" ? " · 执行请求已发出" : ""}</p>}
-    {task?.task_status === "running" && task.browser_session_id && <BrowserScene key={task.browser_session_id} sessionId={task.browser_session_id} />}
+    {task && <p role="status" className="mt-3 text-xs">{task.outcome === "read_stop_requested" ? "停止已请求 · 等待浏览器释放核验" : labels[task.task_status]}{executing && task.task_status === "accepted" ? " · 执行请求已发出" : ""}</p>}
+    {(task?.task_status === "running" || task?.task_status === "waiting") && task.browser_session_id && <BrowserScene key={task.browser_session_id} sessionId={task.browser_session_id} />}
     {result && <div className="mt-3 rounded-lg border bg-background p-3 text-xs leading-5">
       <p>{pageLabels[result.page.state]} · {new Date(result.observed_at).toLocaleString()}</p>
       <p className="mt-1 font-medium">{result.page.title}</p><p className="break-all text-muted-foreground">{result.page.url}</p>
