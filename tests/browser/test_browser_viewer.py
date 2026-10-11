@@ -47,6 +47,12 @@ class _ViewerStore:
             raise CommandRejected("revoked")
         self.commands.append(command)
 
+    async def authorize_watcher(self, command: BrowserCommand) -> None:
+        self.calls += 1
+        if self.reject or (self.reject_after is not None and self.calls > self.reject_after):
+            raise CommandRejected("revoked")
+        self.commands.append(command)
+
     async def acquire_viewer(self, command: BrowserCommand) -> SessionLease:
         await self.authorize_viewer(command)
         return SessionLease(command.session_id, uuid4(), command.owner_id, datetime.now(UTC))
@@ -68,7 +74,7 @@ class _ViewerStore:
         self.released = True
 
 
-def _token(private_key: Ed25519PrivateKey, session_id: UUID) -> str:
+def _token(private_key: Ed25519PrivateKey, session_id: UUID, *, mode: str = "control") -> str:
     now = int(datetime.now(UTC).timestamp())
     return jwt.encode(
         {
@@ -83,8 +89,8 @@ def _token(private_key: Ed25519PrivateKey, session_id: UUID) -> str:
             "authorization_id": str(uuid4()),
             "attempt_id": str(uuid4()),
             "request_id": str(uuid4()),
-            "owner_id": "viewer",
-            "action": "viewer",
+            "owner_id": "watcher" if mode == "watch" else "viewer",
+            "action": "watcher" if mode == "watch" else "viewer",
         },
         private_key,
         algorithm="EdDSA",
@@ -161,6 +167,69 @@ def test_viewer_route_rewrites_steel_html_and_sets_browser_headers() -> None:
     assert viewer_cookie_name(session_id) in response.headers["set-cookie"]
     assert "HttpOnly" in response.headers["set-cookie"]
     assert len(store.commands) == 1
+
+
+def test_watcher_route_is_read_only_and_does_not_acquire_lease() -> None:
+    session_id = uuid4()
+    private_key = Ed25519PrivateKey.generate()
+    store = _ViewerStore()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.params["interactive"] == "false"
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/html"},
+            text='<script>const ws="ws://steel:3000/v1/sessions/cast?pageId=page-a"</script>',
+        )
+
+    with TestClient(_app(private_key, store, _steel_client(handler, session_id))) as client:
+        response = client.get(
+            f"/internal/v1/sessions/{session_id}/viewer?pageId=page-a&mode=watch",
+            headers={
+                "Authorization": "Bearer " + _token(private_key, session_id, mode="watch"),
+                "Origin": "https://careeract.example",
+            },
+        )
+
+    assert response.status_code == 200
+    assert len(store.commands) == 1
+    assert store.commands[0].action == "watcher"
+    assert viewer_cookie_name(session_id, "watch") in response.headers["set-cookie"]
+    assert f"{viewer_cookie_name(session_id)}=" not in response.headers["set-cookie"]
+
+
+def test_watcher_cast_rejects_client_input_without_forwarding() -> None:
+    session_id = uuid4()
+    private_key = Ed25519PrivateKey.generate()
+    upstream = _Upstream()
+    connector = _Connector(upstream)
+    with (
+        TestClient(
+            _app(
+                private_key,
+                _ViewerStore(),
+                _steel_client(lambda _: httpx.Response(500), session_id),
+                connector,
+            )
+        ) as client,
+        client.websocket_connect(
+            f"/internal/v1/sessions/{session_id}/cast?pageId=page-a&mode=watch",
+            headers={
+                "Origin": "https://careeract.example",
+                "Cookie": (
+                    f"{viewer_cookie_name(session_id, 'watch')}="
+                    f"{_token(private_key, session_id, mode='watch')}"
+                ),
+            },
+        ) as socket,
+    ):
+        assert socket.receive_text() == "from-steel"
+        with pytest.raises(WebSocketDisconnect) as disconnected:
+            socket.send_text("forged-input")
+            socket.receive_text()
+        assert disconnected.value.code == 1008
+
+    assert upstream.sent == []
 
 
 @pytest.mark.parametrize(

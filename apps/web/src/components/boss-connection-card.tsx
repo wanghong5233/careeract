@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogTitle } from "@/components/ui/dialog";
 import { createLatestRequest } from "@/lib/latest-request";
 import { cn } from "@/lib/utils";
+import { BrowserScene } from "@/components/browser-scene";
+import { BossReadTask } from "@/components/boss-read-task";
 
 type ConnectionStatus = "pending" | "waiting_for_login" | "waiting_for_verification" | "connected" | "blocked" | "revoked" | "failed";
 type Connection = { id: string; version: string; status: ConnectionStatus };
@@ -15,6 +17,13 @@ type LoginExecution = {
   authorization_status: "active" | "revoked" | "expired";
   outcome: string | null;
   browser_session_id: string | null;
+};
+type SavedLoginViewer = {
+  id: string;
+  browser_session_id: string;
+  status: "starting" | "live" | "closing" | "released" | "failed";
+  expires_at: string;
+  expired: boolean;
 };
 
 const labels: Record<ConnectionStatus, string> = {
@@ -30,14 +39,23 @@ const labels: Record<ConnectionStatus, string> = {
 export function BossConnectionCard() {
   const [connection, setConnection] = useState<Connection | null>(null);
   const [login, setLogin] = useState<LoginExecution | null>(null);
+  const [savedViewer, setSavedViewer] = useState<SavedLoginViewer | null>(null);
+  const [expiredViewerId, setExpiredViewerId] = useState<string | null>(null);
   const [loginAvailable, setLoginAvailable] = useState<boolean | null>(null);
-  const [busy, setBusy] = useState<"read" | "start" | "stop" | "finish" | "forget" | null>("read");
+  const [busy, setBusy] = useState<"read" | "start" | "stop" | "finish" | "forget" | "open-viewer" | "close-viewer" | null>("read");
   const [forgetOpen, setForgetOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [needsReconciliation, setNeedsReconciliation] = useState(false);
   const requests = useRef(createLatestRequest());
   const requestKey = useRef<string | null>(null);
   const writing = useRef(false);
+
+  useEffect(() => {
+    if (!savedViewer || savedViewer.status !== "live") return;
+    const remaining = Date.parse(savedViewer.expires_at) - Date.now();
+    const timer = setTimeout(() => setExpiredViewerId(savedViewer.id), Math.max(0, remaining));
+    return () => clearTimeout(timer);
+  }, [savedViewer]);
 
   const load = useCallback(async () => {
     if (writing.current) return;
@@ -66,6 +84,25 @@ export function BossConnectionCard() {
       } else {
         setLoginAvailable(null);
         setLogin(null);
+      }
+      if (current?.status === "connected" && current.id) {
+        const viewerResponse = await fetch(`/api/connections/boss/${current.id}/saved-login/viewer`, {
+          cache: "no-store",
+          signal: AbortSignal.any([controller.signal, AbortSignal.timeout(20_000)]),
+        });
+        if (viewerResponse.ok) {
+          const viewer = await viewerResponse.json() as SavedLoginViewer | null;
+          if (!requests.current.isCurrent(controller)) return;
+          setSavedViewer(viewer?.browser_session_id ? {
+            ...viewer, expired: viewer.expired || Date.parse(viewer.expires_at) <= Date.now(),
+          } : null);
+        } else if (viewerResponse.status === 404 || viewerResponse.status === 503) {
+          setSavedViewer(null);
+        } else if (viewerResponse.status !== 404 && viewerResponse.status !== 503) {
+          throw new Error("Saved login viewer unavailable");
+        }
+      } else {
+        setSavedViewer(null);
       }
       setNeedsReconciliation(false);
       setError(null);
@@ -116,7 +153,9 @@ export function BossConnectionCard() {
       if (!requests.current.isCurrent(controller)) return;
       setLogin(execution);
       const refreshed = await fetch("/api/connections/boss", { cache: "no-store", signal: AbortSignal.any([controller.signal, AbortSignal.timeout(20_000)]) });
-      if (refreshed.ok) setConnection(await refreshed.json() as Connection);
+      if (!refreshed.ok) throw new Error("Connection state unconfirmed");
+      if (!requests.current.isCurrent(controller)) return;
+      setConnection(await refreshed.json() as Connection);
       requestKey.current = null;
     } catch (failure) {
       if (!requests.current.isCurrent(controller)) return;
@@ -192,7 +231,14 @@ export function BossConnectionCard() {
   };
 
   const forgetLogin = async () => {
-    if (writing.current || busy || needsReconciliation || !connection || connection.status !== "connected") return;
+    if (
+      writing.current ||
+      busy ||
+      needsReconciliation ||
+      !connection ||
+      connection.status !== "connected" ||
+      (savedViewer && ["starting", "live", "closing"].includes(savedViewer.status))
+    ) return;
     writing.current = true;
     const controller = requests.current.start();
     setBusy("forget");
@@ -222,10 +268,75 @@ export function BossConnectionCard() {
     }
   };
 
+  const openSavedViewer = async () => {
+    if (writing.current || busy || needsReconciliation || !connection || connection.status !== "connected") return;
+    writing.current = true;
+    const controller = requests.current.start();
+    setBusy("open-viewer");
+    setError(null);
+    try {
+      const response = await fetch(`/api/connections/boss/${connection.id}/saved-login/viewer`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ version: connection.version }),
+        signal: AbortSignal.any([controller.signal, AbortSignal.timeout(60_000)]),
+      });
+      if (!response.ok) throw new Error("Saved login viewer unavailable");
+      const viewer = await response.json() as SavedLoginViewer;
+      if (!requests.current.isCurrent(controller)) return;
+      setSavedViewer({ ...viewer, expired: viewer.expired || Date.parse(viewer.expires_at) <= Date.now() });
+      if (viewer.status !== "live") setError("浏览器现场正在准备，请重新读取状态。");
+    } catch (failure) {
+      if (!requests.current.isCurrent(controller)) return;
+      if (!(failure instanceof Error)) throw failure;
+      setNeedsReconciliation(true);
+      setError("未能确认浏览器现场，请重新读取状态；不会自动重试。");
+    } finally {
+      writing.current = false;
+      if (requests.current.isCurrent(controller)) setBusy(null);
+    }
+  };
+
+  const closeSavedViewer = async () => {
+    if (writing.current || busy || needsReconciliation || !connection) return;
+    writing.current = true;
+    const controller = requests.current.start();
+    setBusy("close-viewer");
+    setError(null);
+    setSavedViewer(null);
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+    try {
+      const response = await fetch(`/api/connections/boss/${connection.id}/saved-login/viewer`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ version: connection.version }),
+        signal: AbortSignal.any([controller.signal, AbortSignal.timeout(60_000)]),
+      });
+      if (!response.ok) throw new Error("Saved login viewer close unavailable");
+      if (!requests.current.isCurrent(controller)) return;
+      setSavedViewer(null);
+    } catch (failure) {
+      if (!requests.current.isCurrent(controller)) return;
+      if (!(failure instanceof Error)) throw failure;
+      setNeedsReconciliation(true);
+      setError("未能确认浏览器现场关闭结果，请重新读取状态；不会自动重试。");
+    } finally {
+      writing.current = false;
+      if (requests.current.isCurrent(controller)) setBusy(null);
+    }
+  };
+
   const active = connection && !["revoked", "failed"].includes(connection.status);
   const browserReady = login?.attempt_status === "waiting" && login.outcome === "browser_created" && login.browser_session_id;
   const cleanupRequired = Boolean(login?.browser_session_id && login.outcome !== "browser_released");
   const viewerHref = browserReady ? `/api/browser/sessions/${login.browser_session_id}/viewer` : null;
+  const savedViewerExpired = Boolean(savedViewer && (
+    savedViewer.expired || savedViewer.id === expiredViewerId
+  ));
+  const savedViewerReady = savedViewer?.status === "live" && !savedViewerExpired && savedViewer.browser_session_id;
+  const savedViewerActive = Boolean(
+    savedViewer && ["starting", "live", "closing"].includes(savedViewer.status),
+  );
   return <section aria-labelledby="boss-connection-title" className="mb-5 rounded-xl border bg-muted/20 p-5">
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div><h2 id="boss-connection-title" className="text-sm font-medium">连接 BOSS 直聘</h2><p className="mt-1 text-xs leading-5 text-muted-foreground">招聘沟通需要先在隔离浏览器中完成登录和安全验证。</p></div>
@@ -236,15 +347,21 @@ export function BossConnectionCard() {
     <p className="mt-4 max-w-2xl text-xs leading-5 text-muted-foreground">密码、短信验证码和验证码只应由你在安全浏览器中输入，不会进入 Agent 对话或普通业务记录。</p>
     <p className="mt-2 max-w-2xl text-xs leading-5 text-muted-foreground">{connection?.status === "connected" ? "登录已核验并加密保存。后续恢复仍可能需要平台安全验证；尚未开启消息回复或简历发送。" : "登录会在隔离浏览器中进行。完成后点击“完成登录并保存”，系统将核验登录状态、加密保存并关闭本次浏览器。"}</p>
     <div className="mt-4 flex flex-wrap items-center gap-3">
-      <Button disabled={busy !== null || needsReconciliation || loginAvailable === false || cleanupRequired || connection?.status === "connected"} variant="outline" onClick={() => void startLogin()}>
-        {busy === "start" && <LoaderCircle className="size-3.5 animate-spin" />}{browserReady ? "等待登录" : active ? "开始安全登录" : "重新开始安全登录"}
+      <Button disabled={busy !== null || needsReconciliation || loginAvailable === false || cleanupRequired || savedViewerActive} variant="outline" onClick={() => void startLogin()}>
+        {busy === "start" && <LoaderCircle className="size-3.5 animate-spin" />}{connection?.status === "connected" ? "重新登录" : browserReady ? "等待登录" : active ? "开始安全登录" : "重新开始安全登录"}
       </Button>
       {viewerHref && <a className="inline-flex min-h-9 items-center gap-2 rounded-md border px-3 text-xs hover:bg-muted" href={viewerHref} target="_blank" rel="noreferrer"><ExternalLink className="size-3.5" />打开安全浏览器</a>}
       {browserReady && <Button disabled={busy !== null || needsReconciliation} onClick={() => void finishLogin()}>{busy === "finish" && <LoaderCircle className="size-3.5 animate-spin" />}完成登录并保存</Button>}
       {cleanupRequired && <Button disabled={busy !== null || needsReconciliation} variant="ghost" onClick={() => void stopLogin()}>{busy === "stop" && <LoaderCircle className="size-3.5 animate-spin" />}停止登录</Button>}
-      {connection?.status === "connected" && <Button disabled={busy !== null || needsReconciliation} variant="ghost" onClick={() => setForgetOpen(true)}>忘记已保存登录</Button>}
+      {connection?.status === "connected" && <Button disabled={busy !== null || needsReconciliation || savedViewerActive} variant="ghost" onClick={() => setForgetOpen(true)}>忘记已保存登录</Button>}
+      {connection?.status === "connected" && (!savedViewerActive || savedViewerExpired) && <Button disabled={busy !== null || needsReconciliation} onClick={() => void openSavedViewer()}>{busy === "open-viewer" && <LoaderCircle className="size-3.5 animate-spin" />}{savedViewerExpired ? "重新打开浏览器现场" : "打开已保存登录现场"}</Button>}
+      {savedViewerActive && <Button disabled={busy !== null || needsReconciliation} variant="ghost" onClick={() => void closeSavedViewer()}>{busy === "close-viewer" && <LoaderCircle className="size-3.5 animate-spin" />}{savedViewer?.status === "live" ? "关闭浏览器现场" : "停止浏览器现场"}</Button>}
       <Button disabled={busy !== null} variant="ghost" onClick={() => void load()}><RefreshCw className="size-3.5" />重新读取</Button>
     </div>
+    {browserReady && <BrowserScene key={browserReady} sessionId={browserReady} />}
+    {savedViewerReady && <BrowserScene key={savedViewerReady} sessionId={savedViewerReady} />}
+    {savedViewerExpired && savedViewerActive && <p role="status" className="mt-3 text-xs text-muted-foreground">浏览器现场已到期，已保存登录仍保留。重新打开会先关闭旧现场，再恢复新的只读现场。</p>}
+    {connection?.status === "connected" && <BossReadTask key={connection.id} connectionId={connection.id} version={connection.version} blocked={savedViewerActive || cleanupRequired || busy !== null || needsReconciliation} />}
     {loginAvailable === false && <p role="status" className="mt-3 text-xs text-amber-700 dark:text-amber-300">安全登录服务尚未配置；当前不会启动浏览器。配置 Browser Service 后重新读取即可。</p>}
     {error && <p role="alert" className="mt-3 text-xs text-destructive">{error}</p>}
     {forgetOpen && <Dialog open={forgetOpen} onOpenChange={setForgetOpen}>

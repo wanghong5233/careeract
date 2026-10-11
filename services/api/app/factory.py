@@ -14,6 +14,7 @@ from services.api.app.settings import Settings
 from services.api.application.agent_context import AgentContextService
 from services.api.application.boss_connections import BossConnectionService
 from services.api.application.boss_login import BossLoginService
+from services.api.application.boss_saved_login_viewer import BossSavedLoginViewerService
 from services.api.application.browser_registration import BrowserRegistrationService
 from services.api.application.conversation_branches import ConversationBranchService
 from services.api.application.materials import MaterialService
@@ -24,6 +25,7 @@ from services.api.application.ports.browser_viewer import (
 )
 from services.api.application.profiles import ProfileService
 from services.api.application.projects import ProjectService
+from services.api.application.read_execution import ReadExecutionService
 from services.api.application.side_chats import SideChatService
 from services.api.application.work_sessions import AgentWorkSessionService
 from services.api.domain.boss_connection import (
@@ -31,7 +33,11 @@ from services.api.domain.boss_connection import (
     BossConnectionNotFound,
     BossConnectionUnavailable,
 )
-from services.api.domain.execution import ExecutionConflict, ExecutionUnavailable
+from services.api.domain.boss_saved_login_viewer import (
+    SavedLoginViewerConflict,
+    SavedLoginViewerUnavailable,
+)
+from services.api.domain.execution import ExecutionConflict, ExecutionNotFound, ExecutionUnavailable
 from services.api.domain.material import (
     MaterialConflict,
     MaterialInvalid,
@@ -72,7 +78,14 @@ from services.api.infrastructure.agent_tools import (
 )
 from services.api.infrastructure.authentication import JwtAuthenticationMiddleware
 from services.api.infrastructure.boss_connections import PostgresBossConnectionRepository
-from services.api.infrastructure.browser_control import BrowserCommandSigner, BrowserControlClient
+from services.api.infrastructure.boss_page import BossPageClient
+from services.api.infrastructure.boss_saved_login_viewer import (
+    PostgresBossSavedLoginViewerRepository,
+)
+from services.api.infrastructure.browser_control import (
+    BrowserCommandSigner,
+    BrowserControlClient,
+)
 from services.api.infrastructure.browser_viewer import PostgresBrowserViewerTicketIssuer
 from services.api.infrastructure.conversation_branches import AgnoConversationBranches
 from services.api.infrastructure.conversation_deletion import AgnoConversationDeletion
@@ -84,6 +97,7 @@ from services.api.infrastructure.memories import PostgresMemoryRepository
 from services.api.infrastructure.privacy import PrivacyBoundaryMiddleware
 from services.api.infrastructure.profiles import PostgresProfileRepository
 from services.api.infrastructure.projects import PostgresProjectRepository
+from services.api.infrastructure.read_execution import PostgresReadExecutionRepository
 from services.api.infrastructure.side_chats import AgnoSideChatRuntime
 from services.api.infrastructure.work_sessions import PostgresAgentWorkSessionRepository
 from services.api.routes.agent_sessions import router as agent_session_router
@@ -163,7 +177,10 @@ def create_app(
     app.state.browser_viewer_ticket_issuer = None
     app.state.browser_registration_service = None
     app.state.boss_login_service = None
+    app.state.boss_saved_login_viewer_service = None
     app.state.browser_control = None
+    app.state.boss_page_reader = None
+    app.state.read_execution_service = ReadExecutionService(PostgresReadExecutionRepository(engine))
     if settings.browser_base_url is not None and settings.browser_command_private_key_file is None:
         raise RuntimeError("Browser control requires a private signing key")
     if settings.browser_command_private_key_file is not None:
@@ -181,10 +198,14 @@ def create_app(
                 engine, signer, browser_client, settings.auth_issuer
             )
             app.state.browser_control = BrowserControlClient(browser_client, signer)
+            app.state.boss_page_reader = BossPageClient(browser_client, signer)
             app.state.browser_registration_service = BrowserRegistrationService(
                 PostgresExecutionRepository(engine), app.state.browser_control
             )
             app.state.boss_login_service = BossLoginService(app.state.browser_registration_service)
+            app.state.boss_saved_login_viewer_service = BossSavedLoginViewerService(
+                PostgresBossSavedLoginViewerRepository(engine), app.state.browser_control
+            )
         else:
             app.state.browser_viewer_ticket_issuer = PostgresBrowserViewerTicketIssuer(
                 engine, signer
@@ -286,7 +307,10 @@ def create_app(
     app.add_exception_handler(BossConnectionNotFound, boss_connection_error)
     app.add_exception_handler(BossConnectionConflict, boss_connection_error)
     app.add_exception_handler(BossConnectionUnavailable, boss_connection_error)
+    app.add_exception_handler(SavedLoginViewerConflict, boss_connection_error)
+    app.add_exception_handler(SavedLoginViewerUnavailable, boss_connection_error)
     app.add_exception_handler(ExecutionConflict, execution_error)
+    app.add_exception_handler(ExecutionNotFound, execution_error)
     app.add_exception_handler(ExecutionUnavailable, execution_error)
     app.add_exception_handler(BrowserViewerTicketRejected, browser_viewer_error)
     app.add_exception_handler(BrowserViewerTicketUnavailable, browser_viewer_error)

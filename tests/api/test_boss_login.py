@@ -19,6 +19,7 @@ from services.browser.sessions.postgres import PostgresLeaseStore
 from services.browser.sessions.profiles import PostgresBrowserProfileStore, ProfileCipher
 from services.browser.sessions.steel import SteelSessionManager
 from services.browser.site_adapters.boss_context import BOSS_SCOPE, BossContextReader
+from services.browser.site_adapters.boss_lifecycle import boss_site_lifecycles
 from tests.api.test_execution_semantics import Scenario
 from tests.api.test_execution_semantics import pytestmark as pytestmark
 from tests.api.test_execution_semantics import scenario as scenario
@@ -51,7 +52,13 @@ async def test_finish_login_updates_owned_business_state_only_after_verified_sav
             verifier=CommandVerifier(key.public_key()),
             store=PostgresLeaseStore(scenario.engine),
             steel_sessions=SteelSessionManager(steel_client, scenario.engine),
-            profiles=profiles,
+            site_lifecycles=boss_site_lifecycles(
+                profiles=profiles,
+                navigator=None,
+                reader=lambda _session: cast(
+                    BossContextReader, SimpleNamespace(storage_state=reader)
+                ),
+            ),
             context_reader=lambda _session: cast(
                 BossContextReader, SimpleNamespace(storage_state=reader)
             ),
@@ -120,6 +127,32 @@ async def test_finish_login_updates_owned_business_state_only_after_verified_sav
                         await client.post(path + "/finish", headers=headers, json=body)
                     ).json() == result
                     assert len(steel.writes) == 2
+                    original_task = result["task_id"]
+                    original_attempt = result["attempt_id"]
+                    headers["Idempotency-Key"] = str(uuid4())
+                    resumed = await client.post(
+                        path,
+                        headers=headers,
+                        json={"version": str(current.version), "authorize_login": True},
+                    )
+                    assert resumed.status_code == 201
+                    assert resumed.json()["task_id"] != original_task
+                    assert resumed.json()["attempt_id"] != original_attempt
+                    assert await profiles.current(scenario.actor.user_id) is not None
+                    assert (await client.get(path, headers=headers)).json() == resumed.json()
+                    current = await connections.get_current(scenario.actor)
+                    assert current is not None and current.status == "waiting_for_login"
+                    saved_again = await client.post(
+                        path + "/finish",
+                        headers=headers,
+                        json={"version": str(current.version)},
+                    )
+                    assert saved_again.status_code == 200
+                    assert saved_again.json()["attempt_status"] == "completed"
+                    assert await profiles.current(scenario.actor.user_id) is not None
+                    current = await connections.get_current(scenario.actor)
+                    assert current is not None and current.status == "connected"
+                    assert len(steel.writes) == 4
                     forget_path = path.removesuffix("/login") + "/saved-login"
                     assert (
                         await client.request(
@@ -148,7 +181,7 @@ async def test_finish_login_updates_owned_business_state_only_after_verified_sav
                             json={"version": str(current.version)},
                         )
                     ).status_code == 204
-                    assert len(steel.writes) == 2
+                    assert len(steel.writes) == 4
 
 
 async def test_product_login_requires_explicit_scope_version_and_owned_connection(

@@ -14,7 +14,11 @@ from services.api.domain.boss_connection import (
     BossConnectionNotFound,
     BossConnectionUnavailable,
 )
-from services.api.domain.execution import ExecutionConflict, ExecutionUnavailable
+from services.api.domain.boss_saved_login_viewer import (
+    SavedLoginViewerConflict,
+    SavedLoginViewerUnavailable,
+)
+from services.api.domain.execution import ExecutionConflict, ExecutionNotFound, ExecutionUnavailable
 from services.api.domain.material import (
     MaterialConflict,
     MaterialInvalid,
@@ -121,6 +125,18 @@ async def boss_connection_error(request: Request, error: Exception) -> JSONRespo
             "boss_connection_conflict",
             "连接已有更新或需要核对，请读取最新状态。",
         )
+    elif isinstance(error, SavedLoginViewerConflict):
+        status, code, message = (
+            409,
+            "saved_login_viewer_conflict",
+            "保存的登录现场已有变化，请重新读取后再试。",
+        )
+    elif isinstance(error, SavedLoginViewerUnavailable):
+        status, code, message = (
+            503,
+            "saved_login_viewer_unavailable",
+            "保存的登录现场暂不可用，请稍后读取并核对。",
+        )
     elif isinstance(error, RequestValidationError):
         status, code, message = 422, "invalid_boss_connection", "请检查连接请求格式。"
     else:
@@ -163,7 +179,9 @@ async def browser_viewer_error(request: Request, error: Exception) -> JSONRespon
 
 
 async def execution_error(request: Request, error: Exception) -> JSONResponse:
-    if isinstance(error, ExecutionConflict):
+    if isinstance(error, ExecutionNotFound):
+        status, code, message = 404, "execution_not_found", "找不到该执行任务。"
+    elif isinstance(error, ExecutionConflict):
         status, code, message = 409, "execution_conflict", "执行已有变化，请读取并核对当前状态。"
     elif isinstance(error, ExecutionUnavailable):
         status, code, message = 503, "execution_unavailable", "执行结果待核对，不会自动重试。"

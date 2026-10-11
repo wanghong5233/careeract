@@ -23,6 +23,7 @@ from services.browser.sessions.postgres import PostgresLeaseStore
 from services.browser.sessions.profiles import PostgresBrowserProfileStore, ProfileCipher
 from services.browser.sessions.steel import SteelSessionManager
 from services.browser.site_adapters.boss_context import BOSS_SCOPE, BossContextReader
+from services.browser.site_adapters.boss_lifecycle import boss_site_lifecycles
 from tests.api.test_browser_control import control_context
 from tests.browser.test_browser_profiles import add_user
 from tests.browser.test_signed_lifecycle import database_url as database_url
@@ -70,7 +71,13 @@ async def test_finish_saves_only_verified_state_and_releases_with_evidence(
             verifier=CommandVerifier(key.public_key()),
             store=store,
             steel_sessions=SteelSessionManager(steel_client, engine),
-            profiles=profiles,
+            site_lifecycles=boss_site_lifecycles(
+                profiles=profiles,
+                navigator=None,
+                reader=lambda _session: cast(
+                    BossContextReader, SimpleNamespace(storage_state=reader)
+                ),
+            ),
             context_reader=lambda _session: cast(
                 BossContextReader, SimpleNamespace(storage_state=reader)
             ),

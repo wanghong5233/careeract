@@ -17,10 +17,12 @@ Action = Literal[
     "register",
     "revoke",
     "viewer",
+    "watcher",
     "create",
     "release",
     "finish",
     "forget",
+    "snapshot",
 ]
 
 
@@ -83,10 +85,12 @@ class CommandVerifier:
                     "register",
                     "revoke",
                     "viewer",
+                    "watcher",
                     "create",
                     "release",
                     "finish",
                     "forget",
+                    "snapshot",
                 )
             )
             != (command.lease_id is None)

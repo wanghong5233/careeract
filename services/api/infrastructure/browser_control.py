@@ -54,10 +54,12 @@ class BrowserCommandSigner:
                     "revoke",
                     "acquire",
                     "viewer",
+                    "watcher",
                     "create",
                     "release",
                     "finish",
                     "forget",
+                    "snapshot",
                 )
             )
             != (lease_id is None)
@@ -99,7 +101,7 @@ class BrowserControlClient:
     async def send(
         self, context: BrowserControlContext, action: BrowserAction, lease_id: UUID | None = None
     ) -> BrowserLease | None:
-        if action in ("viewer", "create", "release", "finish", "forget"):
+        if action in ("viewer", "watcher", "create", "release", "finish", "forget", "snapshot"):
             raise BrowserControlRejected("Browser action requires its dedicated adapter")
         token = self.signer.sign(context, action, lease_id)
         prefix = "" if action in ("register", "revoke") else "lease/"

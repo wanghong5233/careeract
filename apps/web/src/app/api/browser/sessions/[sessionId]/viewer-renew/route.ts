@@ -17,8 +17,14 @@ export async function POST(
   }
   const auth = await authenticate(request, requestId);
   if ("response" in auth) return auth.response;
+  const mode = new URL(request.url).searchParams.get("mode") ?? "control";
+  if (mode !== "control" && mode !== "watch") {
+    return failure(422, "invalid_browser_viewer_mode", "浏览器观看模式无效。", requestId);
+  }
   try {
-    const upstream = await fetch(new URL(`/api/v1/browser/sessions/${sessionId}/viewer-renew`, serverEnv.apiBaseUrl), {
+    const target = new URL(`/api/v1/browser/sessions/${sessionId}/viewer-renew`, serverEnv.apiBaseUrl);
+    target.searchParams.set("mode", mode);
+    const upstream = await fetch(target, {
       method: "POST",
       headers: { Authorization: `Bearer ${auth.token}`, "X-Request-ID": requestId, "Content-Type": "application/json" },
       body: "{}",

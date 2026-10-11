@@ -33,9 +33,11 @@ function card(fetch) {
       },
       useRef: initial => refs[refIndex++] ??= { current: initial },
       useCallback: callback => callback,
-      useEffect: callback => { if (!effects.length) effects.push(callback); },
+      useEffect: callback => { effects.push(callback); },
     },
     "lucide-react": { LoaderCircle: Placeholder, RefreshCw: Placeholder },
+    "@/components/browser-scene": { BrowserScene: Placeholder },
+    "@/components/boss-read-task": { BossReadTask: Placeholder },
     "@/components/ui/button": { Button: Placeholder },
     "@/components/ui/dialog": {
       Dialog: ({ open, children }) => open ? children : null,
@@ -52,10 +54,81 @@ function card(fetch) {
     element.props.onClick();
   };
   render();
-  return { render, click, mount: () => effects[0](), states };
+  const mountedEffects = [...effects];
+  return { render, click, mount: () => {
+    const cleanups = mountedEffects.map(callback => callback());
+    return () => cleanups.forEach(cleanup => cleanup?.());
+  }, states };
 }
 
 const settle = () => new Promise(resolve => setImmediate(resolve));
+
+test("connected login recovery reuses the connection and exposes its human control entry", async () => {
+  let resumed = false;
+  const writes = [];
+  const fixture = card(async (url, options = {}) => {
+    if (options.method === "POST") {
+      writes.push(url);
+      assert.equal(url, `/api/connections/boss/${connectionId}/login`);
+      assert.deepEqual(JSON.parse(options.body), { version: "v1", authorize_login: true });
+      resumed = true;
+    }
+    if (url.endsWith("/saved-login/viewer")) return Response.json(null);
+    if (url.endsWith("/login")) return Response.json(resumed ? {
+      attempt_status: "waiting", outcome: "browser_created", browser_session_id: "new-session",
+    } : { attempt_status: "completed", outcome: "browser_released" });
+    return Response.json({ id: connectionId, version: resumed ? "v2" : "v1",
+      status: resumed ? "waiting_for_login" : "connected" });
+  });
+  fixture.mount();
+  await settle();
+  fixture.click("重新登录");
+  await settle();
+  assert.equal(writes.length, 1);
+  assert.match(text(fixture.render()), /完成登录并保存/);
+  const control = elements(fixture.render()).find(item => item.type === "a");
+  assert.equal(control.props.href, "/api/browser/sessions/new-session/viewer");
+  assert.ok(elements(fixture.render()).some(item => item.props.sessionId === "new-session"));
+});
+
+test("expired live viewer offers recovery and cleanup without embedding the dead session", async () => {
+  for (const serverExpired of [false, true]) {
+    let reopened = false;
+    let writes = 0;
+    const fixture = card(async (url, options = {}) => {
+      if (url.endsWith("/saved-login/viewer")) {
+        if (options.method === "POST") {
+          writes++;
+          reopened = true;
+          assert.deepEqual(JSON.parse(options.body), { version: "v1" });
+        }
+        return Response.json({
+          id: reopened ? "fresh-viewer" : "old-viewer",
+          browser_session_id: reopened ? "fresh-session" : "old-session",
+          status: "live",
+          expired: !reopened && serverExpired,
+          expires_at: reopened || serverExpired ? "2099-01-01T00:00:00Z" : "2000-01-01T00:00:00Z",
+        });
+      }
+      if (url.endsWith("/login")) return Response.json(null);
+      return Response.json({ id: connectionId, version: "v1", status: "connected" });
+    });
+    fixture.mount();
+    await settle();
+    assert.match(text(fixture.render()), /浏览器现场已到期/);
+    assert.equal(elements(fixture.render()).some(item => item.props.sessionId === "old-session"), false);
+    const forget = elements(fixture.render()).find(item => text(item) === "忘记已保存登录");
+    assert.equal(forget.props.disabled, true);
+    const recovery = elements(fixture.render()).find(item => text(item).trim() === "重新登录");
+    assert.equal(recovery.props.disabled, true);
+    assert.match(text(fixture.render()), /关闭浏览器现场/);
+    assert.equal(writes, 0);
+    fixture.click("重新打开浏览器现场");
+    await settle();
+    assert.equal(writes, 1);
+    assert.ok(elements(fixture.render()).some(item => item.props.sessionId === "fresh-session"));
+  }
+});
 
 test("forget requires confirmation, reads revoked state and never retries a lost response", async () => {
   for (const lost of [false, true]) {

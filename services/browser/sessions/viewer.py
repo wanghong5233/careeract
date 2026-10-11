@@ -1,6 +1,8 @@
+import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Literal
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import UUID
 
@@ -92,8 +94,9 @@ def validate_page_id(page_id: str | None) -> str | None:
     return _validate_page_id(page_id)
 
 
-def viewer_cookie_name(session_id: UUID) -> str:
-    return VIEWER_COOKIE_PREFIX + session_id.hex
+def viewer_cookie_name(session_id: UUID, mode: str = "control") -> str:
+    suffix = "_watch" if mode == "watch" else ""
+    return VIEWER_COOKIE_PREFIX + session_id.hex + suffix
 
 
 def cast_websocket_url(
@@ -111,7 +114,12 @@ def cast_websocket_url(
 
 
 async def fetch_viewer_document(
-    client: httpx.AsyncClient, page_id: str | None, context: ViewerContext
+    client: httpx.AsyncClient,
+    page_id: str | None,
+    context: ViewerContext,
+    *,
+    interactive: bool = True,
+    renewal_mode: Literal["control", "watch"] = "control",
 ) -> str:
     page_id = _validate_page_id(page_id)
     try:
@@ -119,7 +127,10 @@ async def fetch_viewer_document(
             "/v1/sessions/debug",
             params={
                 key: value
-                for key, value in {"pageId": page_id, "interactive": "true"}.items()
+                for key, value in {
+                    "pageId": page_id,
+                    "interactive": "true" if interactive else "false",
+                }.items()
                 if value is not None
             },
             follow_redirects=False,
@@ -140,7 +151,7 @@ async def fetch_viewer_document(
         html = response.content.decode("utf-8")
     except UnicodeDecodeError:
         raise ViewerRejected("Viewer document is invalid") from None
-    rewritten = rewrite_viewer_html(html, context)
+    rewritten = rewrite_viewer_html(html, context, mode=renewal_mode)
     renewal = """<script>
 (() => {
     let stopped = false;
@@ -171,17 +182,23 @@ async def fetch_viewer_document(
     }, 20000);
     window.addEventListener('pagehide', () => { stopped = true; clearInterval(timer); });
 })();
-</script>""".replace("__RENEW_PATH__", f"/api/browser/sessions/{context.session_id}/viewer-renew")
+</script>""".replace(
+        "__RENEW_PATH__",
+        f"/api/browser/sessions/{context.session_id}/viewer-renew?mode={renewal_mode}",
+    )
     return rewritten + renewal
 
 
-def rewrite_viewer_html(html: str, context: ViewerContext) -> str:
+def rewrite_viewer_html(
+    html: str, context: ViewerContext, *, mode: Literal["control", "watch"] = "control"
+) -> str:
     if len(html.encode("utf-8")) > MAX_VIEWER_HTML_BYTES:
         raise ViewerRejected("Viewer document is too large")
     if "javascript:" in html.lower():
         raise ViewerRejected("Viewer document contains an unsupported URL")
     found = False
     steel = urlsplit(context.steel_origin)
+    single_page_mode = bool(re.search(r"const\s+singlePageMode\s*=\s*true", html))
 
     def replace_endpoint(match: re.Match[str]) -> str:
         nonlocal found
@@ -192,11 +209,11 @@ def rewrite_viewer_html(html: str, context: ViewerContext) -> str:
             or parsed.path != CAST_PATH
         ):
             raise ViewerRejected("Viewer WebSocket URL is not a Steel cast endpoint")
-        query = dict(parse_qsl(parsed.query, keep_blank_values=True))
         relative = f"/api/browser/sessions/{context.session_id}/cast"
-        if query:
-            query["sessionId"] = str(context.session_id)
-            relative += "?" + urlencode(query)
+        if single_page_mode:
+            original_query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+            if original_query.get("pageId"):
+                relative += "?" + urlencode({"pageId": original_query["pageId"]})
         found = True
         return match.group("quote") + relative + match.group("quote")
 
@@ -209,7 +226,42 @@ def rewrite_viewer_html(html: str, context: ViewerContext) -> str:
         raise ViewerRejected("Viewer document has no Steel cast endpoint")
     if context.steel_origin in rewritten or "devtools" in rewritten.lower():
         raise ViewerRejected("Viewer document exposes an internal browser endpoint")
-    return rewritten
+    cast_path = f"/api/browser/sessions/{context.session_id}/cast"
+    bootstrap = f"""<script>
+(() => {{
+    const NativeWebSocket = window.WebSocket;
+    const castPath = {json.dumps(cast_path)};
+    const sessionId = {json.dumps(str(context.session_id))};
+    const mode = {json.dumps(mode)};
+    const fitStyle = document.createElement('style');
+    fitStyle.textContent = '.canvas-container.active {{ overflow: hidden; }}'
+        + ' .canvas {{ max-width: 100%; max-height: 100%; }}';
+    document.head?.appendChild(fitStyle);
+    const notify = status => window.parent === window || window.parent.postMessage({{
+        source: 'careeract-browser-viewer', sessionId, mode, status
+    }}, window.location.origin);
+    class ScopedWebSocket extends NativeWebSocket {{
+        constructor(url, protocols) {{
+            const parsed = new URL(url, window.location.href);
+            if (parsed.pathname === castPath) {{
+                parsed.searchParams.set('sessionId', sessionId);
+                parsed.searchParams.set('mode', mode);
+                parsed.protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                url = parsed.toString();
+            }}
+            super(url, protocols);
+            this.addEventListener('open', () => notify('connected'));
+            this.addEventListener('close', () => notify('disconnected'));
+            this.addEventListener('error', () => notify('error'));
+        }}
+    }}
+    window.WebSocket = ScopedWebSocket;
+}})();
+</script>"""
+    insertion = re.search(r"</head>", rewritten, flags=re.IGNORECASE)
+    if insertion is None:
+        return bootstrap + rewritten
+    return rewritten[: insertion.start()] + bootstrap + rewritten[insertion.start() :]
 
 
 def viewer_context(

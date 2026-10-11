@@ -7,6 +7,7 @@ import pytest
 from pydantic import AnyHttpUrl
 
 from services.browser.site_adapters.boss_login import (
+    BOSS_CONVERSATIONS_URL,
     BOSS_LOGIN_URL,
     BossLoginNavigator,
     BossLoginUnavailable,
@@ -30,6 +31,7 @@ from services.browser.site_adapters.boss_login import (
         "blank",
         "empty",
         "foreign",
+        "conversations",
     ],
 )
 async def test_login_navigation_uses_owned_blank_page_and_disconnects(
@@ -50,6 +52,8 @@ async def test_login_navigation_uses_owned_blank_page_and_disconnects(
         if changed == "blank"
         else "https://example.com"
         if changed == "foreign"
+        else BOSS_CONVERSATIONS_URL
+        if changed == "conversations"
         else BOSS_LOGIN_URL
     )
     client = SimpleNamespace(
@@ -118,12 +122,26 @@ async def test_login_navigation_uses_owned_blank_page_and_disconnects(
         "services.browser.site_adapters.boss_login.httpx.AsyncClient", Mock(return_value=cdp_client)
     )
     async with steel_client:
-        navigator = BossLoginNavigator(steel_client, AnyHttpUrl("http://cdp:9223"))
-        if changed in {None, "initial_blank", "initial_empty", "redirect_blank", "redirect_empty"}:
+        navigator = BossLoginNavigator(
+            steel_client,
+            AnyHttpUrl("http://cdp:9223"),
+            destination="conversations" if changed == "conversations" else "login",
+        )
+        if changed in {
+            None,
+            "initial_blank",
+            "initial_empty",
+            "redirect_blank",
+            "redirect_empty",
+            "conversations",
+        }:
             await navigator(session_id)
             constructor.assert_called_once_with("ws://cdp:9223/devtools/browser/synthetic")
             navigation.assert_awaited_once_with(
-                params={"url": BOSS_LOGIN_URL, "transitionType": "address_bar"},
+                params={
+                    "url": BOSS_CONVERSATIONS_URL if changed == "conversations" else BOSS_LOGIN_URL,
+                    "transitionType": "address_bar",
+                },
                 session_id="owned-attachment",
             )
         else:

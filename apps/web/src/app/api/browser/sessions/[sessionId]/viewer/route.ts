@@ -18,12 +18,18 @@ export async function GET(
   }
   const auth = await authenticate(request, requestId);
   if ("response" in auth) return auth.response;
-  const pageId = request.nextUrl.searchParams.get("pageId");
+  const requestUrl = new URL(request.url);
+  const pageId = requestUrl.searchParams.get("pageId");
+  const mode = requestUrl.searchParams.get("mode") ?? "control";
+  if (mode !== "control" && mode !== "watch") {
+    return failure(422, "invalid_browser_viewer_mode", "浏览器观看模式无效。", requestId);
+  }
   if (pageId !== null && (pageId.length === 0 || pageId.length > 256 || /[\u0000-\u001f]/u.test(pageId))) {
     return failure(422, "invalid_browser_page", "浏览器页面标识无效。", requestId);
   }
   const target = new URL(`/api/v1/browser/sessions/${sessionId}/viewer`, serverEnv.apiBaseUrl);
   if (pageId !== null) target.searchParams.set("pageId", pageId);
+  target.searchParams.set("mode", mode);
   try {
     const upstream = await fetch(target, {
       headers: { Authorization: `Bearer ${auth.token}`, "X-Request-ID": requestId },

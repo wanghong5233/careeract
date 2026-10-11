@@ -1,7 +1,7 @@
 import asyncio
 from collections.abc import Awaitable, Callable
 from time import monotonic
-from typing import cast
+from typing import Literal, cast
 from urllib.parse import urlsplit, urlunsplit
 from uuid import UUID
 
@@ -13,6 +13,7 @@ from websockets.exceptions import WebSocketException
 from services.browser.sessions.viewer import ViewerRejected, resolve_viewer_page
 
 BOSS_LOGIN_URL = "https://www.zhipin.com/web/user/"
+BOSS_CONVERSATIONS_URL = "https://www.zhipin.com/web/geek/chat"
 
 
 class BossLoginUnavailable(Exception):
@@ -20,9 +21,18 @@ class BossLoginUnavailable(Exception):
 
 
 class BossLoginNavigator:
-    def __init__(self, steel_client: httpx.AsyncClient, cdp_origin: AnyHttpUrl) -> None:
+    def __init__(
+        self,
+        steel_client: httpx.AsyncClient,
+        cdp_origin: AnyHttpUrl,
+        *,
+        destination: Literal["login", "conversations"] = "login",
+    ) -> None:
         self.steel_client = steel_client
         self.cdp_origin = str(cdp_origin).rstrip("/")
+        if destination not in {"login", "conversations"}:
+            raise ValueError("Unsupported BOSS navigation destination")
+        self.destination_url = BOSS_LOGIN_URL if destination == "login" else BOSS_CONVERSATIONS_URL
 
     async def __call__(self, session_id: UUID) -> None:
         try:
@@ -62,7 +72,7 @@ class BossLoginNavigator:
                         params={"targetId": page_id, "flatten": True}
                     )
                     result = await cdp_client.send.Page.navigate(
-                        params={"url": BOSS_LOGIN_URL, "transitionType": "address_bar"},
+                        params={"url": self.destination_url, "transitionType": "address_bar"},
                         session_id=attached["sessionId"],
                     )
                 if result.get("errorText"):

@@ -104,6 +104,15 @@ class PostgresExecutionRepository:
                 if existing is not None:
                     if existing["connection_id"] != connection_id or existing["kind"] != kind:
                         raise ExecutionConflict("Execution request key has different content")
+                    current_task = await database.scalar(
+                        text(
+                            "SELECT login_task_id FROM career.boss_connections "
+                            "WHERE id=:id AND user_id=:user"
+                        ),
+                        {"id": connection_id, "user": actor.user_id},
+                    )
+                    if current_task != existing["id"]:
+                        raise ExecutionConflict("Login request has been superseded")
                     authorization = (
                         (
                             await database.execute(
@@ -149,10 +158,16 @@ class PostgresExecutionRepository:
                 )
                 if connection is None:
                     raise BossConnectionNotFound("BOSS connection does not exist")
-                if (
+                if expected_version is not None and connection["version"] != expected_version:
+                    raise ExecutionConflict("BOSS connection has changed")
+                if connection["status"] == "connected":
+                    if expected_version is None:
+                        raise ExecutionConflict("Login recovery requires the connection version")
+                    await self._prepare_login_recovery(database, actor, connection)
+                elif (
                     connection["status"] != "pending"
                     or connection["browser_session_id"] is not None
-                    or (expected_version is not None and connection["version"] != expected_version)
+                    or connection["login_task_id"] is not None
                 ):
                     raise ExecutionConflict("BOSS connection is unavailable for login")
                 now = await database.scalar(text("SELECT clock_timestamp()"))
@@ -178,6 +193,13 @@ class PostgresExecutionRepository:
                     )
                     .mappings()
                     .one()
+                )
+                await database.execute(
+                    text(
+                        "UPDATE career.boss_connections SET login_task_id=:task, "
+                        "version=:version, updated_at=clock_timestamp() WHERE id=:id"
+                    ),
+                    {"id": connection_id, "task": task["id"], "version": uuid4()},
                 )
                 authorization = (
                     (
@@ -252,6 +274,45 @@ class PostgresExecutionRepository:
             raise ExecutionUnavailable("Execution state is unavailable") from None
 
     @staticmethod
+    async def _prepare_login_recovery(
+        database: AsyncConnection, actor: ActorContext, connection: RowMapping
+    ) -> None:
+        parameters = {"id": connection["id"], "user": actor.user_id}
+        released = await database.scalar(
+            text(
+                "SELECT true FROM career.execution_tasks t "
+                "JOIN career.execution_authorizations z ON z.task_id=t.id AND z.user_id=t.user_id "
+                "JOIN career.execution_attempts a ON a.task_id=t.id AND a.user_id=t.user_id "
+                "JOIN career.boss_connections c ON c.login_task_id=t.id AND c.id=:id "
+                "AND c.user_id=t.user_id AND c.browser_session_id=a.browser_session_id "
+                "WHERE t.user_id=:user AND t.status='completed' AND a.status='completed' "
+                "AND a.outcome='browser_released' AND z.status='revoked'"
+            ),
+            parameters,
+        )
+        occupied = await database.scalar(
+            text(
+                "SELECT EXISTS (SELECT 1 FROM career.boss_saved_login_viewers "
+                "WHERE connection_id=:id AND user_id=:user "
+                "AND status IN ('starting','live','closing')) OR EXISTS ("
+                "SELECT 1 FROM career.execution_resources r "
+                "JOIN career.execution_tasks t ON t.id=r.task_id AND t.user_id=r.user_id "
+                "WHERE r.connection_id=:id AND r.user_id=:user "
+                "AND t.status IN ('accepted','running','waiting','unknown'))"
+            ),
+            parameters,
+        )
+        if not released or occupied:
+            raise ExecutionConflict("Login recovery requires released browser tasks and viewers")
+        await database.execute(
+            text(
+                "UPDATE career.boss_connections SET status='pending', browser_session_id=NULL, "
+                "last_observed_state='login_recovery_requested' WHERE id=:id AND user_id=:user"
+            ),
+            parameters,
+        )
+
+    @staticmethod
     async def _lock(database: AsyncConnection, actor: ActorContext, attempt_id: UUID) -> RowMapping:
         await database.execute(
             text(
@@ -268,7 +329,7 @@ class PostgresExecutionRepository:
                     text(
                         "SELECT a.*, t.status AS task_status, t.connection_id, "
                         "c.status AS connection_status, "
-                        "c.version AS connection_version, "
+                        "c.version AS connection_version, c.login_task_id, "
                         "z.status AS authorization_status, "
                         "z.expires_at AS authorization_expires_at "
                         "FROM career.execution_tasks t "
@@ -288,6 +349,8 @@ class PostgresExecutionRepository:
         )
         if row is None:
             raise ExecutionConflict("Execution attempt is unavailable")
+        if row["login_task_id"] != row["task_id"]:
+            raise ExecutionConflict("Login attempt has been superseded")
         return row
 
     async def bind_browser_session(
@@ -476,7 +539,9 @@ class PostgresExecutionRepository:
                     (
                         await database.execute(
                             text(
-                                "SELECT * FROM career.execution_tasks t "
+                                "SELECT t.* FROM career.execution_tasks t "
+                                "JOIN career.boss_connections c ON c.login_task_id=t.id "
+                                "AND c.id=t.connection_id AND c.user_id=t.user_id "
                                 "WHERE t.connection_id=:id AND t.user_id=:user"
                             ),
                             {"id": connection_id, "user": actor.user_id},

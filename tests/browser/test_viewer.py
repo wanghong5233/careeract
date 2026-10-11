@@ -28,8 +28,8 @@ def test_rewrites_only_the_configured_steel_cast_endpoint() -> None:
     html = '<script>const ws="ws://steel:3000/v1/sessions/cast?pageId=page-a"</script>'
     rewritten = rewrite_viewer_html(html, current)
     assert f"/api/browser/sessions/{current.session_id}/cast" in rewritten
-    assert "pageId=page-a" in rewritten
-    assert "sessionId=" + str(current.session_id) in rewritten
+    assert str(current.session_id) in rewritten
+    assert 'const mode = "control"' in rewritten
     assert "steel:3000" not in rewritten
 
 
@@ -39,12 +39,47 @@ def test_cast_url_preserves_multi_page_discovery_without_exposing_steel() -> Non
     assert url.endswith("/v1/sessions/cast?tabInfo=true&sessionId=" + str(current.session_id))
 
 
+def test_cast_url_can_mark_a_watcher_as_read_only() -> None:
+    current = context()
+    url = cast_websocket_url(current, "page-a", {"readOnly": "true"})
+    assert "readOnly=true" in url
+
+
 def test_rewrites_single_quoted_base_endpoint_without_duplicate_query_separator() -> None:
     current = context()
     html = "<script>const baseWsUrl = 'ws://steel:3000/v1/sessions/cast';</script>"
     rewritten = rewrite_viewer_html(html, current)
-    assert f"'{f'/api/browser/sessions/{current.session_id}/cast'}'" in rewritten
-    assert "?" not in rewritten
+    assert f"'/api/browser/sessions/{current.session_id}/cast'" in rewritten
+    assert "class ScopedWebSocket" in rewritten
+    assert "parsed.searchParams.set('sessionId'" in rewritten
+    assert "parsed.searchParams.set('mode'" in rewritten
+
+
+def test_rewritten_viewer_bootstrap_scopes_the_template_constructor() -> None:
+    current = context()
+    html = (
+        "<html><head></head><body>"
+        "<script>const baseWsUrl = 'ws://steel:3000/v1/sessions/cast';"
+        "new WebSocket(`${baseWsUrl}?pageId=page-a`);</script>"
+        "</body></html>"
+    )
+    rewritten = rewrite_viewer_html(html, current, mode="watch")
+    assert rewritten.index("class ScopedWebSocket") < rewritten.index("new WebSocket")
+    assert 'const mode = "watch"' in rewritten
+    assert "?pageId=page-a" in rewritten
+
+
+def test_single_page_template_keeps_its_page_binding_without_duplicate_query() -> None:
+    current = context()
+    html = (
+        "<html><head></head><body><script>"
+        "const singlePageMode = true;"
+        "const baseWsUrl = 'ws://steel:3000/v1/sessions/cast?pageId=page-a';"
+        "</script></body></html>"
+    )
+    rewritten = rewrite_viewer_html(html, current)
+    assert f"/api/browser/sessions/{current.session_id}/cast?pageId=page-a" in rewritten
+    assert rewritten.count("?pageId=page-a") == 1
 
 
 @pytest.mark.parametrize(

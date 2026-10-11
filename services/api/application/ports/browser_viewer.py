@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Protocol
+from typing import Literal, Protocol
 from uuid import UUID
 
 from services.api.application.context import ActorContext
@@ -11,6 +11,7 @@ class BrowserViewerTicket:
     session_id: UUID
     token: str
     expires_at: datetime
+    mode: Literal["control", "watch"] = "control"
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,10 +30,27 @@ class BrowserViewerTicketUnavailable(Exception):
 
 
 class BrowserViewerTicketIssuer(Protocol):
-    async def issue(self, actor: ActorContext, session_id: UUID) -> BrowserViewerTicket: ...
+    async def issue(
+        self,
+        actor: ActorContext,
+        session_id: UUID,
+        *,
+        mode: Literal["control", "watch"] = "control",
+    ) -> BrowserViewerTicket: ...
 
     async def document(
-        self, actor: ActorContext, session_id: UUID, page_id: str | None
+        self,
+        actor: ActorContext,
+        session_id: UUID,
+        page_id: str | None,
+        *,
+        mode: Literal["control", "watch"] = "control",
     ) -> BrowserViewerDocument: ...
 
-    async def renew(self, actor: ActorContext, session_id: UUID) -> None: ...
+    async def renew(
+        self,
+        actor: ActorContext,
+        session_id: UUID,
+        *,
+        mode: Literal["control", "watch"] = "control",
+    ) -> None: ...

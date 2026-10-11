@@ -133,6 +133,21 @@ class PostgresLeaseStore:
             if row["lease_id"] is not None:
                 raise LeaseConflict("Previous writer must be stopped before viewing")
 
+    async def authorize_watcher(self, command: BrowserCommand) -> None:
+        if command.action != "watcher" or command.lease_id is not None:
+            raise CommandRejected("Not a watcher command")
+        async with self.engine.begin() as connection:
+            row = await self._lock(connection, command.session_id)
+            now = cast(datetime, await connection.scalar(text("SELECT clock_timestamp()")))
+            if (
+                row["revoked"]
+                or row["user_id"] != command.sub
+                or row["task_id"] != command.task_id
+                or row["authorization_id"] != command.authorization_id
+                or not command.is_current(now.timestamp())
+            ):
+                raise CommandRejected("Browser command is no longer authorized")
+
     async def acquire_viewer(self, command: BrowserCommand) -> SessionLease:
         if command.action != "viewer" or command.lease_id is not None:
             raise CommandRejected("Not a viewer command")
@@ -291,6 +306,28 @@ class PostgresLeaseStore:
                     await asyncio.sleep(0.1)
         except TimeoutError:
             raise LeaseConflict("Viewer disconnection requires reconciliation") from None
+
+    @asynccontextmanager
+    async def snapshot_guard(self, command: BrowserCommand) -> AsyncIterator[None]:
+        async with self.engine.begin() as connection:
+            row = await self._lock(connection, command.session_id)
+            now = cast(datetime, await connection.scalar(text("SELECT clock_timestamp()")))
+            if (
+                command.action != "snapshot"
+                or command.lease_id is not None
+                or row["revoked"]
+                or row["user_id"] != command.sub
+                or row["task_id"] != command.task_id
+                or row["authorization_id"] != command.authorization_id
+                or not command.is_current(now.timestamp())
+            ):
+                raise CommandRejected("Browser page read is no longer authorized")
+            if row["lease_id"] is not None:
+                raise LeaseConflict("Previous writer must disconnect before page capture")
+            yield
+            now = cast(datetime, await connection.scalar(text("SELECT clock_timestamp()")))
+            if not command.is_current(now.timestamp()):
+                raise CommandRejected("Browser page read authorization expired")
 
     @asynccontextmanager
     async def lifecycle_guard(self, command: BrowserCommand) -> AsyncIterator[None]:

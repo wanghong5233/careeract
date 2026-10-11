@@ -11,10 +11,12 @@ BrowserAction = Literal[
     "stop",
     "check",
     "viewer",
+    "watcher",
     "create",
     "release",
     "finish",
     "forget",
+    "snapshot",
 ]
 
 

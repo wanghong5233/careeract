@@ -4,7 +4,14 @@ from typing import Literal
 from uuid import UUID
 
 TaskStatus = Literal[
-    "accepted", "running", "waiting", "failed", "timed_out", "cancelled", "completed"
+    "accepted",
+    "running",
+    "waiting",
+    "failed",
+    "timed_out",
+    "cancelled",
+    "completed",
+    "unknown",
 ]
 AuthorizationStatus = Literal["active", "revoked", "expired"]
 AttemptStatus = Literal[
@@ -21,7 +28,7 @@ class ExecutionTask:
     status: TaskStatus
     created_at: datetime
     updated_at: datetime
-    connection_id: UUID
+    connection_id: UUID | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,7 +65,35 @@ class LoginExecution:
     attempt: ExecutionAttempt
 
 
+@dataclass(frozen=True, slots=True)
+class BossReadTarget:
+    connection_id: UUID
+    connection_version: UUID
+
+
+@dataclass(frozen=True, slots=True)
+class MaterialReadTarget:
+    material_id: UUID
+    version_id: UUID
+    material_version: UUID
+
+
+ReadTarget = BossReadTarget | MaterialReadTarget
+
+
+@dataclass(frozen=True, slots=True)
+class ReadExecution:
+    task: ExecutionTask
+    authorization: ExecutionAuthorization
+    attempt: ExecutionAttempt
+    target: ReadTarget
+
+
 class ExecutionConflict(Exception):
+    pass
+
+
+class ExecutionNotFound(Exception):
     pass
 
 

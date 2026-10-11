@@ -27,6 +27,40 @@ explicitly authorized `boss.login` execution. It creates or reads the durable ta
 authorization and attempt; it does not accept credentials. The browser Viewer is
 available at `GET /api/v1/browser/sessions/{session_id}/viewer` only after confirmed
 physical creation and returns same-origin HTML with a short-lived HttpOnly cookie.
+POST may also recover a connected login using its current version and a fresh request key.
+Recovery preserves encrypted login and prior tasks, rejects active saved viewers or unfinished
+read tasks, and binds a new current login task. Superseded login commands and keys return 409;
+the new task must still pass login verification and physical release before becoming connected.
+
+`POST /api/v1/connections/boss/{id}/read` accepts a bounded `boss.read` task with
+JSON `{version, authorize_read: true}` and a UUID `Idempotency-Key`. It validates
+the owned connected resource and its current version, atomically persists the task,
+authorization and attempt, and returns 201. Authorization expires within 15 minutes
+of database acceptance; replay retains the original task, deadline and cancellation.
+Acceptance does not start a browser or read HR data. The bounded read includes initial
+navigation to the fixed BOSS conversation page during guarded session creation;
+login and messaging permissions remain separate. The authenticated Web BFF is connected.
+`GET /api/v1/connections/boss/{id}/read/{task_id}` reads that task;
+`DELETE` cancels an unstarted task and revokes its authorization, preserving history.
+Cancellation replays safely; started tasks return 409 for reconciliation.
+Missing, other-owned or differently bound task IDs return the same 404 error envelope.
+These responses use `Cache-Control: no-store`.
+
+The shared execution adapter reserves a fresh browser session only after rechecking the
+owned connected resource, current version, active authorization and expiry. It uses the
+existing signed `register`/`create`/`revoke`/`release` lifecycle with owner `boss-read`, then
+hands page capture to the BOSS adapter as `boss-page-reader`. Capture outcomes close the
+attempt as `completed`, `failed`, or `unknown`; an uncertain lifecycle or page result is
+never reported as success. This adapter is currently exercised in isolated tests and has
+an explicit HTTP prototype consumer. `POST /{id}/read/{task_id}/run` with empty JSON
+executes that accepted attempt once within the request; it is not a Temporal worker
+and cannot resume after process interruption. `GET /{id}/read` restores the latest owned
+task, and `GET /{id}/read/{task_id}/result` restores its bounded structured observation.
+No raw HTML or Cookie is persisted in the result. Unusable observations with confirmed
+cleanup close as failed; unconfirmed lifecycle outcomes remain unknown.
+`POST /{id}/read/{task_id}/reconcile` with empty JSON closes an unknown read as failed
+only after matching owned, revoked, lease-free and physically released session evidence.
+It revokes the read authorization and never reruns the original attempt.
 
 `POST /api/v1/connections/boss/{id}/login/finish` requires JSON `{version}` and
 verifies the active login after stopping the Viewer, saves its encrypted state and

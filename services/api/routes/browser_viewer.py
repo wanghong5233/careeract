@@ -1,4 +1,4 @@
-from typing import Annotated, cast
+from typing import Annotated, Literal, cast
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
@@ -48,8 +48,9 @@ async def viewer_document(
     issuer: Annotated[BrowserViewerTicketIssuer, Depends(get_issuer)],
     actor: Annotated[ActorContext, Depends(get_actor)],
     page_id: Annotated[str | None, Query(alias="pageId")] = None,
+    mode: Literal["control", "watch"] = Query(default="control"),
 ) -> Response:
-    document = await issuer.document(actor, session_id, page_id)
+    document = await issuer.document(actor, session_id, page_id, mode=mode)
     headers = {"Cache-Control": "no-store"}
     if document.set_cookie is not None:
         headers["Set-Cookie"] = document.set_cookie
@@ -62,9 +63,10 @@ async def issue_viewer_ticket(
     response: Response,
     issuer: Annotated[BrowserViewerTicketIssuer, Depends(get_issuer)],
     actor: Annotated[ActorContext, Depends(get_actor)],
+    mode: Literal["control", "watch"] = Query(default="control"),
 ) -> ViewerTicketResponse:
     response.headers["Cache-Control"] = "no-store"
-    return serialize(await issuer.issue(actor, session_id))
+    return serialize(await issuer.issue(actor, session_id, mode=mode))
 
 
 @router.post("/{session_id}/viewer-renew", status_code=204)
@@ -73,6 +75,7 @@ async def renew_viewer_ticket(
     response: Response,
     issuer: Annotated[BrowserViewerTicketIssuer, Depends(get_issuer)],
     actor: Annotated[ActorContext, Depends(get_actor)],
+    mode: Literal["control", "watch"] = Query(default="control"),
 ) -> None:
     response.headers["Cache-Control"] = "no-store"
-    await issuer.renew(actor, session_id)
+    await issuer.renew(actor, session_id, mode=mode)

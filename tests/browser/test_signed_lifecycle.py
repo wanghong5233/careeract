@@ -32,6 +32,7 @@ from services.browser.site_adapters.boss_context import (
     BossContextReader,
     BossContextUnavailable,
 )
+from services.browser.site_adapters.boss_lifecycle import boss_site_lifecycles
 from tests.api.test_browser_control import control_context
 from tests.browser.test_postgres_leases import database_url as database_url
 from tests.browser.test_steel_sessions import SyntheticSteel
@@ -92,7 +93,11 @@ async def test_saved_profile_restores_and_capture_failure_still_releases(
             verifier=CommandVerifier(key.public_key()),
             store=PostgresLeaseStore(engine),
             steel_sessions=SteelSessionManager(steel_client, engine),
-            profiles=cast(PostgresBrowserProfileStore, profiles),
+            site_lifecycles=boss_site_lifecycles(
+                profiles=cast(PostgresBrowserProfileStore, profiles),
+                navigator=None,
+                reader=lambda _session: cast(BossContextReader, reader),
+            ),
             context_reader=lambda _session: cast(BossContextReader, reader),
         )
         async with httpx.AsyncClient(

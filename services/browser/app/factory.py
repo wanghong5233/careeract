@@ -1,14 +1,15 @@
 import asyncio
 import logging
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
-from typing import Any
-from uuid import UUID
+from typing import Any, Literal
+from uuid import UUID, uuid4
 
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Query, Response, WebSocket
+from fastapi.responses import JSONResponse
 from pydantic import AnyHttpUrl
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.exc import TimeoutError as PoolTimeoutError
@@ -25,14 +26,13 @@ from services.browser.sessions.authentication import (
     LifecycleAction,
     SessionAction,
 )
-from services.browser.sessions.context import BrowserContext, BrowserContextRejected
 from services.browser.sessions.lease import LeaseConflict, LeaseNotFound, SessionLease
 from services.browser.sessions.postgres import PostgresLeaseStore
 from services.browser.sessions.profiles import (
     BrowserProfileConflict,
     BrowserProfileUnavailable,
-    PostgresBrowserProfileStore,
 )
+from services.browser.sessions.site_lifecycle import SiteLifecycleUnavailable, SiteSessionLifecycle
 from services.browser.sessions.steel import (
     SteelSessionConflict,
     SteelSessionManager,
@@ -50,7 +50,6 @@ from services.browser.sessions.viewer import (
     viewer_cookie_name,
 )
 from services.browser.site_adapters.boss_context import BossContextReader, BossContextUnavailable
-from services.browser.site_adapters.boss_login import BossLoginUnavailable
 
 
 class ViewerAuthorizationRevoked(Exception):
@@ -64,7 +63,7 @@ class ViewerCoordinationUnavailable(Exception):
 @dataclass
 class _ActiveViewer:
     command: BrowserCommand
-    lease_id: UUID
+    lease_id: UUID | None
 
 
 async def _relay_websocket(
@@ -74,6 +73,7 @@ async def _relay_websocket(
     authorization_check: Callable[[], Awaitable[None]],
     authorization_renew: Callable[[], Awaitable[None]],
     authorization_interval: float = 5.0,
+    allow_input: bool = True,
 ) -> None:
     async def from_client() -> None:
         while True:
@@ -87,6 +87,8 @@ async def _relay_websocket(
                 raise ViewerAuthorizationRevoked from error
             except (DBAPIError, PoolTimeoutError, TimeoutError) as error:
                 raise ViewerCoordinationUnavailable from error
+            if not allow_input:
+                raise ViewerAuthorizationRevoked
             if message.get("text") is not None:
                 await upstream.send(message["text"])
             elif message.get("bytes") is not None:
@@ -133,8 +135,7 @@ def create_app(
     viewer_public_origin: AnyHttpUrl | None = None,
     steel_ws_connect: Callable[..., Any] | None = None,
     viewer_authorization_interval: float = 5.0,
-    login_navigator: Callable[[UUID], Awaitable[None]] | None = None,
-    profiles: PostgresBrowserProfileStore | None = None,
+    site_lifecycles: Mapping[str, SiteSessionLifecycle] | None = None,
     context_reader: Callable[[UUID], BossContextReader] | None = None,
 ) -> FastAPI:
     if not 0 < viewer_authorization_interval <= 5:
@@ -152,6 +153,7 @@ def create_app(
 
     app = FastAPI(title="CareerAct Browser Service", lifespan=lifespan)
     active_viewers: dict[UUID, _ActiveViewer] = {}
+    active_watchers: dict[UUID, dict[UUID, _ActiveViewer]] = {}
 
     @app.get("/health")
     async def health() -> dict[str, str]:
@@ -210,40 +212,31 @@ def create_app(
         if steel_sessions is None or store is None:
             raise HTTPException(503, "Browser lifecycle is not configured")
         try:
-            if (
-                action == "create"
-                and (login_navigator is not None or profiles is not None)
-                and command.owner_id != "boss-login"
-            ):
-                raise CommandRejected("Login navigation requires the login executor")
-            if action == "finish" and (
-                profiles is None or context_reader is None or command.owner_id != "boss-login"
-            ):
-                raise CommandRejected("Login verification is not configured")
-            if action == "forget" and (profiles is None or command.owner_id != "boss-login"):
-                raise CommandRejected("Profile removal is not configured")
+            site = site_lifecycles.get(command.owner_id) if site_lifecycles is not None else None
+            if site_lifecycles is not None and (site is None or action not in site.actions):
+                raise CommandRejected("Site lifecycle action is not configured")
+            if action in {"finish", "forget"} and site is None:
+                raise CommandRejected("Site profile action is not configured")
             login_verified = False
             if action in ("release", "finish"):
                 await store.wait_for_viewer_stop(command)
             await store.authorize_lifecycle(command)
             async with store.lifecycle_guard(command):
                 restored = (
-                    await profiles.current(command.sub)
-                    if action == "create" and profiles is not None
+                    await site.restore(command.sub)
+                    if action == "create" and site is not None
                     else None
                 )
                 if action == "create":
-                    session = await steel_sessions.create(
-                        session_id, context=restored[1] if restored is not None else None
-                    )
+                    session = await steel_sessions.create(session_id, context=restored)
                 elif action == "forget":
                     session = await steel_sessions.release(session_id)
-                    if profiles is None:
+                    if site is None:
                         raise CommandRejected("Profile removal is not configured")
-                    await profiles.forget_released_session(command.sub, session_id)
+                    await site.forget(command.sub, session_id)
                 else:
                     try:
-                        if profiles is not None and context_reader is not None:
+                        if site is not None:
                             physical = await steel_sessions.inspect(session_id)
                             if action == "finish" and (
                                 physical is None or physical.status != "live"
@@ -252,42 +245,21 @@ def create_app(
                                     "Login verification requires a live session"
                                 )
                             if physical is not None and physical.status == "live":
-                                captured = await context_reader(session_id).storage_state()
-                                if (
-                                    isinstance(captured, dict)
-                                    and captured.get("authenticated") is True
-                                ):
-                                    snapshot = BrowserContext.from_playwright(
-                                        captured, profiles.scope
-                                    )
-                                    current = await profiles.current(command.sub)
-                                    if current is None:
-                                        await profiles.create(command.sub, snapshot)
-                                    else:
-                                        await profiles.save(
-                                            command.sub,
-                                            current[0].id,
-                                            snapshot,
-                                            expected_version=current[0].version,
-                                        )
-                                    login_verified = True
+                                login_verified = await site.save(command.sub, session_id)
                         if action == "finish" and not command.is_current(
                             datetime.now(UTC).timestamp()
                         ):
                             raise CommandRejected("Login verification authorization expired")
                     finally:
                         session = await steel_sessions.release(session_id)
-                if action == "create" and login_navigator is not None:
+                if action == "create" and site is not None:
                     if not command.is_current(datetime.now(UTC).timestamp()):
                         raise CommandRejected("Login navigation authorization expired")
-                    await login_navigator(session_id)
+                    await site.prepare(session_id)
         except CommandRejected:
             raise HTTPException(403, "Browser lifecycle rejected") from None
         except (LeaseNotFound, LeaseConflict, SteelSessionConflict):
             raise HTTPException(409, "Browser lifecycle conflict") from None
-        except BossLoginUnavailable as error:
-            logging.getLogger(__name__).warning("Login navigation unavailable: %s", error)
-            raise HTTPException(503, "Browser coordination unavailable") from None
         except (
             DBAPIError,
             PoolTimeoutError,
@@ -295,8 +267,7 @@ def create_app(
             SteelSessionUncertain,
             BrowserProfileUnavailable,
             BrowserProfileConflict,
-            BrowserContextRejected,
-            BossContextUnavailable,
+            SiteLifecycleUnavailable,
         ):
             raise HTTPException(503, "Browser coordination unavailable") from None
         result: dict[str, str | bool] = {
@@ -307,14 +278,42 @@ def create_app(
             result["login_verified"] = login_verified
         return result
 
+    @app.post("/internal/v1/sessions/{session_id}/boss/page")
+    async def read_boss_page(session_id: UUID, authorization: str = Header(default="")) -> Response:
+        command = authenticate(session_id, "snapshot", authorization)
+        if command.owner_id != "boss-page-reader":
+            raise HTTPException(403, "Browser page read rejected")
+        if context_reader is None or store is None:
+            raise HTTPException(503, "Browser page reader is not configured")
+        try:
+            async with store.snapshot_guard(command):
+                result = await context_reader(session_id).read_page()
+        except CommandRejected:
+            raise HTTPException(403, "Browser page read rejected") from None
+        except (LeaseNotFound, LeaseConflict):
+            raise HTTPException(409, "Browser page read conflicts with session state") from None
+        except (DBAPIError, PoolTimeoutError, BossContextUnavailable) as failure:
+            logging.getLogger(__name__).warning(
+                "BOSS page read unavailable session=%s boundary=%s",
+                session_id,
+                type(failure).__name__,
+            )
+            raise HTTPException(503, "Browser page read unavailable") from None
+        return JSONResponse(
+            {"session_id": str(session_id), "page": asdict(result)},
+            headers={"Cache-Control": "no-store"},
+        )
+
     @app.get("/internal/v1/sessions/{session_id}/viewer")
     async def viewer_document(
         session_id: UUID,
         page_id: str | None = Query(default=None, alias="pageId"),
+        mode: Literal["control", "watch"] = Query(default="control"),
         origin: str | None = Header(default=None),
         authorization: str = Header(default=""),
     ) -> Response:
-        command = authenticate(session_id, "viewer", authorization)
+        action: Action = "watcher" if mode == "watch" else "viewer"
+        command = authenticate(session_id, action, authorization)
         if steel_client is None or viewer_public_origin is None:
             raise HTTPException(503, "Browser viewer is not configured")
         context = viewer_context(
@@ -328,9 +327,18 @@ def create_app(
             raise HTTPException(403, str(error)) from None
         try:
             assert store is not None
-            await store.authorize_viewer(command)
+            if command.action == "watcher":
+                await store.authorize_watcher(command)
+            else:
+                await store.authorize_viewer(command)
             page_id = await resolve_viewer_page(steel_client, session_id, page_id)
-            html = await fetch_viewer_document(steel_client, page_id, context)
+            html = await fetch_viewer_document(
+                steel_client,
+                page_id,
+                context,
+                interactive=command.action == "viewer",
+                renewal_mode="watch" if command.action == "watcher" else "control",
+            )
         except CommandRejected:
             raise HTTPException(403, "Browser command rejected") from None
         except (LeaseNotFound, LeaseConflict):
@@ -349,7 +357,9 @@ def create_app(
         )
         _, _, viewer_token = authorization.partition(" ")
         response.set_cookie(
-            key=viewer_cookie_name(session_id),
+            key=viewer_cookie_name(
+                session_id, "watch" if command.action == "watcher" else "control"
+            ),
             value=viewer_token,
             max_age=60,
             httponly=True,
@@ -361,13 +371,40 @@ def create_app(
 
     @app.post("/internal/v1/sessions/{session_id}/viewer/renew", status_code=204)
     async def renew_viewer_ticket(
-        session_id: UUID, authorization: str = Header(default="")
+        session_id: UUID,
+        mode: Literal["control", "watch"] = Query(default="control"),
+        authorization: str = Header(default=""),
     ) -> None:
-        command = authenticate(session_id, "viewer", authorization)
-        active = active_viewers.get(session_id)
-        if active is None:
+        action: Action = "watcher" if mode == "watch" else "viewer"
+        command = authenticate(session_id, action, authorization)
+        if action == "watcher":
+            active_watchers_for_session = active_watchers.get(session_id, {})
+            matching = [
+                watcher
+                for watcher in active_watchers_for_session.values()
+                if all(
+                    getattr(watcher.command, field) == getattr(command, field)
+                    for field in ("sub", "task_id", "authorization_id", "attempt_id", "owner_id")
+                )
+                and command.exp >= watcher.command.exp
+            ]
+            if not matching:
+                raise HTTPException(409, "Viewer connection is not active in this process")
+            assert store is not None
+            try:
+                await store.authorize_watcher(command)
+            except (CommandRejected, LeaseConflict, LeaseNotFound):
+                raise HTTPException(403, "Viewer renewal rejected") from None
+            except (DBAPIError, PoolTimeoutError):
+                raise HTTPException(503, "Viewer coordination unavailable") from None
+            for watcher in matching:
+                watcher.command = command
+            return
+
+        control_active = active_viewers.get(session_id)
+        if control_active is None or control_active.lease_id is None:
             raise HTTPException(409, "Viewer connection is not active in this process")
-        previous = active.command
+        previous = control_active.command
         if (
             any(
                 getattr(previous, field) != getattr(command, field)
@@ -378,12 +415,12 @@ def create_app(
             raise HTTPException(403, "Viewer renewal rejected")
         assert store is not None
         try:
-            await store.refresh_viewer(command, active.lease_id)
+            await store.refresh_viewer(command, control_active.lease_id)
         except (CommandRejected, LeaseConflict, LeaseNotFound):
             raise HTTPException(403, "Viewer renewal rejected") from None
         except (DBAPIError, PoolTimeoutError):
             raise HTTPException(503, "Viewer coordination unavailable") from None
-        active.command = command
+        control_active.command = command
 
     @app.websocket("/internal/v1/sessions/{session_id}/cast")
     async def viewer_cast(websocket: WebSocket, session_id: UUID) -> None:
@@ -402,15 +439,19 @@ def create_app(
         )
         try:
             validate_origin(context, websocket.headers.get("origin"))
-            token = websocket.cookies.get(viewer_cookie_name(session_id))
+            mode = websocket.query_params.get("mode", "control")
+            if mode not in ("control", "watch"):
+                raise ViewerRejected("Viewer mode is invalid")
+            action: Action = "watcher" if mode == "watch" else "viewer"
+            token = websocket.cookies.get(viewer_cookie_name(session_id, mode))
             if not token:
                 raise ViewerRejected("Viewer command required")
-            command = verifier.verify(token, session_id, "viewer")
+            command = verifier.verify(token, session_id, action)
             page_id = validate_page_id(websocket.query_params.get("pageId"))
-            if page_id is None or set(websocket.query_params) - {"pageId", "sessionId"}:
+            if page_id is None or set(websocket.query_params) - {"pageId", "sessionId", "mode"}:
                 raise ViewerRejected("Viewer requires one selected page")
             page_id = await resolve_viewer_page(steel_client, session_id, page_id)
-            lease = await store.acquire_viewer(command)
+            lease = None if command.action == "watcher" else await store.acquire_viewer(command)
         except (CommandRejected, ViewerRejected, LeaseNotFound, LeaseConflict):
             await websocket.close(code=1008)
             return
@@ -418,8 +459,13 @@ def create_app(
             await websocket.close(code=1013)
             return
 
-        upstream_url = cast_websocket_url(context, page_id)
+        upstream_url = cast_websocket_url(
+            context,
+            page_id,
+            {"readOnly": "true"} if lease is None else None,
+        )
         connector = steel_ws_connect or connect
+        connection_id = uuid4()
         try:
             close_code = 1000
             async with connector(
@@ -429,21 +475,39 @@ def create_app(
                 max_size=2 * 1024 * 1024,
             ) as upstream:
                 try:
-                    await store.renew_viewer(command, lease.lease_id)
-                    active = _ActiveViewer(command, lease.lease_id)
-                    active_viewers[session_id] = active
+                    if lease is not None:
+                        await store.renew_viewer(command, lease.lease_id)
+                    else:
+                        await store.authorize_watcher(command)
+                    active = _ActiveViewer(command, lease.lease_id if lease is not None else None)
+                    if lease is not None:
+                        active_viewers[session_id] = active
+                    else:
+                        active_watchers.setdefault(session_id, {})[connection_id] = active
                     await websocket.accept()
-                    await _relay_websocket(
-                        websocket,
-                        upstream,
-                        authorization_check=lambda: store.check_viewer(
-                            active.command, lease.lease_id
-                        ),
-                        authorization_renew=lambda: store.renew_viewer(
-                            active.command, lease.lease_id
-                        ),
-                        authorization_interval=viewer_authorization_interval,
-                    )
+                    if lease is not None:
+                        lease_id = lease.lease_id
+                        await _relay_websocket(
+                            websocket,
+                            upstream,
+                            authorization_check=lambda: store.check_viewer(
+                                active.command, lease_id
+                            ),
+                            authorization_renew=lambda: store.renew_viewer(
+                                active.command, lease_id
+                            ),
+                            authorization_interval=viewer_authorization_interval,
+                            allow_input=True,
+                        )
+                    else:
+                        await _relay_websocket(
+                            websocket,
+                            upstream,
+                            authorization_check=lambda: store.authorize_watcher(active.command),
+                            authorization_renew=lambda: store.authorize_watcher(active.command),
+                            authorization_interval=viewer_authorization_interval,
+                            allow_input=False,
+                        )
                 except (ViewerAuthorizationRevoked, CommandRejected, LeaseNotFound, LeaseConflict):
                     close_code = 1008
                 except (ViewerCoordinationUnavailable, DBAPIError, PoolTimeoutError):
@@ -451,11 +515,20 @@ def create_app(
                 except (ConnectionClosed, WebSocketDisconnect, OSError, TimeoutError):
                     close_code = 1011
                 finally:
-                    active_viewers.pop(session_id, None)
-                    await store.drain_viewer(command, lease.lease_id)
+                    if lease is not None:
+                        active_viewers.pop(session_id, None)
+                    else:
+                        watchers = active_watchers.get(session_id)
+                        if watchers is not None:
+                            watchers.pop(connection_id, None)
+                            if not watchers:
+                                active_watchers.pop(session_id, None)
+                    if lease is not None:
+                        await store.drain_viewer(command, lease.lease_id)
             async with asyncio.timeout(5):
                 await upstream.wait_closed()
-            await store.confirm_stopped(session_id, lease.lease_id)
+            if lease is not None:
+                await store.confirm_stopped(session_id, lease.lease_id)
             if websocket.application_state != WebSocketState.DISCONNECTED:
                 await websocket.close(code=close_code)
         except (DBAPIError, PoolTimeoutError):

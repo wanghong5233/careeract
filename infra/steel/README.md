@@ -41,6 +41,15 @@ page without another QR login. Release and encrypted full-context update passed;
 persistent empty URLs and foreign origins remain rejected.
 Account forgetting, joint revocation and deployment remain separate gates.
 
+The compatibility layer also patches the pinned cast handler for CareerAct's
+watch mode. A `readOnly=true` cast does not bring the target page to the front,
+does not accept cast input messages, and does not apply Steel's fixed device
+metrics. Puppeteer attaches with `defaultViewport: null`, so opening one or
+more watch streams preserves the executor's current viewport. CareerAct's
+watcher proxy supplies this flag and still rejects client messages server-side;
+the isolated synthetic report records viewport preservation, forged-input
+rejection, concurrent streams and physical release.
+
 Build through the development Compose file. Production Compose still uses the
 stock image and is not validated for BOSS login; publish and pin a verified
 derived image before deploying this path. An image upgrade must rerun login,

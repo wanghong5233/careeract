@@ -245,3 +245,26 @@ The pinned implementation uses shared Profile paths and does not honor arbitrary
 in PostgreSQL with a separate local key. Clean sequential session storage has canary
 evidence, but disk cleanup, production isolation and long-term login validity still
 require separate verification.
+
+## Signed current-page reads
+
+`POST /internal/v1/sessions/{id}/boss/page` accepts the dedicated `snapshot` command
+from `boss-page-reader`. Watcher and login Viewer commands cannot call this endpoint.
+The caller must first validate a business read authorization and session/task ownership;
+the endpoint does not create that authorization or navigate to a conversation.
+
+The BOSS endpoint enforces its reader owner; `snapshot_guard` is site-independent
+and holds the registered session row lock through DOM capture and CDP
+disconnect. It rejects revoked or expired commands and any existing writer lease,
+including expired/draining leases awaiting trusted cleanup. Acquisition, revocation,
+and physical lifecycle changes wait for capture to finish. Expiration during capture
+discards the result. This guard is for bounded current-page observations only;
+navigating or opening HR conversations still requires exclusive execution control.
+
+The response binds `session_id` to a structured `page` with `Cache-Control: no-store`;
+raw HTML is not returned. The dedicated API `BossPageClient` validates the session, nested schema, BOSS
+HTTPS sources, authorization expiry, and a 512 KiB response limit without retries or
+redirects. These are internal adapters, not product business-read endpoints. Local
+signed HTTP tests use synthetic pages; isolated PostgreSQL tests verify concurrent
+acquisition/revocation and capture expiration. Live HR DOM, product read authorization,
+and the full human/automatic control handoff remain unverified.

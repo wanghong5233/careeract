@@ -20,6 +20,7 @@ from services.api.application.ports.browser_control import (
 from services.api.application.ports.browser_viewer import BrowserViewerTicketRejected
 from services.api.domain.boss_connection import BossConnectionNotFound
 from services.api.domain.execution import (
+    BossReadTarget,
     ExecutionAttempt,
     ExecutionAuthorization,
     ExecutionConflict,
@@ -30,6 +31,7 @@ from services.api.infrastructure.boss_connections import PostgresBossConnectionR
 from services.api.infrastructure.browser_control import BrowserCommandSigner, BrowserControlClient
 from services.api.infrastructure.browser_viewer import PostgresBrowserViewerTicketIssuer
 from services.api.infrastructure.execution import PostgresExecutionRepository
+from services.api.infrastructure.read_execution import PostgresReadExecutionRepository
 from services.browser.app.factory import create_app
 from services.browser.sessions.authentication import CommandRejected, CommandVerifier
 from services.browser.sessions.postgres import PostgresLeaseStore
@@ -170,6 +172,117 @@ async def test_binding_is_owned_and_only_one_caller_can_start(scenario: Scenario
                 text("SELECT status FROM career.execution_tasks WHERE id=:id"), {"id": task.id}
             )
             == "running"
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("blocker", [None, "viewer", "read", "unknown"])
+async def test_login_recovery_preserves_history_and_excludes_stale_or_occupied_controls(
+    scenario: Scenario, blocker: str | None
+) -> None:
+    repository = PostgresExecutionRepository(scenario.engine)
+    connections = PostgresBossConnectionRepository(scenario.engine)
+    original_task, _, original_attempt = await scenario.accept()
+    await repository.bind_browser_session(scenario.actor, original_attempt.id, uuid4())
+    await repository.record_registration(scenario.actor, original_attempt.id, "browser_registered")
+    await repository.reserve_creation(scenario.actor, original_attempt.id)
+    await repository.record_creation(scenario.actor, original_attempt.id, "browser_created")
+    await repository.revoke(scenario.actor, original_attempt.id)
+    await repository.record_release(scenario.actor, original_attempt.id, login_verified=True)
+    connection = await connections.get_current(scenario.actor)
+    assert connection is not None and connection.status == "connected"
+    key = uuid4()
+
+    async def recover(
+        *, actor: ActorContext = scenario.actor, version: UUID = connection.version
+    ) -> tuple[ExecutionTask, ExecutionAuthorization, ExecutionAttempt]:
+        return await repository.accept(
+            actor,
+            connection_id=connection.id,
+            kind="boss_login",
+            request_key=key,
+            scope="boss.login",
+            authorization_expires_at=datetime.now(UTC) + timedelta(minutes=5),
+            request_id=uuid4(),
+            expected_version=version,
+        )
+
+    with pytest.raises(BossConnectionNotFound):
+        await recover(actor=scenario.other)
+    with pytest.raises(ExecutionConflict):
+        await recover(version=uuid4())
+    if blocker == "viewer":
+        async with scenario.engine.begin() as database:
+            await database.execute(
+                text(
+                    "INSERT INTO career.boss_saved_login_viewers "
+                    "(id,user_id,connection_id,browser_session_id,version,status,expires_at) "
+                    "VALUES (:id,:user,:connection,:session,:version,'live',"
+                    "clock_timestamp()+interval '5 minutes')"
+                ),
+                {
+                    "id": uuid4(),
+                    "user": scenario.actor.user_id,
+                    "connection": connection.id,
+                    "session": uuid4(),
+                    "version": uuid4(),
+                },
+            )
+    elif blocker in {"read", "unknown"}:
+        execution = await PostgresReadExecutionRepository(scenario.engine).accept(
+            scenario.actor,
+            target=BossReadTarget(connection.id, connection.version),
+            request_key=uuid4(),
+            authorization_lifetime=timedelta(minutes=5),
+        )
+        if blocker == "unknown":
+            async with scenario.engine.begin() as database:
+                await database.execute(
+                    text("UPDATE career.execution_tasks SET status='unknown' WHERE id=:id"),
+                    {"id": execution.task.id},
+                )
+    if blocker is not None:
+        with pytest.raises(ExecutionConflict):
+            await recover()
+        assert await connections.get_current(scenario.actor) == connection
+        return
+    recovered = await asyncio.gather(*(recover() for _ in range(3)))
+    assert recovered[0] == recovered[1] == recovered[2]
+    new_task, _, new_attempt = recovered[0]
+    assert new_task.id != original_task.id
+    current = await connections.get_current(scenario.actor)
+    assert current is not None and current.status == "pending"
+    assert current.version != connection.version and current.browser_session_id is None
+    login = await repository.read_login(scenario.actor, connection.id)
+    assert login is not None and login.task.id == new_task.id
+    with pytest.raises(ExecutionConflict):
+        await repository.revoke(scenario.actor, original_attempt.id)
+    with pytest.raises(ExecutionConflict):
+        await repository.accept(
+            scenario.actor,
+            connection_id=connection.id,
+            kind="boss_login",
+            request_key=original_task.request_key,
+            scope="boss.login",
+            authorization_expires_at=datetime.now(UTC) + timedelta(minutes=5),
+            request_id=uuid4(),
+            expected_version=current.version,
+        )
+    with pytest.raises(ExecutionConflict):
+        await repository.record_release(scenario.actor, original_attempt.id, login_verified=True)
+    with pytest.raises(ExecutionConflict):
+        await repository.forget_context(
+            scenario.actor, original_attempt.id, expected_version=current.version
+        )
+    assert (await repository.read_attempt(scenario.actor, original_attempt.id)) is not None
+    assert new_attempt.status == "accepted"
+    async with scenario.engine.connect() as database:
+        assert (
+            await database.scalar(
+                text("SELECT count(*) FROM career.execution_tasks WHERE connection_id=:id"),
+                {"id": connection.id},
+            )
+            == 2
         )
 
 
