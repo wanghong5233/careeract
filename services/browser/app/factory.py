@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
-from contextlib import asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal
@@ -74,7 +74,11 @@ async def _relay_websocket(
     authorization_renew: Callable[[], Awaitable[None]],
     authorization_interval: float = 5.0,
     allow_input: bool = True,
+    input_guard: Callable[[], AbstractAsyncContextManager[None]] | None = None,
 ) -> None:
+    if allow_input and input_guard is None:
+        raise ValueError("Interactive relay requires an input guard")
+
     async def from_client() -> None:
         while True:
             message = await websocket.receive()
@@ -82,17 +86,19 @@ async def _relay_websocket(
                 return
             try:
                 async with asyncio.timeout(5):
-                    await authorization_check()
+                    if not allow_input:
+                        await authorization_check()
+                        raise ViewerAuthorizationRevoked
+                    assert input_guard is not None
+                    async with input_guard():
+                        if message.get("text") is not None:
+                            await upstream.send(message["text"])
+                        elif message.get("bytes") is not None:
+                            await upstream.send(message["bytes"])
             except (CommandRejected, LeaseNotFound, LeaseConflict) as error:
                 raise ViewerAuthorizationRevoked from error
             except (DBAPIError, PoolTimeoutError, TimeoutError) as error:
                 raise ViewerCoordinationUnavailable from error
-            if not allow_input:
-                raise ViewerAuthorizationRevoked
-            if message.get("text") is not None:
-                await upstream.send(message["text"])
-            elif message.get("bytes") is not None:
-                await upstream.send(message["bytes"])
 
     async def from_upstream() -> None:
         async for message in upstream:
@@ -498,6 +504,7 @@ def create_app(
                             ),
                             authorization_interval=viewer_authorization_interval,
                             allow_input=True,
+                            input_guard=lambda: store.viewer_input_guard(active.command, lease_id),
                         )
                     else:
                         await _relay_websocket(

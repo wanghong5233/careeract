@@ -1,9 +1,9 @@
 import asyncio
 import os
-from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from services.browser.sessions.authentication import BrowserCommand, CommandRejected
@@ -74,11 +74,16 @@ async def test_snapshot_excludes_writer_and_revocation_waits_for_capture(databas
             assert not acquiring.done()
         acquired = await acquiring
         assert acquired.session_id == third.session_id
+        async with engine.connect() as database:
+            database_time = int(
+                await database.scalar(text("SELECT EXTRACT(EPOCH FROM clock_timestamp())"))
+            )
         expiring = command.model_copy(
             update={
                 "session_id": uuid4(),
                 "jti": uuid4(),
-                "exp": int(datetime.now(UTC).timestamp()) + 2,
+                "iat": database_time,
+                "exp": database_time + 2,
             }
         )
         await store.register(

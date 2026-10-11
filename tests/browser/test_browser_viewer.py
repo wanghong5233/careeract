@@ -1,5 +1,6 @@
 import asyncio
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Any, cast
 from uuid import UUID, uuid4
@@ -40,6 +41,7 @@ class _ViewerStore:
         self.commands: list[BrowserCommand] = []
         self.drained = False
         self.released = False
+        self.input_active = False
 
     async def authorize_viewer(self, command: BrowserCommand) -> None:
         self.calls += 1
@@ -62,6 +64,17 @@ class _ViewerStore:
 
     async def check_viewer(self, command: BrowserCommand, lease_id: UUID) -> None:
         await self.authorize_viewer(command)
+
+    @asynccontextmanager
+    async def viewer_input_guard(
+        self, command: BrowserCommand, lease_id: UUID
+    ) -> AsyncIterator[None]:
+        await self.check_viewer(command, lease_id)
+        self.input_active = True
+        try:
+            yield
+        finally:
+            self.input_active = False
 
     async def refresh_viewer(self, command: BrowserCommand, lease_id: UUID) -> None:
         await self.authorize_viewer(command)
@@ -361,7 +374,14 @@ class _Connector:
 def test_viewer_cast_uses_cookie_ticket_and_rewrites_upstream_session() -> None:
     session_id = uuid4()
     private_key = Ed25519PrivateKey.generate()
-    upstream = _Upstream()
+    store = _ViewerStore()
+
+    class GuardedUpstream(_Upstream):
+        async def send(self, message: str | bytes) -> None:
+            assert store.input_active
+            await super().send(message)
+
+    upstream = GuardedUpstream()
     connector = _Connector(upstream)
     steel_client = _steel_client(
         lambda _: httpx.Response(
@@ -372,7 +392,7 @@ def test_viewer_cast_uses_cookie_ticket_and_rewrites_upstream_session() -> None:
         session_id,
     )
     with (
-        TestClient(_app(private_key, _ViewerStore(), steel_client, connector)) as client,
+        TestClient(_app(private_key, store, steel_client, connector)) as client,
         client.websocket_connect(
             f"/internal/v1/sessions/{session_id}/cast?pageId=page-a",
             headers={
@@ -386,6 +406,39 @@ def test_viewer_cast_uses_cookie_ticket_and_rewrites_upstream_session() -> None:
 
     assert connector.url.endswith(f"/v1/sessions/cast?pageId=page-a&sessionId={session_id}")
     assert upstream.sent == ["from-viewer"]
+    assert not store.input_active
+
+
+def test_viewer_input_rejected_at_forwarding_does_not_reach_steel() -> None:
+    session_id = uuid4()
+    private_key = Ed25519PrivateKey.generate()
+    store = _ViewerStore()
+    upstream = _Upstream()
+    with (
+        TestClient(
+            _app(
+                private_key,
+                store,
+                _steel_client(lambda _: httpx.Response(500), session_id),
+                _Connector(upstream),
+            )
+        ) as client,
+        client.websocket_connect(
+            f"/internal/v1/sessions/{session_id}/cast?pageId=page-a",
+            headers={
+                "Origin": "https://careeract.example",
+                "Cookie": f"{viewer_cookie_name(session_id)}={_token(private_key, session_id)}",
+            },
+        ) as socket,
+    ):
+        assert socket.receive_text() == "from-steel"
+        store.reject = True
+        socket.send_text("stale-input")
+        with pytest.raises(WebSocketDisconnect) as disconnected:
+            socket.receive_text()
+        assert disconnected.value.code == 1008
+    assert upstream.sent == []
+    assert store.drained and store.released
 
 
 def test_viewer_renewal_updates_active_channel_and_rejects_changed_scope() -> None:

@@ -215,10 +215,14 @@ the API can now issue the matching 60-second command only for an existing, unrev
 registered session, and the internal cast route proxies text/binary WebSocket frames
 to Steel after rechecking that cookie. The cast connection acquires the existing durable
 writer lease, consumes its ticket, and excludes automatic executors and other Viewers.
-It checks authorization before forwarding input and renews the lease every five seconds;
+Each input holds the session row lock through authorization/lease validation and the
+bounded upstream send, serializing admission with draining, revocation and replacement.
+It rejects expired, stopped or old-generation input and renews the lease every five seconds;
 expiry, revocation, draining, or unavailable coordination stops the relay. Trusted cleanup
 marks it draining and releases ownership only after the upstream WebSocket has closed.
 Uncertain connection or disconnect outcomes retain ownership for reconciliation.
+Completion of the upstream send is transport evidence, not proof that a browser action
+or recruiting message succeeded. A failed or timed-out send is never replayed.
 Caddy and Next forward only the exact cast path. Viewer HTML and renewal go through
 the authenticated Web BFF and API. The pinned Steel single-page interactive template
 is selected after checking the active inventory and page ownership; discovery and

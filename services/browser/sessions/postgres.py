@@ -165,6 +165,37 @@ class PostgresLeaseStore:
             raise CommandRejected("Not a viewer command")
         await self.execute(command.model_copy(update={"action": "check", "lease_id": lease_id}))
 
+    @asynccontextmanager
+    async def viewer_input_guard(
+        self, command: BrowserCommand, lease_id: UUID
+    ) -> AsyncIterator[None]:
+        if command.action != "viewer" or command.lease_id is not None:
+            raise CommandRejected("Not a viewer command")
+        async with self.engine.begin() as connection:
+            row = await self._lock(connection, command.session_id)
+            now = cast(datetime, await connection.scalar(text("SELECT clock_timestamp()")))
+            if (
+                row["revoked"]
+                or row["user_id"] != command.sub
+                or row["task_id"] != command.task_id
+                or row["authorization_id"] != command.authorization_id
+                or not command.is_current(now.timestamp())
+            ):
+                raise CommandRejected("Viewer input is no longer authorized")
+            if (
+                row["lease_id"] != lease_id
+                or row["owner_id"] != command.owner_id
+                or row["attempt_id"] != command.attempt_id
+                or row["draining"]
+                or row["expires_at"] is None
+                or row["expires_at"] <= now
+            ):
+                raise LeaseConflict("Viewer input does not own an active lease")
+            yield
+            now = cast(datetime, await connection.scalar(text("SELECT clock_timestamp()")))
+            if not command.is_current(now.timestamp()) or row["expires_at"] <= now:
+                raise CommandRejected("Viewer input authorization expired during forwarding")
+
     async def refresh_viewer(self, command: BrowserCommand, lease_id: UUID) -> None:
         if command.action != "viewer" or command.lease_id is not None:
             raise CommandRejected("Not a viewer command")

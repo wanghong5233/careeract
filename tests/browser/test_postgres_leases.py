@@ -41,6 +41,94 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("transition", ["drain", "revoke"])
+async def test_viewer_input_serializes_control_change_and_rejects_late_input(
+    database_url: str, transition: str
+) -> None:
+    engine = create_async_engine(database_url)
+    store = PostgresLeaseStore(engine)
+    command = BrowserCommand.model_validate(command_payload() | {"action": "viewer"})
+    await store.register(command.session_id, command.sub, command.task_id, command.authorization_id)
+    try:
+        lease = await store.acquire_viewer(command)
+        for field, value in (
+            ("sub", "other-user"),
+            ("task_id", uuid4()),
+            ("authorization_id", uuid4()),
+            ("attempt_id", uuid4()),
+            ("owner_id", "other-viewer"),
+            ("action", "watcher"),
+        ):
+            with pytest.raises((CommandRejected, LeaseConflict)):
+                async with store.viewer_input_guard(
+                    command.model_copy(update={field: value}), lease.lease_id
+                ):
+                    pytest.fail("Invalid control binding must reject input")
+        async with store.viewer_input_guard(command, lease.lease_id):
+            changing = asyncio.create_task(
+                store.drain_viewer(command, lease.lease_id)
+                if transition == "drain"
+                else store.revoke(command.session_id)
+            )
+            await asyncio.sleep(0.1)
+            assert not changing.done()
+        await changing
+        with pytest.raises((CommandRejected, LeaseConflict)):
+            async with store.viewer_input_guard(command, lease.lease_id):
+                pytest.fail("Stopped control must reject late input")
+        with pytest.raises(LeaseConflict):
+            await store.confirm_stopped(command.session_id, uuid4())
+        await store.confirm_stopped(command.session_id, lease.lease_id)
+        if transition == "drain":
+            replacement = command.model_copy(update={"jti": uuid4(), "attempt_id": uuid4()})
+            next_lease = await store.acquire_viewer(replacement)
+            with pytest.raises(LeaseConflict):
+                async with store.viewer_input_guard(command, lease.lease_id):
+                    pytest.fail("Old generation must reject input")
+            async with store.viewer_input_guard(replacement, next_lease.lease_id):
+                pass
+            await store.drain_viewer(replacement, next_lease.lease_id)
+            await store.confirm_stopped(command.session_id, next_lease.lease_id)
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_viewer_input_expiry_or_failed_forwarding_does_not_release_control(
+    database_url: str,
+) -> None:
+    engine = create_async_engine(database_url)
+    store = PostgresLeaseStore(engine)
+    command = BrowserCommand.model_validate(command_payload() | {"action": "viewer"})
+    await store.register(command.session_id, command.sub, command.task_id, command.authorization_id)
+    try:
+        lease = await store.acquire_viewer(command)
+        with pytest.raises(OSError):
+            async with store.viewer_input_guard(command, lease.lease_id):
+                raise OSError("Synthetic forwarding failed")
+        async with store.viewer_input_guard(command, lease.lease_id):
+            pass
+        with pytest.raises(CommandRejected):
+            expired = command.model_copy(update={"iat": 1, "exp": 61})
+            async with store.viewer_input_guard(expired, lease.lease_id):
+                pytest.fail("Expired input must reject admission")
+        async with engine.connect() as database:
+            database_time = int(
+                await database.scalar(text("SELECT EXTRACT(EPOCH FROM clock_timestamp())"))
+            )
+        short = command.model_copy(update={"iat": database_time, "exp": database_time + 1})
+        with pytest.raises(CommandRejected, match="expired during forwarding"):
+            async with store.viewer_input_guard(short, lease.lease_id):
+                await asyncio.sleep(1.1)
+        with pytest.raises(LeaseConflict):
+            await store.acquire_viewer(command.model_copy(update={"jti": uuid4()}))
+        await store.drain_viewer(command, lease.lease_id)
+        await store.confirm_stopped(command.session_id, lease.lease_id)
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_release_waits_for_confirmed_viewer_disconnect(database_url: str) -> None:
     engine = create_async_engine(database_url)
     store = PostgresLeaseStore(engine)
