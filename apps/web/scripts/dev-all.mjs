@@ -33,8 +33,48 @@ export function processAlive(pid) {
   }
 }
 
+export function launcherProcessAlive(pid) {
+  if (!processAlive(pid)) return false;
+  if (process.platform !== "win32") return true;
+  const result = spawnSync("powershell.exe", [
+    "-NoProfile",
+    "-Command",
+    `$process = Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}" -ErrorAction SilentlyContinue; if ($process -and $process.CommandLine -match 'dev-all\\.mjs') { exit 0 } else { exit 1 }`,
+  ], { windowsHide: true, encoding: "utf8" });
+  return result.status === 0;
+}
+
 export function recoveryDelay(attempt) {
   return attempt > 3 ? null : 1000 * 2 ** (attempt - 1);
+}
+
+export function recordServiceHealth(service, available, now = Date.now()) {
+  if (!available) {
+    service.failures += 1;
+    service.healthySince = null;
+    return;
+  }
+  service.failures = 0;
+  service.healthySince ??= now;
+  if (now - service.healthySince >= 60_000) service.restarts = 0;
+}
+
+export async function recoverService(service, { stop, start, wait = delay, report = log, isStopping = () => false }) {
+  if (service.recoveryStopped) return service;
+  const backoff = recoveryDelay(service.restarts + 1);
+  if (backoff === null) {
+    await stop(service.child);
+    service.recoveryStopped = true;
+    report(`${service.name} 已连续恢复 3 次，停止该服务的自动恢复；其他服务继续运行。`);
+    return service;
+  }
+  report(`${service.name} 不可用，${backoff / 1000} 秒后在原端口恢复。不会重放 Agent 请求。`);
+  await stop(service.child);
+  await wait(backoff);
+  if (isStopping()) return service;
+  const replacement = start(service.name, service.command, service.args, service.cwd, service.environment);
+  replacement.restarts = service.restarts + 1;
+  return replacement;
 }
 
 export async function stopProcessTree(child) {
@@ -73,7 +113,7 @@ function log(message) {
 async function existingInstance() {
   for (let attempt = 0; attempt < 20; attempt++) {
     const owner = readJson(lockPath);
-    if (!owner || !processAlive(owner.pid)) return null;
+    if (!owner || !launcherProcessAlive(owner.pid)) return null;
     const state = readJson(statePath);
     if (state?.pid === owner.pid) return state;
     await delay(250);
@@ -83,6 +123,7 @@ async function existingInstance() {
 
 function showState(state) {
   console.log(state ? `CareerAct ${state.status}：Web ${state.webUrl ?? "准备中"} / API ${state.apiUrl ?? "准备中"}，PID=${state.pid}\n日志：${logPath}` : "CareerAct 开发服务未运行。");
+  for (const [service, error] of Object.entries(state?.serviceErrors ?? {})) console.log(`${service}：${error}`);
 }
 
 async function main() {
@@ -115,7 +156,7 @@ async function main() {
   }
   const stale = readJson(lockPath);
   if (stale) {
-    if (processAlive(stale.pid)) {
+    if (launcherProcessAlive(stale.pid)) {
       showState(await existingInstance());
       return;
     }
@@ -143,12 +184,14 @@ async function main() {
   }, 250);
   function startService(name, command, args, cwd, environment) {
     const child = spawn(command, args, { cwd, env: environment, windowsHide: true, detached: process.platform !== "win32", stdio: ["ignore", "pipe", "pipe"] });
-    const service = { name, child, command, args, cwd, environment, restarts: 0, failures: 0, exited: false, bindFailed: false };
+    const service = { name, child, command, args, cwd, environment, restarts: 0, failures: 0, healthySince: null, reloadUntil: 0, exited: false, bindFailed: false, recoveryStopped: false };
     for (const stream of [child.stdout, child.stderr]) stream.on("data", data => {
       const message = data.toString();
       appendFileSync(logPath, message);
       process.stdout.write(message);
       if (/EADDRINUSE|EACCES|WinError 10013|address already in use/i.test(message)) service.bindFailed = true;
+      if (name === "api" && /WatchFiles detected changes.*Reloading/.test(message)) service.reloadUntil = Date.now() + 90_000;
+      if (name === "api" && /Application startup complete/.test(message)) { service.reloadUntil = 0; service.failures = 0; }
     });
     child.once("error", error => { service.exited = true; log(`${name} 启动失败：${error.code}`); });
     child.once("exit", (code, signal) => { service.exited = true; log(`${name} 退出：${code ?? signal}`); });
@@ -163,8 +206,9 @@ async function main() {
   async function waitReady() {
     const deadline = Date.now() + 90000;
     while (!stopping && Date.now() < deadline) {
-      if (children.some(service => service.exited)) return false;
-      const results = await Promise.all([healthy(`${state.webUrl}/sign-in`), healthy(`${state.apiUrl}/health`)]);
+      const active = children.filter(service => !service.recoveryStopped);
+      if (active.some(service => service.exited)) return false;
+      const results = await Promise.all(active.map(service => healthy(service.name === "web" ? `${state.webUrl}/sign-in` : `${state.apiUrl}/health`)));
       if (results.every(Boolean)) return true;
       await delay(500);
     }
@@ -183,7 +227,7 @@ async function main() {
       log(`启动 Web ${state.webUrl} / API ${state.apiUrl}`);
       children = [
         startService("web", process.execPath, [resolve(webDirectory, "node_modules/next/dist/bin/next"), "dev", "--hostname", "127.0.0.1", "--port", String(ports.web)], webDirectory, environment),
-        startService("api", "uv", ["run", "--package", "careeract-api", "python", "-m", "uvicorn", "services.api.app.main:app", "--host", "127.0.0.1", "--port", String(ports.api), "--reload", "--reload-dir", "services"], rootDirectory, environment),
+        startService("api", "uv", ["run", "--package", "careeract-api", "python", "-m", "uvicorn", "services.api.app.main:app", "--host", "127.0.0.1", "--port", String(ports.api), "--reload", "--reload-dir", "services/api", "--timeout-graceful-shutdown", "10"], rootDirectory, environment),
       ];
       if (await waitReady()) break;
       const bindFailed = children.some(service => service.bindFailed);
@@ -202,22 +246,29 @@ async function main() {
       await delay(5000);
       for (let index = 0; index < children.length && !stopping; index++) {
         const service = children[index];
+        if (service.recoveryStopped) continue;
         const url = service.name === "web" ? `${state.webUrl}/sign-in` : `${state.apiUrl}/health`;
-        service.failures = await healthy(url) ? 0 : service.failures + 1;
+        recordServiceHealth(service, await healthy(url));
+        if (!service.exited && service.reloadUntil > Date.now()) continue;
         if (!service.exited && service.failures < 3) continue;
-        const backoff = recoveryDelay(service.restarts + 1);
-        if (backoff === null) throw new Error(`${service.name} 已连续恢复 3 次，停止自动恢复以保留错误证据。`);
         state.status = "recovering";
         saveState();
-        log(`${service.name} 不可用，${backoff / 1000} 秒后在原端口恢复。不会重放 Agent 请求。`);
-        await stopProcessTree(service.child);
-        await delay(backoff);
-        if (stopping) break;
-        const replacement = startService(service.name, service.command, service.args, service.cwd, service.environment);
-        replacement.restarts = service.restarts + 1;
+        const replacement = await recoverService(service, {
+          stop: stopProcessTree,
+          start: startService,
+          isStopping: () => stopping,
+        });
         children[index] = replacement;
+        if (replacement.recoveryStopped) {
+          state.serviceErrors ??= {};
+          state.serviceErrors[service.name] = "连续恢复失败；查看日志，修正后 dev:stop 再 dev。";
+          state.status = "degraded";
+          saveState();
+          continue;
+        }
+        if (stopping) break;
         if (!await waitReady()) replacement.failures = 3;
-        else { state.status = "ready"; saveState(); log(`${service.name} 恢复成功。`); }
+        else { state.status = children.some(child => child.recoveryStopped) ? "degraded" : "ready"; saveState(); log(`${service.name} 恢复成功。`); }
       }
     }
   } catch (error) {
