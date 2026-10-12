@@ -64,6 +64,24 @@ const observation = {
   page: { title: "Synthetic BOSS page", url: "https://www.zhipin.com/", state: "ready", kind: "job_list", jobs: [{ job_id: "job-a", title: "Synthetic job", company: "Synthetic company" }], conversations: [], messages: [] },
 };
 
+test("historical resume cards restore without sending or claiming a current material version", async () => {
+  const writes = [];
+  const result = { ...observation, page: { ...observation.page, kind: "conversations", jobs: [],
+    messages: [{ conversation_id: "thread-1", message_id: "123", sender: "candidate", content: "Synthetic.pdf", sent_at: null,
+      resume_attachment: { filename: "Synthetic.pdf", sent_by_candidate: true, request_message_id: "122" } }] } };
+  const fixture = taskCard(async (url, options = {}) => {
+    if (options.method === "POST") writes.push(url);
+    return Response.json(url.endsWith("/result") ? result : { ...accepted, task_status: "completed" });
+  });
+  await settle();
+  assert.match(text(fixture.render()), /历史简历卡片.*我方消息.*Synthetic\.pdf/);
+  assert.match(text(fixture.render()), /不能证明发送成功、待发送材料的版本或再次发送许可/);
+  fixture.click("核对读取结果");
+  await settle();
+  assert.deepEqual(writes, []);
+  fixture.cleanup();
+});
+
 test("selected conversation is persisted before execution and restored with message direction", async () => {
   let current = { ...accepted, task_status: "failed" };
   let detailed = false;

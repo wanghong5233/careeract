@@ -569,8 +569,29 @@ BOSS_RENDERED_MESSAGES = """JSON.stringify((() => {
         const text = normalize(textNodes ? textNodes[0].textContent : content.textContent);
         if (!sender || !text || text.length > 10000
             || (contentComponent === 'MessageText' && text !== normalize(message.text))) return [];
+        let resume_attachment = null;
+        if (contentComponent === 'message-hyperlink') {
+            const children = Array.from(content.querySelectorAll('*'));
+            if (!children.some(node => node.__vue__?.$props?.message === message)) return [];
+            const resumes = children.filter(node =>
+                node.__vue__?.$options?.name === 'hyperlink-resume');
+            if (resumes.length) {
+                const link = message.hyperLink;
+                const titles = content.querySelectorAll('.message-card-top-title');
+                const filename = normalize(link?.text);
+                const request = link?.extraJson?.requestDialogMid;
+                if (resumes.length !== 1 || resumes[0].__vue__.$props?.message !== message
+                    || titles.length !== 1 || !filename || filename.length > 300
+                    || /[\\x00-\\x1f\\x7f/\\\\]/.test(filename)
+                    || normalize(titles[0].textContent) !== filename
+                    || (request != null && request !== 0
+                        && (!Number.isSafeInteger(request) || request <= 0))) return [];
+                resume_attachment = {filename, sent_by_candidate: message.isSelf,
+                    request_message_id: request ? String(request) : null};
+            }
+        }
         messages.push({conversation_id: target, message_id: String(message.mid), sender,
-            content: text, sent_at: new Date(message.time).toISOString()});
+            content: text, sent_at: new Date(message.time).toISOString(), resume_attachment});
     }
     if (messages.at(-1)?.message_id !== String(source.lastMsgId)
         || box.__vue__.selectedFriend$?.uniqueId !== target) return [];

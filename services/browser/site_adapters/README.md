@@ -8,15 +8,22 @@ conversation/message summaries from captured HTML and bounded rendered-component
 contracts. Live list rows bind `source.uniqueId` to the virtual list key and expose
 `lastMsgId`. The selected conversation and each rendered message are checked against
 that identity, stable message IDs, direction, timestamp and rendered content; the
-last loaded message must match the list's latest ID. A real five-message conversation
-has passed the signed product read and persistence path. This covers currently loaded
+last loaded message must match the list's latest ID. A real conversation (initially five,
+then eight currently loaded messages) has passed the signed product read and persistence path.
+This covers currently loaded
 messages, not all history or permission to send a resume. The selected conversation
 reader also records the uniquely bound resume button as available/unavailable/unknown
 and the component's attachment flag. The real sample is unavailable with a false
 attachment flag; this does not identify a material or prove the account has no resume.
 Missing/changed controls remain unknown, and material identity/version still requires
-verification before any send. The parser does not open a
-browser, retain a profile, send messages, or write CareerAct domain state. Browser
+verification before any send.
+The reader also observes historical resume cards only after their child component
+binds the same message object and its displayed title matches the bounded filename.
+It returns the filename, message-side flag and optional request message ID, excluding
+attachment URLs and contents. A real card passed signed read, persistence and product
+readback. These references do not establish delivery or the current material version;
+partially rendered hyperlink messages wait within the existing observation window.
+The parser does not open a browser, retain a profile, send messages, or write CareerAct domain state. Browser
 drivers must supply the captured URL, title, and HTML; unknown structure fails loudly
 so a caller cannot treat an unverified page as a successful read.
 

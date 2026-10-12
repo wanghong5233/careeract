@@ -19,6 +19,7 @@ from services.api.application.ports.boss_page import (
     BossConversationObservation,
     BossMessageObservation,
     BossPageObservation,
+    BossResumeAttachmentObservation,
 )
 from services.api.application.ports.browser_control import (
     BrowserControlConflict,
@@ -766,7 +767,12 @@ async def test_read_prototype_runs_once_and_restores_owned_results(
         observation,
         messages=(
             BossMessageObservation(
-                "m1", "recruiter", "Synthetic message", None, "synthetic-conversation"
+                "m1",
+                "candidate",
+                "Synthetic.pdf",
+                None,
+                "synthetic-conversation",
+                BossResumeAttachmentObservation("Synthetic.pdf", True, "122"),
             ),
         ),
     )
@@ -804,6 +810,11 @@ async def test_read_prototype_runs_once_and_restores_owned_results(
             restored.json()["page"]["conversations"][0]["conversation_id"]
             == "synthetic-conversation"
         )
+        assert restored.json()["page"]["messages"][0]["resume_attachment"] == {
+            "filename": "Synthetic.pdf",
+            "sent_by_candidate": True,
+            "request_message_id": "122",
+        }
         assert (await client.get(task_path + "/result", headers=other_headers)).status_code == 404
         assert (await client.post(task_path + "/run", headers=headers, json={})).status_code == 409
         reader.read_boss_page.assert_awaited_once()

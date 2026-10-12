@@ -9,7 +9,23 @@ from services.browser.site_adapters.boss_context import BOSS_RENDERED_MESSAGES, 
 
 @pytest.mark.parametrize(
     "changed",
-    [None, "selected", "message", "key", "direction", "latest", "text", "component", "duplicate"],
+    [
+        None,
+        "selected",
+        "message",
+        "key",
+        "direction",
+        "latest",
+        "text",
+        "component",
+        "duplicate",
+        "resume",
+        "resume_title",
+        "resume_binding",
+        "resume_request",
+        "resume_duplicate",
+        "resume_loading",
+    ],
 )
 def test_live_message_script_separates_delivery_status_and_rejects_changed_binding(
     changed: str | None,
@@ -42,16 +58,41 @@ if (changed === 'latest') source.lastMsgId = 999;
 if (changed === 'text') body.textContent = 'Different text';
 if (changed === 'component') content.__vue__.$options.name = 'Unknown';
 if (changed === 'duplicate') content.querySelectorAll = () => [body, body];
+if (changed?.startsWith('resume')) {
+    content.__vue__.$options.name = 'message-hyperlink';
+    content.textContent = 'Synthetic.pdf 点击预览附件简历';
+    message.hyperLink = {text: 'Synthetic.pdf', extraJson: {requestDialogMid: 122}};
+    const resume = {__vue__: {$options: {name: 'hyperlink-resume'}, $props: {message}}};
+    const title = {textContent: changed === 'resume_title' ? 'Other.pdf' : 'Synthetic.pdf'};
+    content.querySelectorAll = selector => selector === '*'
+        ? changed === 'resume_loading' ? []
+          : changed === 'resume_duplicate' ? [resume, resume] : [resume] : [title];
+    if (changed === 'resume_binding') resume.__vue__.$props.message = {};
+    if (changed === 'resume_request') message.hyperLink.extraJson.requestDialogMid = 'secret-url';
+}
 """
     expression = BOSS_RENDERED_MESSAGES.replace("__TARGET__", json.dumps("thread-1"))
     script = "const changed = " + json.dumps(changed) + ";\n" + fixture
     script += "\nprocess.stdout.write(" + expression + ");"
     result = subprocess.run(
-        [node, "-"], input=script, text=True, capture_output=True, timeout=5, check=True
+        [node, "-"],
+        input=script,
+        text=True,
+        encoding="utf-8",
+        capture_output=True,
+        timeout=5,
+        check=True,
     )
     messages = json.loads(result.stdout)
-    if changed:
+    if changed and changed != "resume":
         assert messages == []
+    elif changed == "resume":
+        assert messages[0]["resume_attachment"] == {
+            "filename": "Synthetic.pdf",
+            "sent_by_candidate": True,
+            "request_message_id": "122",
+        }
+        assert "url" not in result.stdout
     else:
         assert messages[0]["content"] == "Synthetic text"
         assert messages[0]["sender"] == "candidate"
@@ -90,7 +131,13 @@ const document = {querySelector: () => box, querySelectorAll: () => [selected]};
         + ");"
     )
     result = subprocess.run(
-        [node, "-"], input=script, text=True, capture_output=True, timeout=5, check=True
+        [node, "-"],
+        input=script,
+        text=True,
+        encoding="utf-8",
+        capture_output=True,
+        timeout=5,
+        check=True,
     )
     control = json.loads(result.stdout)
     if changed == "selected":

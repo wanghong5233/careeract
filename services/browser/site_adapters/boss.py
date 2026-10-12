@@ -50,12 +50,21 @@ class BossConversationSummary:
 
 
 @dataclass(frozen=True, slots=True)
+class BossResumeAttachment:
+    # isSelf binds the card's message side; it does not establish successful delivery.
+    filename: str
+    sent_by_candidate: bool
+    request_message_id: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class BossMessageSummary:
     message_id: str
     sender: Literal["recruiter", "candidate", "system", "unknown"]
     content: str
     sent_at: str | None
     conversation_id: str | None = None
+    resume_attachment: BossResumeAttachment | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,6 +97,14 @@ class _RenderedConversation(BaseModel):
     unread: bool
 
 
+class _RenderedResumeAttachment(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, hide_input_in_errors=True)
+
+    filename: str = Field(min_length=1, max_length=300, pattern=r"^[^\x00-\x1f\x7f/\\]+$")
+    sent_by_candidate: bool
+    request_message_id: str | None = Field(default=None, pattern=r"^[1-9][0-9]{0,19}$")
+
+
 class _RenderedMessage(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, hide_input_in_errors=True)
 
@@ -96,6 +113,7 @@ class _RenderedMessage(BaseModel):
     sender: Literal["recruiter", "candidate", "system"]
     content: str = Field(min_length=1, max_length=10000)
     sent_at: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$")
+    resume_attachment: _RenderedResumeAttachment | None = None
 
 
 class _RenderedResumeControl(BaseModel):
@@ -140,9 +158,28 @@ def parse_boss_rendered_messages(
         or rows[-1].message_id != target[0].last_message_id
     ):
         raise ValueError("BOSS rendered message binding is incomplete")
+    if any(
+        row.resume_attachment is not None
+        and (
+            row.resume_attachment.filename not in row.content
+            or row.sender == "candidate"
+            and not row.resume_attachment.sent_by_candidate
+            or row.sender == "recruiter"
+            and row.resume_attachment.sent_by_candidate
+        )
+        for row in rows
+    ):
+        raise ValueError("BOSS resume attachment binding is incomplete")
     return tuple(
         BossMessageSummary(
-            row.message_id, row.sender, row.content, row.sent_at, row.conversation_id
+            row.message_id,
+            row.sender,
+            row.content,
+            row.sent_at,
+            row.conversation_id,
+            BossResumeAttachment(**row.resume_attachment.model_dump())
+            if row.resume_attachment is not None
+            else None,
         )
         for row in rows
     )

@@ -339,3 +339,49 @@ def test_resume_control_is_bound_to_verified_messages(changed: str | None) -> No
     else:
         result = parse_boss_resume_control(value, messages, "thread-1")
         assert result.state == "unavailable" and result.attachment_reported is False
+
+
+@pytest.mark.parametrize("changed", [None, "title", "direction", "path", "request", "extra"])
+def test_rendered_resume_card_preserves_evidence_without_download_url(changed: str | None) -> None:
+    import json
+
+    from services.browser.site_adapters.boss import (
+        parse_boss_rendered_conversations,
+        parse_boss_rendered_messages,
+    )
+
+    previews = parse_boss_rendered_conversations(
+        '[{"conversation_id":"thread-1","recruiter_name":"Synthetic HR",'
+        '"last_message":"Synthetic.pdf","last_message_id":"123","unread":false}]'
+    )
+    attachment = {
+        "filename": "Other.pdf"
+        if changed == "title"
+        else "../Synthetic.pdf"
+        if changed == "path"
+        else "Synthetic.pdf",
+        "sent_by_candidate": changed != "direction",
+        "request_message_id": "invalid" if changed == "request" else "122",
+    }
+    if changed == "extra":
+        attachment["url"] = "https://private.invalid"
+    value = json.dumps(
+        [
+            {
+                "conversation_id": "thread-1",
+                "message_id": "123",
+                "sender": "candidate",
+                "content": "Synthetic.pdf 点击预览附件简历",
+                "sent_at": "2026-10-12T01:00:00.000Z",
+                "resume_attachment": attachment,
+            }
+        ]
+    )
+    if changed:
+        with pytest.raises(ValueError):
+            parse_boss_rendered_messages(value, previews, "thread-1")
+    else:
+        result = parse_boss_rendered_messages(value, previews, "thread-1")
+        assert result[0].resume_attachment is not None
+        assert result[0].resume_attachment.filename == "Synthetic.pdf"
+        assert result[0].resume_attachment.sent_by_candidate

@@ -5,7 +5,10 @@ from uuid import UUID
 import httpx
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from services.api.application.ports.boss_page import BossPageObservation
+from services.api.application.ports.boss_page import (
+    BossPageObservation,
+    has_bound_conversation_messages,
+)
 from services.api.application.ports.browser_control import (
     BrowserControlConflict,
     BrowserControlContext,
@@ -78,6 +81,10 @@ class BossPageClient:
         if (
             result.session_id != context.session_id
             or invalid_url
+            or (
+                any(message.resume_attachment is not None for message in result.page.messages)
+                and not has_bound_conversation_messages(result.page)
+            )
             or (
                 result.page.resume_control is not None
                 and (

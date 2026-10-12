@@ -143,12 +143,23 @@ async def test_page_client_validates_scope_binding_and_nested_response(failure: 
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("wrong_target", [False, True, "resume"])
+@pytest.mark.parametrize(
+    "wrong_target",
+    [False, True, "resume", "attachment", "filename", "direction", "request", "url"],
+)
 async def test_selected_conversation_is_signed_and_response_cannot_switch_recipient(
     wrong_target: bool | str,
 ) -> None:
     key = Ed25519PrivateKey.generate()
     context = replace(control_context(), owner_id="boss-page-reader", conversation_id="thread-1")
+    attachment = {
+        "filename": "Other.pdf" if wrong_target == "filename" else "Synthetic.pdf",
+        "sent_by_candidate": wrong_target != "direction",
+        "request_message_id": "01" if wrong_target == "request" else "122",
+    }
+    if wrong_target == "url":
+        attachment["url"] = "https://untrusted.invalid/private"
+    includes_attachment = wrong_target in {"attachment", "filename", "direction", "request", "url"}
 
     def respond(request: httpx.Request) -> httpx.Response:
         assert request.url.path.endswith("/boss/conversation")
@@ -187,9 +198,10 @@ async def test_selected_conversation_is_signed_and_response_cannot_switch_recipi
                             if wrong_target is True
                             else "thread-1",
                             "message_id": "123",
-                            "sender": "recruiter",
-                            "content": "Synthetic",
+                            "sender": "candidate" if includes_attachment else "recruiter",
+                            "content": "Synthetic.pdf" if includes_attachment else "Synthetic",
                             "sent_at": None,
+                            "resume_attachment": attachment if includes_attachment else None,
                         }
                     ],
                     "resume_control": {
@@ -207,8 +219,13 @@ async def test_selected_conversation_is_signed_and_response_cannot_switch_recipi
         transport=httpx.MockTransport(respond), base_url="http://browser"
     ) as client:
         reader = BossPageClient(client, BrowserCommandSigner(key))
-        if wrong_target:
+        if wrong_target and wrong_target != "attachment":
             with pytest.raises(BrowserControlUncertain):
                 await reader.read_boss_page(context)
         else:
-            assert (await reader.read_boss_page(context)).messages[0].conversation_id == "thread-1"
+            message = (await reader.read_boss_page(context)).messages[0]
+            assert message.conversation_id == "thread-1"
+            if includes_attachment:
+                assert message.resume_attachment is not None
+                assert message.resume_attachment.filename == "Synthetic.pdf"
+                assert message.resume_attachment.sent_by_candidate
