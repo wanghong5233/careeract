@@ -20,9 +20,9 @@ function text(value) {
   return typeof value === "string" ? value : "";
 }
 
-function card(fetch) {
-  const states = [], refs = [], effects = [];
-  let stateIndex = 0, refIndex = 0;
+function card(fetch, globals = {}) {
+  const states = [], refs = [], effects = [], effectDependencies = [];
+  let stateIndex = 0, refIndex = 0, effectIndex = 0;
   const { BossConnectionCard } = loadSource("components/boss-connection-card.tsx", {
     react: {
       ...React,
@@ -33,7 +33,12 @@ function card(fetch) {
       },
       useRef: initial => refs[refIndex++] ??= { current: initial },
       useCallback: callback => callback,
-      useEffect: callback => { effects.push(callback); },
+      useEffect: (callback, dependencies) => {
+        const index = effectIndex++;
+        const previous = effectDependencies[index];
+        if (!previous || dependencies.some((value, position) => !Object.is(value, previous[position]))) effects.push(callback);
+        effectDependencies[index] = dependencies;
+      },
     },
     "lucide-react": { LoaderCircle: Placeholder, RefreshCw: Placeholder },
     "@/components/browser-scene": { BrowserScene: Placeholder },
@@ -45,8 +50,8 @@ function card(fetch) {
     },
     "@/lib/latest-request": loadSource("lib/latest-request.ts"),
     "@/lib/utils": { cn: (...values) => values.filter(Boolean).join(" ") },
-  }, { fetch });
-  const render = () => { stateIndex = 0; refIndex = 0; return BossConnectionCard(); };
+  }, { fetch, ...globals });
+  const render = () => { stateIndex = 0; refIndex = 0; effectIndex = 0; return BossConnectionCard(); };
   const click = label => {
     const element = elements(render()).find(item => item.type === Placeholder && text(item).includes(label));
     assert.ok(element, label);
@@ -54,11 +59,11 @@ function card(fetch) {
     element.props.onClick();
   };
   render();
-  const mountedEffects = [...effects];
+  const mountedEffects = effects.splice(0);
   return { render, click, mount: () => {
     const cleanups = mountedEffects.map(callback => callback());
     return () => cleanups.forEach(cleanup => cleanup?.());
-  }, states };
+  }, states, runEffects: () => effects.splice(0).map(callback => callback()) };
 }
 
 const settle = () => new Promise(resolve => setImmediate(resolve));
@@ -75,7 +80,7 @@ test("connected login recovery reuses the connection and exposes its human contr
     }
     if (url.endsWith("/saved-login/viewer")) return Response.json(null);
     if (url.endsWith("/login")) return Response.json(resumed ? {
-      attempt_status: "waiting", outcome: "browser_created", browser_session_id: "new-session",
+      attempt_status: "waiting", outcome: "browser_created", browser_session_id: "new-session", authorization_status: "active", authorization_expires_at: "2099-01-01T00:00:00Z",
     } : { attempt_status: "completed", outcome: "browser_released" });
     return Response.json({ id: connectionId, version: resumed ? "v2" : "v1",
       status: resumed ? "waiting_for_login" : "connected" });
@@ -179,7 +184,7 @@ test("finish reads connected state after verified save and never replays an unce
       }
       if (url.endsWith("/login")) return Response.json(saved
         ? { attempt_status: "completed", outcome: "browser_released" }
-        : { attempt_status: "waiting", outcome: "browser_created", browser_session_id: connectionId });
+        : { attempt_status: "waiting", outcome: "browser_created", browser_session_id: connectionId, authorization_status: "active", authorization_expires_at: "2099-01-01T00:00:00Z" });
       return Response.json({ id: connectionId, version: "v1", status: saved ? "connected" : "waiting_for_login" });
     });
     fixture.mount();
@@ -205,7 +210,7 @@ test("confirmed cleanup after an uncertain start uses a fresh key for the next l
   const fixture = card(async (url, options = {}) => {
     if (url.endsWith("/login") && options.method === "POST") {
       starts++;
-      execution = { attempt_status: "unknown", outcome: "creation_unconfirmed", browser_session_id: connectionId };
+      execution = { attempt_status: "unknown", outcome: "creation_unconfirmed", browser_session_id: connectionId, authorization_status: "active", authorization_expires_at: "2099-01-01T00:00:00Z" };
       if (starts === 1) throw new TypeError("Lost response");
       return Response.json(execution);
     }
@@ -239,7 +244,7 @@ test("connection card starts and stops an explicitly authorized browser login", 
   const calls = [];
   const fixture = card(async (url, options = {}) => {
     calls.push({ url, options });
-    if (url.endsWith("/login") && options.method === "POST") return Response.json({ attempt_status: "waiting", outcome: "browser_created", browser_session_id: connectionId });
+    if (url.endsWith("/login") && options.method === "POST") return Response.json({ attempt_status: "waiting", outcome: "browser_created", browser_session_id: connectionId, authorization_status: "active", authorization_expires_at: "2099-01-01T00:00:00Z" });
     if (url.endsWith("/login") && options.method === "DELETE") return Response.json({ attempt_status: "cancelled", outcome: "browser_released", browser_session_id: connectionId });
     if (url.endsWith("/login")) return Response.json(null);
     return Response.json({ id: connectionId, version: "v1", status: "pending" });
@@ -287,7 +292,7 @@ test("restarting a revoked connection creates a fresh connection before login", 
   const freshId = "a1965402-3575-4125-b339-6e489e5a3209";
   const fixture = card(async (url, options = {}) => {
     calls.push({ url, options });
-    if (url.endsWith("/login") && options.method === "POST") return Response.json({ attempt_status: "waiting", outcome: "browser_created", browser_session_id: freshId });
+    if (url.endsWith("/login") && options.method === "POST") return Response.json({ attempt_status: "waiting", outcome: "browser_created", browser_session_id: freshId, authorization_status: "active", authorization_expires_at: "2099-01-01T00:00:00Z" });
     if (url === "/api/connections/boss" && options.method === "POST") return Response.json({ id: freshId, version: "v2", status: "pending" }, { status: 201 });
     if (url.endsWith("/login")) return Response.json(null);
     return Response.json({ id: connectionId, version: "v1", status: "revoked" });
@@ -328,9 +333,62 @@ test("unknown login keeps cleanup reachable and prevents a second start", async 
   const start = elements(fixture.render()).find(item => item.type === Placeholder && text(item).includes("开始安全登录"));
   assert.equal(start.props.disabled, true);
   assert.doesNotMatch(text(fixture.render()), /打开安全浏览器/);
-  fixture.click("停止登录");
+  fixture.click("结束已到期登录");
   await settle();
   assert.equal(calls[2].options.method, "DELETE");
+});
+
+test("expired or revoked login unmounts the viewer and keeps cleanup reachable", async () => {
+  for (const authorization of [
+    { authorization_status: "active", authorization_expires_at: "2000-01-01T00:00:00Z" },
+    { authorization_status: "revoked", authorization_expires_at: "2099-01-01T00:00:00Z" },
+  ]) {
+    const writes = [];
+    const fixture = card(async (url, options = {}) => {
+      if (options.method) writes.push(options.method);
+      if (url.endsWith("/login")) return Response.json({
+        attempt_status: "waiting", outcome: "browser_created", browser_session_id: connectionId, ...authorization,
+      });
+      return Response.json({ id: connectionId, version: "v1", status: "waiting_for_login" });
+    });
+    fixture.mount();
+    await settle();
+    const tree = fixture.render();
+    assert.match(text(tree), /登录窗口已到期/);
+    assert.equal(elements(tree).some(item => item.type === Placeholder && text(item).includes("完成登录并保存")), false);
+    assert.equal(elements(tree).some(item => item.type === "a"), false);
+    assert.equal(elements(tree).some(item => item.props.sessionId), false);
+    assert.equal(elements(tree).find(item => item.type === Placeholder && text(item).includes("开始安全登录")).props.disabled, true);
+    fixture.click("结束已到期登录");
+    await settle();
+    assert.deepEqual(writes, ["DELETE"]);
+  }
+});
+
+test("live login expiry removes control without writes or blocking a fresh session", async () => {
+  const timers = [];
+  const writes = [];
+  let sessionId = "old-login-session";
+  const fixture = card(async (url, options = {}) => {
+    if (options.method) writes.push(options.method);
+    if (url.endsWith("/login")) return Response.json({
+      attempt_status: "waiting", outcome: "browser_created", browser_session_id: sessionId,
+      authorization_status: "active", authorization_expires_at: new Date(Date.now() + 60_000).toISOString(),
+    });
+    return Response.json({ id: connectionId, version: "v1", status: "waiting_for_login" });
+  }, { setTimeout: callback => { timers.push(callback); return timers.length; }, clearTimeout: () => {} });
+  fixture.mount();
+  await settle();
+  assert.match(text(fixture.render()), /完成登录并保存/);
+  fixture.runEffects();
+  await settle();
+  timers[0]();
+  assert.equal(elements(fixture.render()).some(item => item.type === Placeholder && text(item).includes("完成登录并保存")), false);
+  assert.deepEqual(writes, []);
+  sessionId = "fresh-login-session";
+  fixture.click("重新读取");
+  await settle();
+  assert.ok(elements(fixture.render()).some(item => item.props.sessionId === sessionId));
 });
 
 function bff({ authorized = true, upstream = () => Response.json(null) } = {}) {
@@ -466,6 +524,31 @@ test("viewer BFF keeps HTML same-origin and forwards the short-lived cookie", as
   assert.equal(response.headers.get("set-cookie"), "careeract_viewer=redacted; HttpOnly");
   assert.equal(new URL(fixture.calls[0].url).pathname, `/api/v1/browser/sessions/${connectionId}/viewer`);
   assert.equal(new URL(fixture.calls[0].url).searchParams.get("pageId"), "page-a");
+});
+
+test("viewer errors show bounded HTML and distinguish identity from browser authorization", async () => {
+  const context = { params: Promise.resolve({ sessionId: connectionId }) };
+  const viewerRequest = new Request(`${origin}/api/browser/sessions/${connectionId}/viewer?mode=watch`);
+  const denied = bff({ authorized: false });
+  const identity = await denied.viewer.GET(viewerRequest, context);
+  assert.equal(identity.status, 401);
+  assert.match(await identity.text(), /CareerAct 登录已失效/);
+  assert.equal(denied.calls.length, 0);
+  for (const status of [403, 404, 409, 422, 500, 503]) {
+    const fixture = bff({ upstream: () => new Response("Private diagnostics <script>secret</script>", { status }) });
+    const response = await fixture.viewer.GET(viewerRequest, context);
+    const html = await response.text();
+    assert.equal(response.status, status === 500 ? 502 : status);
+    assert.match(response.headers.get("content-type"), /text\/html/);
+    assert.equal(response.headers.get("cache-control"), "no-store");
+    assert.match(response.headers.get("content-security-policy"), /frame-ancestors 'self'/);
+    assert.match(html, /返回招聘沟通/);
+    assert.match(html, /"mode":"watch","status":"error"/);
+    assert.match(html, new RegExp(connectionId));
+    assert.doesNotMatch(html, /Private|secret|synthetic-token/);
+    if (status === 403) assert.match(html, /浏览器访问授权/);
+    assert.equal(fixture.calls.length, 1);
+  }
 });
 
 test("viewer renewal BFF enforces origin and identity without exposing ticket or retrying", async () => {

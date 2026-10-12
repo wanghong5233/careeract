@@ -15,6 +15,7 @@ type Connection = { id: string; version: string; status: ConnectionStatus };
 type LoginExecution = {
   attempt_status: "accepted" | "running" | "waiting" | "unknown" | "failed" | "cancelled" | "completed";
   authorization_status: "active" | "revoked" | "expired";
+  authorization_expires_at: string;
   outcome: string | null;
   browser_session_id: string | null;
 };
@@ -36,6 +37,10 @@ const labels: Record<ConnectionStatus, string> = {
   failed: "连接失败",
 };
 
+function loginAuthorized(login: LoginExecution | null) {
+  return login?.authorization_status === "active" && Date.parse(login.authorization_expires_at) > Date.now();
+}
+
 export function BossConnectionCard() {
   const [connection, setConnection] = useState<Connection | null>(null);
   const [login, setLogin] = useState<LoginExecution | null>(null);
@@ -46,6 +51,7 @@ export function BossConnectionCard() {
   const [forgetOpen, setForgetOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [needsReconciliation, setNeedsReconciliation] = useState(false);
+  const [expiredLoginSessionId, setExpiredLoginSessionId] = useState<string | null>(null);
   const requests = useRef(createLatestRequest());
   const requestKey = useRef<string | null>(null);
   const writing = useRef(false);
@@ -56,6 +62,13 @@ export function BossConnectionCard() {
     const timer = setTimeout(() => setExpiredViewerId(savedViewer.id), Math.max(0, remaining));
     return () => clearTimeout(timer);
   }, [savedViewer]);
+
+  useEffect(() => {
+    if (!login?.browser_session_id || !loginAuthorized(login)) return;
+    const sessionId = login.browser_session_id;
+    const timer = setTimeout(() => setExpiredLoginSessionId(sessionId), Date.parse(login.authorization_expires_at) - Date.now());
+    return () => clearTimeout(timer);
+  }, [login]);
 
   const load = useCallback(async () => {
     if (writing.current) return;
@@ -199,7 +212,7 @@ export function BossConnectionCard() {
   };
 
   const finishLogin = async () => {
-    if (writing.current || busy || needsReconciliation || !connection) return;
+    if (writing.current || busy || needsReconciliation || !connection || !loginAuthorized(login)) return;
     writing.current = true;
     const controller = requests.current.start();
     setBusy("finish");
@@ -327,8 +340,9 @@ export function BossConnectionCard() {
   };
 
   const active = connection && !["revoked", "failed"].includes(connection.status);
-  const browserReady = login?.attempt_status === "waiting" && login.outcome === "browser_created" && login.browser_session_id;
   const cleanupRequired = Boolean(login?.browser_session_id && login.outcome !== "browser_released");
+  const loginExpired = cleanupRequired && (!loginAuthorized(login) || login?.browser_session_id === expiredLoginSessionId);
+  const browserReady = !loginExpired && login?.attempt_status === "waiting" && login.outcome === "browser_created" && login.browser_session_id;
   const viewerHref = browserReady ? `/api/browser/sessions/${login.browser_session_id}/viewer` : null;
   const savedViewerExpired = Boolean(savedViewer && (
     savedViewer.expired || savedViewer.id === expiredViewerId
@@ -341,7 +355,7 @@ export function BossConnectionCard() {
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div><h2 id="boss-connection-title" className="text-sm font-medium">连接 BOSS 直聘</h2><p className="mt-1 text-xs leading-5 text-muted-foreground">招聘沟通需要先在隔离浏览器中完成登录和安全验证。</p></div>
       <span role="status" className={cn("rounded-full px-2 py-1 text-[11px] font-medium", connection?.status === "connected" ? "bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-200" : "bg-muted text-muted-foreground")}>
-        {busy === "read" ? "读取连接状态" : needsReconciliation ? "状态待核对" : connection ? labels[connection.status] : "尚未连接"}
+        {busy === "read" ? "读取连接状态" : needsReconciliation ? "状态待核对" : loginExpired ? "登录窗口已到期" : connection ? labels[connection.status] : "尚未连接"}
       </span>
     </div>
     <p className="mt-4 max-w-2xl text-xs leading-5 text-muted-foreground">密码、短信验证码和验证码只应由你在安全浏览器中输入，不会进入 Agent 对话或普通业务记录。</p>
@@ -352,7 +366,7 @@ export function BossConnectionCard() {
       </Button>
       {viewerHref && <a className="inline-flex min-h-9 items-center gap-2 rounded-md border px-3 text-xs hover:bg-muted" href={viewerHref} target="_blank" rel="noreferrer"><ExternalLink className="size-3.5" />打开安全浏览器（可操作）</a>}
       {browserReady && <Button disabled={busy !== null || needsReconciliation} onClick={() => void finishLogin()}>{busy === "finish" && <LoaderCircle className="size-3.5 animate-spin" />}完成登录并保存</Button>}
-      {cleanupRequired && <Button disabled={busy !== null || needsReconciliation} variant="ghost" onClick={() => void stopLogin()}>{busy === "stop" && <LoaderCircle className="size-3.5 animate-spin" />}停止登录</Button>}
+      {cleanupRequired && <Button disabled={busy !== null || needsReconciliation} variant="ghost" onClick={() => void stopLogin()}>{busy === "stop" && <LoaderCircle className="size-3.5 animate-spin" />}{loginExpired ? "结束已到期登录" : "停止登录"}</Button>}
       {connection?.status === "connected" && <Button disabled={busy !== null || needsReconciliation || savedViewerActive} variant="ghost" onClick={() => setForgetOpen(true)}>忘记已保存登录</Button>}
       {connection?.status === "connected" && (!savedViewerActive || savedViewerExpired) && <Button disabled={busy !== null || needsReconciliation} onClick={() => void openSavedViewer()}>{busy === "open-viewer" && <LoaderCircle className="size-3.5 animate-spin" />}{savedViewerExpired ? "重新打开浏览器现场" : "打开已保存登录现场"}</Button>}
       {savedViewerActive && <Button disabled={busy !== null || needsReconciliation} variant="ghost" onClick={() => void closeSavedViewer()}>{busy === "close-viewer" && <LoaderCircle className="size-3.5 animate-spin" />}{savedViewer?.status === "live" ? "关闭浏览器现场" : "停止浏览器现场"}</Button>}
@@ -360,6 +374,7 @@ export function BossConnectionCard() {
     </div>
     {browserReady && <p className="mt-3 text-xs text-muted-foreground">在下方点击“操作登录浏览器”即可扫码或输入验证码；也可单独打开安全浏览器。请只保留一个操作窗口。</p>}
     {browserReady && <BrowserScene key={browserReady} sessionId={browserReady} allowLoginControl />}
+    {loginExpired && <p role="status" className="mt-3 text-xs text-muted-foreground">本次登录窗口的操作授权已到期。先结束旧登录，再开始安全登录；已有加密登录信息仍保留。</p>}
     {savedViewerReady && <BrowserScene key={savedViewerReady} sessionId={savedViewerReady} />}
     {savedViewerExpired && savedViewerActive && <p role="status" className="mt-3 text-xs text-muted-foreground">浏览器现场已到期，已保存登录仍保留。重新打开会先关闭旧现场，再恢复新的只读现场。</p>}
     {connection?.status === "connected" && <BossReadTask key={connection.id} connectionId={connection.id} version={connection.version} blocked={savedViewerActive || cleanupRequired || busy !== null || needsReconciliation} />}
