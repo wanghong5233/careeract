@@ -241,23 +241,25 @@ def create_app(
                         raise CommandRejected("Profile removal is not configured")
                     await site.forget(command.sub, session_id)
                 else:
-                    try:
+                    if action == "finish":
                         if site is not None:
                             physical = await steel_sessions.inspect(session_id)
-                            if action == "finish" and (
-                                physical is None or physical.status != "live"
-                            ):
+                            if physical is None or physical.status != "live":
                                 raise SteelSessionConflict(
                                     "Login verification requires a live session"
                                 )
-                            if physical is not None and physical.status == "live":
-                                login_verified = await site.save(command.sub, session_id)
-                        if action == "finish" and not command.is_current(
-                            datetime.now(UTC).timestamp()
-                        ):
-                            raise CommandRejected("Login verification authorization expired")
-                    finally:
+                            login_verified = await site.save(command.sub, session_id)
                         session = await steel_sessions.release(session_id)
+                        if not command.is_current(datetime.now(UTC).timestamp()):
+                            raise CommandRejected("Login verification authorization expired")
+                    else:
+                        try:
+                            if site is not None:
+                                physical = await steel_sessions.inspect(session_id)
+                                if physical is not None and physical.status == "live":
+                                    login_verified = await site.save(command.sub, session_id)
+                        finally:
+                            session = await steel_sessions.release(session_id)
                 if action == "create" and site is not None:
                     if not command.is_current(datetime.now(UTC).timestamp()):
                         raise CommandRejected("Login navigation authorization expired")
@@ -281,7 +283,13 @@ def create_app(
             BrowserProfileUnavailable,
             BrowserProfileConflict,
             SiteLifecycleUnavailable,
-        ):
+        ) as failure:
+            logging.getLogger(__name__).warning(
+                "Browser lifecycle unavailable session=%s action=%s boundary=%s",
+                session_id,
+                action,
+                type(failure).__name__,
+            )
             raise HTTPException(503, "Browser coordination unavailable") from None
         result: dict[str, str | bool] = {
             "session_id": str(session.session_id),

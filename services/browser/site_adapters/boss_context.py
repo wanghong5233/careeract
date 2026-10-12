@@ -60,7 +60,12 @@ class BossContextReader:
             TimeoutError,
             RuntimeError,
             ValueError,
-        ):
+        ) as failure:
+            logger.warning(
+                "BOSS context capture failed session=%s boundary=%s",
+                self.session_id,
+                type(failure).__name__,
+            )
             raise BossContextUnavailable("BOSS context capture unavailable") from None
 
     async def page_snapshot(self) -> BossPageSnapshot:
@@ -142,9 +147,11 @@ class BossContextReader:
             )
         )
         cdp = CDPClient(endpoint)
+        stage = "connect"
         try:
             async with asyncio.timeout(8):
                 await cast(Callable[[], Awaitable[None]], cdp.start)()
+                stage = "page_ownership"
                 targets = await cdp.send.Target.getTargets()
                 pages = [target for target in targets["targetInfos"] if target["type"] == "page"]
                 if len(pages) != 1:
@@ -158,18 +165,29 @@ class BossContextReader:
                 attached = await cdp.send.Target.attachToTarget(
                     params={"targetId": page_id, "flatten": True}
                 )
+                stage = "cookies"
                 cookies = await cdp.send.Network.getAllCookies(session_id=attached["sessionId"])
                 if not self.include_local_storage:
                     return {"cookies": cookies["cookies"], "origins": []}
-                storage = await cdp.send.DOMStorage.getDOMStorageItems(
-                    params={
-                        "storageId": {
-                            "securityOrigin": BOSS_SCOPE.origins[0],
-                            "isLocalStorage": True,
-                        }
-                    },
-                    session_id=attached["sessionId"],
-                )
+                stage = "local_storage"
+                try:
+                    async with asyncio.timeout(2):
+                        storage = await cdp.send.DOMStorage.getDOMStorageItems(
+                            params={
+                                "storageId": {
+                                    "securityOrigin": BOSS_SCOPE.origins[0],
+                                    "isLocalStorage": True,
+                                }
+                            },
+                            session_id=attached["sessionId"],
+                        )
+                except TimeoutError:
+                    logger.warning(
+                        "BOSS local storage unavailable session=%s boundary=TimeoutError",
+                        self.session_id,
+                    )
+                    storage = {"entries": []}
+                stage = "login_verification"
                 document = await cdp.send.DOM.getDocument(session_id=attached["sessionId"])
                 account = await cdp.send.DOM.querySelector(
                     params={
@@ -203,6 +221,14 @@ class BossContextReader:
                         }
                     ],
                 }
+        except (WebSocketException, OSError, TimeoutError, RuntimeError, ValueError) as failure:
+            logger.warning(
+                "BOSS context operation failed session=%s stage=%s boundary=%s",
+                self.session_id,
+                stage,
+                type(failure).__name__,
+            )
+            raise
         finally:
             async with asyncio.timeout(5):
                 await cast(Callable[[], Awaitable[None]], cdp.stop)()

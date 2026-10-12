@@ -16,7 +16,8 @@ from services.browser.site_adapters.boss_context import (
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "changed", [None, "owner", "multiple", "site", "cookie_only", "verify", "anonymous"]
+    "changed",
+    [None, "owner", "multiple", "site", "cookie_only", "verify", "anonymous", "storage_timeout"],
 )
 async def test_context_capture_is_scoped_disconnects_and_uses_no_runtime_enable(
     monkeypatch: pytest.MonkeyPatch, changed: str | None
@@ -46,7 +47,10 @@ async def test_context_capture_is_scoped_disconnects_and_uses_no_runtime_enable(
             ),
             Network=SimpleNamespace(getAllCookies=AsyncMock(return_value={"cookies": cookies})),
             DOMStorage=SimpleNamespace(
-                getDOMStorageItems=AsyncMock(return_value={"entries": [["synthetic", "value"]]})
+                getDOMStorageItems=AsyncMock(
+                    side_effect=TimeoutError if changed == "storage_timeout" else None,
+                    return_value={"entries": [["synthetic", "value"]]},
+                )
             ),
             DOM=SimpleNamespace(
                 getDocument=AsyncMock(return_value={"root": {"nodeId": 1}}),
@@ -102,6 +106,8 @@ async def test_context_capture_is_scoped_disconnects_and_uses_no_runtime_enable(
         else:
             assert state["origins"][0]["origin"] == "https://www.zhipin.com"
             assert state["authenticated"] is (changed not in {"verify", "anonymous"})
+            if changed == "storage_timeout":
+                assert state["origins"][0]["localStorage"] == []
     if changed != "owner":
         cdp.stop.assert_awaited_once()
 
