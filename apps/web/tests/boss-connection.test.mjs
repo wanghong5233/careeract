@@ -338,6 +338,32 @@ test("unknown login keeps cleanup reachable and prevents a second start", async 
   assert.equal(calls[2].options.method, "DELETE");
 });
 
+test("cleanup-required revoked login offers same-session save recovery", async () => {
+  const calls = [];
+  const fixture = card(async (url, options = {}) => {
+    calls.push({ url, options });
+    if (url.endsWith("/login/finish")) {
+      return Response.json({ attempt_status: "completed", outcome: "browser_released", browser_session_id: connectionId });
+    }
+    if (url.endsWith("/login")) {
+      return Response.json({
+        attempt_status: "unknown",
+        authorization_status: "revoked",
+        authorization_expires_at: "2099-01-01T00:00:00Z",
+        outcome: "cleanup_required",
+        browser_session_id: connectionId,
+      });
+    }
+    return Response.json({ id: connectionId, version: "v2", status: "blocked" });
+  });
+  fixture.mount();
+  await settle();
+  fixture.click("继续保存登录");
+  await settle();
+  assert.equal(new URL(calls[2].url, origin).pathname, `/api/connections/boss/${connectionId}/login/finish`);
+  assert.equal(calls[2].options.method, "POST");
+});
+
 test("expired or revoked login unmounts the viewer and keeps cleanup reachable", async () => {
   for (const authorization of [
     { authorization_status: "active", authorization_expires_at: "2000-01-01T00:00:00Z" },

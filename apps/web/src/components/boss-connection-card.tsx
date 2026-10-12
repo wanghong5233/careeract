@@ -41,6 +41,16 @@ function loginAuthorized(login: LoginExecution | null) {
   return login?.authorization_status === "active" && Date.parse(login.authorization_expires_at) > Date.now();
 }
 
+function loginSaveAvailable(login: LoginExecution | null) {
+  return Boolean(
+    loginAuthorized(login) ||
+      (login?.attempt_status === "unknown" &&
+        login.outcome === "cleanup_required" &&
+        login.authorization_status === "revoked" &&
+        login.browser_session_id),
+  );
+}
+
 export function BossConnectionCard() {
   const [connection, setConnection] = useState<Connection | null>(null);
   const [login, setLogin] = useState<LoginExecution | null>(null);
@@ -212,7 +222,7 @@ export function BossConnectionCard() {
   };
 
   const finishLogin = async () => {
-    if (writing.current || busy || needsReconciliation || !connection || !loginAuthorized(login)) return;
+    if (writing.current || busy || needsReconciliation || !connection || !loginSaveAvailable(login)) return;
     writing.current = true;
     const controller = requests.current.start();
     setBusy("finish");
@@ -341,8 +351,15 @@ export function BossConnectionCard() {
 
   const active = connection && !["revoked", "failed"].includes(connection.status);
   const cleanupRequired = Boolean(login?.browser_session_id && login.outcome !== "browser_released");
-  const loginExpired = cleanupRequired && (!loginAuthorized(login) || login?.browser_session_id === expiredLoginSessionId);
+  const loginRecoverable = Boolean(
+    login?.attempt_status === "unknown" &&
+      login.outcome === "cleanup_required" &&
+      login.authorization_status === "revoked" &&
+      login.browser_session_id,
+  );
+  const loginExpired = cleanupRequired && !loginRecoverable && (!loginAuthorized(login) || login?.browser_session_id === expiredLoginSessionId);
   const browserReady = !loginExpired && login?.attempt_status === "waiting" && login.outcome === "browser_created" && login.browser_session_id;
+  const loginSaveReady = !loginExpired && loginSaveAvailable(login);
   const viewerHref = browserReady ? `/api/browser/sessions/${login.browser_session_id}/viewer` : null;
   const savedViewerExpired = Boolean(savedViewer && (
     savedViewer.expired || savedViewer.id === expiredViewerId
@@ -365,7 +382,7 @@ export function BossConnectionCard() {
         {busy === "start" && <LoaderCircle className="size-3.5 animate-spin" />}{connection?.status === "connected" ? "重新登录" : browserReady ? "等待登录" : active ? "开始安全登录" : "重新开始安全登录"}
       </Button>
       {viewerHref && <a className="inline-flex min-h-9 items-center gap-2 rounded-md border px-3 text-xs hover:bg-muted" href={viewerHref} target="_blank" rel="noreferrer"><ExternalLink className="size-3.5" />打开安全浏览器（可操作）</a>}
-      {browserReady && <Button disabled={busy !== null || needsReconciliation} onClick={() => void finishLogin()}>{busy === "finish" && <LoaderCircle className="size-3.5 animate-spin" />}完成登录并保存</Button>}
+      {loginSaveReady && <Button disabled={busy !== null || needsReconciliation} onClick={() => void finishLogin()}>{busy === "finish" && <LoaderCircle className="size-3.5 animate-spin" />}{login?.attempt_status === "unknown" ? "继续保存登录" : "完成登录并保存"}</Button>}
       {cleanupRequired && <Button disabled={busy !== null || needsReconciliation} variant="ghost" onClick={() => void stopLogin()}>{busy === "stop" && <LoaderCircle className="size-3.5 animate-spin" />}{loginExpired ? "结束已到期登录" : "停止登录"}</Button>}
       {connection?.status === "connected" && <Button disabled={busy !== null || needsReconciliation || savedViewerActive} variant="ghost" onClick={() => setForgetOpen(true)}>忘记已保存登录</Button>}
       {connection?.status === "connected" && (!savedViewerActive || savedViewerExpired) && <Button disabled={busy !== null || needsReconciliation} onClick={() => void openSavedViewer()}>{busy === "open-viewer" && <LoaderCircle className="size-3.5 animate-spin" />}{savedViewerExpired ? "重新打开浏览器现场" : "打开已保存登录现场"}</Button>}

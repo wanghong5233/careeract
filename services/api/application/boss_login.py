@@ -66,15 +66,26 @@ class BossLoginService:
             raise ExecutionConflict("Login execution has not started")
         if current.attempt.status == "completed" and current.attempt.outcome == "browser_released":
             return current
-        if (
+        recovering = (
+            current.attempt.status == "unknown"
+            and current.attempt.outcome == "cleanup_required"
+            and current.attempt.browser_session_id is not None
+            and current.authorization.status == "revoked"
+        )
+        if not recovering and (
             current.attempt.status != "waiting"
             or current.attempt.outcome != "browser_created"
             or current.attempt.browser_session_id is None
             or current.authorization.status != "active"
+        ):
+            raise ExecutionConflict("Login verification requires an active login")
+        if (
+            current.attempt.browser_session_id is None
             or current.authorization.expires_at <= datetime.now(UTC)
         ):
             raise ExecutionConflict("Login verification requires an active login")
-        await self.browser.revoke(actor, current.attempt.id, expected_version=expected_version)
+        if not recovering:
+            await self.browser.revoke(actor, current.attempt.id, expected_version=expected_version)
         context = BrowserControlContext(
             actor.user_id,
             current.attempt.browser_session_id,
