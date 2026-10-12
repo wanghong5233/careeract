@@ -8,6 +8,8 @@ from html.parser import HTMLParser
 from typing import Literal
 from urllib.parse import urljoin, urlsplit
 
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+
 
 class BossPageKind(StrEnum):
     LOGIN = "login"
@@ -44,6 +46,7 @@ class BossConversationSummary:
     last_message: str | None
     unread: bool
     url: str | None
+    last_message_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,6 +55,7 @@ class BossMessageSummary:
     sender: Literal["recruiter", "candidate", "system", "unknown"]
     content: str
     sent_at: str | None
+    conversation_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,6 +68,37 @@ class BossReadOnlyPage:
     signals: tuple[str, ...]
     conversations: tuple[BossConversationSummary, ...] = ()
     messages: tuple[BossMessageSummary, ...] = ()
+
+
+class _RenderedConversation(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, hide_input_in_errors=True)
+
+    conversation_id: str = Field(min_length=1, max_length=200, pattern=r"^[\w-]+$")
+    recruiter_name: str = Field(min_length=1, max_length=200)
+    last_message: str = Field(max_length=10000)
+    last_message_id: str = Field(min_length=1, max_length=20, pattern=r"^[1-9][0-9]*$")
+    unread: bool
+
+
+def parse_boss_rendered_conversations(value: str) -> tuple[BossConversationSummary, ...]:
+    if len(value.encode("utf-8")) > 512 * 1024:
+        raise ValueError("BOSS rendered conversation capture is too large")
+    rows = TypeAdapter(list[_RenderedConversation]).validate_json(value)
+    if len(rows) > 200 or len({row.conversation_id for row in rows}) != len(rows):
+        raise ValueError("BOSS rendered conversation identities are ambiguous")
+    return tuple(
+        BossConversationSummary(
+            conversation_id=row.conversation_id,
+            recruiter_name=row.recruiter_name,
+            company=None,
+            job_title=None,
+            last_message=row.last_message or None,
+            unread=row.unread,
+            url="https://www.zhipin.com/web/geek/chat",
+            last_message_id=row.last_message_id,
+        )
+        for row in rows
+    )
 
 
 @dataclass(slots=True)
@@ -137,7 +172,13 @@ def boss_auth_page_state(url: str) -> BossPageState | None:
     return None
 
 
-def parse_boss_page(*, html: str, url: str, title: str) -> BossReadOnlyPage:
+def parse_boss_page(
+    *,
+    html: str,
+    url: str,
+    title: str,
+    rendered_conversations: tuple[BossConversationSummary, ...] = (),
+) -> BossReadOnlyPage:
     parser = _TreeParser()
     parser.feed(html)
     body_text = _text(parser.root)
@@ -206,6 +247,18 @@ def parse_boss_page(*, html: str, url: str, title: str) -> BossReadOnlyPage:
             messages,
         )
 
+    if _has_conversation_structure(nodes) and rendered_conversations:
+        signals.append("rendered_conversation_previews")
+        return _page(
+            url,
+            title,
+            BossPageKind.CONVERSATIONS,
+            BossPageState.UNKNOWN,
+            (),
+            signals,
+            rendered_conversations,
+        )
+
     if _has_conversation_structure(nodes):
         signals.append("conversation_structure")
         _log_conversation_structure(nodes)
@@ -255,6 +308,7 @@ def _find_conversation_cards(root: _Node) -> list[_Node]:
         node
         for node in _descendants(root)
         if node.attrs.get("data-conversation-id")
+        and not node.attrs.get("data-message-id")
         or "conversation-item" in _class_tokens(node)
         or "chat-item" in _class_tokens(node)
     ]
@@ -378,6 +432,7 @@ def _message_summary(node: _Node) -> BossMessageSummary | None:
         sender=sender,
         content=content,
         sent_at=node.attrs.get("data-sent-at") or _field_text(node, "sent-at", ("message-time",)),
+        conversation_id=node.attrs.get("data-conversation-id") or None,
     )
 
 

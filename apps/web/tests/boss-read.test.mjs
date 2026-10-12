@@ -135,6 +135,17 @@ test("blocked viewer prevents accepting a new task and unmounted reads do not ov
   assert.deepEqual(fixture.states, previous);
 });
 
+test("persisted list previews do not claim a full message read or require login again", async () => {
+  const partial = { ...observation, page: { ...observation.page, kind: "conversations", state: "unknown", jobs: [], conversations: [{ conversation_id: "synthetic-thread", recruiter_name: "Synthetic HR", company: null, last_message: "Synthetic preview" }], messages: [] } };
+  const fixture = taskCard(async url => Response.json(url.endsWith("/result") ? partial : { ...accepted, task_status: "failed", outcome: "read_failed" }));
+  await settle();
+  assert.match(text(fixture.render()), /已读取会话列表摘要 · 消息详情待核验/);
+  assert.match(text(fixture.render()), /Synthetic preview/);
+  assert.match(text(fixture.render()), /未完成有效业务读取/);
+  assert.doesNotMatch(text(fixture.render()), /读取完成|需要重新登录/);
+  fixture.cleanup();
+});
+
 test("unknown read closes only after confirmed release and never reruns the attempt", async () => {
   let current = { ...accepted, task_status: "unknown", outcome: "read_unknown" };
   let confirmRelease = false;

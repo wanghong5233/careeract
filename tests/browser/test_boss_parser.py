@@ -1,3 +1,5 @@
+import pytest
+
 from services.browser.site_adapters.boss import (
     BossConversationSummary,
     BossJobSummary,
@@ -134,9 +136,10 @@ def test_conversation_page_extracts_unread_thread_and_messages() -> None:
               <span data-field="last-message">方便聊一下吗？</span>
             </a>
           </article>
-          <div class="message-item" data-message-id="msg-1" data-sender="recruiter"
+          <div class="message-item" data-message-id="msg-1" data-conversation-id="conv-1"
+               data-sender="recruiter"
                data-sent-at="2026-10-08T10:00:00Z">方便聊一下吗？</div>
-          <div class="message-item" data-message-id="msg-2"
+          <div class="message-item" data-message-id="msg-2" data-conversation-id="conv-1"
                data-sender="candidate">您好，可以的。</div>
         </main>
         """,
@@ -159,9 +162,36 @@ def test_conversation_page_extracts_unread_thread_and_messages() -> None:
         ),
     )
     assert page.messages == (
-        BossMessageSummary("msg-1", "recruiter", "方便聊一下吗？", "2026-10-08T10:00:00Z"),
-        BossMessageSummary("msg-2", "candidate", "您好，可以的。", None),
+        BossMessageSummary(
+            "msg-1", "recruiter", "方便聊一下吗？", "2026-10-08T10:00:00Z", "conv-1"
+        ),
+        BossMessageSummary("msg-2", "candidate", "您好，可以的。", None, "conv-1"),
     )
+
+
+@pytest.mark.parametrize(
+    "query", ["", "?conversation=c1", "?conversation=missing", "?conversation=c1&conversation=c2"]
+)
+def test_messages_are_not_assigned_to_a_conversation_by_list_position(query: str) -> None:
+    page = parse_boss_page(
+        html='<article data-conversation-id="c1"></article>'
+        '<div data-message-id="m1" data-sender="recruiter">Synthetic message</div>',
+        url="https://www.zhipin.com/web/geek/chat" + query,
+        title="Synthetic BOSS",
+    )
+    assert page.messages[0].conversation_id is None
+
+
+def test_explicit_message_binding_is_preserved_and_not_parsed_as_a_thread() -> None:
+    page = parse_boss_page(
+        html='<article data-conversation-id="c1"></article>'
+        '<div data-message-id="m1" data-conversation-id="c2" '
+        'data-sender="recruiter">Synthetic message</div>',
+        url="https://www.zhipin.com/web/geek/chat?conversation=c1",
+        title="Synthetic BOSS",
+    )
+    assert [item.conversation_id for item in page.conversations] == ["c1"]
+    assert page.messages[0].conversation_id == "c2"
 
 
 def test_live_boss_conversation_shell_without_rows_is_not_a_successful_read() -> None:
@@ -187,3 +217,53 @@ def test_live_boss_conversation_shell_without_rows_is_not_a_successful_read() ->
     assert page.signals == ("conversation_structure",)
     assert page.conversations == ()
     assert page.messages == ()
+
+
+@pytest.mark.parametrize("invalid", ["duplicate", "numeric_id", "message_id", "extra", "oversize"])
+def test_rendered_conversation_contract_rejects_ambiguous_or_unbounded_data(invalid: str) -> None:
+    import json
+
+    from services.browser.site_adapters.boss import parse_boss_rendered_conversations
+
+    row = {
+        "conversation_id": "thread-1",
+        "recruiter_name": "Synthetic HR",
+        "last_message": "Synthetic preview",
+        "last_message_id": "123",
+        "unread": False,
+    }
+    if invalid == "numeric_id":
+        row["conversation_id"] = 123
+    elif invalid == "message_id":
+        row["last_message_id"] = "0"
+    elif invalid == "extra":
+        row["securityId"] = "Must not enter observation"
+    rows = [row, row] if invalid == "duplicate" else [row]
+    value = " " * (512 * 1024 + 1) if invalid == "oversize" else json.dumps(rows)
+    with pytest.raises(ValueError):
+        parse_boss_rendered_conversations(value)
+
+
+def test_rendered_list_preview_is_not_a_full_message_observation() -> None:
+    from services.browser.site_adapters.boss import parse_boss_rendered_conversations
+
+    previews = parse_boss_rendered_conversations(
+        '[{"conversation_id":"thread-1","recruiter_name":"Synthetic HR",'
+        '"last_message":"Synthetic preview","last_message_id":"123","unread":true}]'
+    )
+    page = parse_boss_page(
+        html='<main class="chat-container"><div class="chat-content"></div>'
+        '<div class="chat-conversation"></div><div class="chat-user"></div></main>',
+        url="https://www.zhipin.com/web/geek/chat",
+        title="Synthetic BOSS",
+        rendered_conversations=previews,
+    )
+    assert page.conversations[0].conversation_id == "thread-1"
+    assert page.conversations[0].last_message_id == "123"
+    assert page.state == "unknown"
+    assert page.signals == ("rendered_conversation_previews",)
+    assert page.messages == ()
+    login = parse_boss_page(
+        html="", url="https://www.zhipin.com/web/user/", title="", rendered_conversations=previews
+    )
+    assert login.state == "needs_login" and login.conversations == ()

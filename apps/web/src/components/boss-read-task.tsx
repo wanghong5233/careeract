@@ -197,7 +197,7 @@ export function BossReadTask({ connectionId, version, blocked }: { connectionId:
     {task && <p role="status" className="mt-3 text-xs">{task.outcome === "read_stop_requested" ? "停止已请求 · 等待浏览器释放核验" : labels[task.task_status]}{executing && task.task_status === "accepted" ? " · 执行请求已发出" : ""}</p>}
     {(task?.task_status === "running" || task?.task_status === "waiting") && task.browser_session_id && <BrowserScene key={task.browser_session_id} sessionId={task.browser_session_id} />}
     {result && <div className="mt-3 rounded-lg border bg-background p-3 text-xs leading-5">
-      <p>{pageLabels[result.page.state]} · {new Date(result.observed_at).toLocaleString()}</p>
+      <p>{result.page.kind === "conversations" && result.page.conversations.length > 0 && result.page.messages.length === 0 ? "已读取会话列表摘要 · 消息详情待核验" : pageLabels[result.page.state]} · {new Date(result.observed_at).toLocaleString()}</p>
       <p className="mt-1 font-medium">{result.page.title}</p><p className="break-all text-muted-foreground">{result.page.url}</p>
       {task?.task_status !== "completed" && <p className="mt-2 text-amber-700 dark:text-amber-300">{task?.task_status === "failed" ? "这是已保存的页面观察；本次未完成有效业务读取。" : "这是已保存的页面观察；本次任务尚未确认完成。"}</p>}
       {result.page.jobs.map(job => <p key={job.job_id} className="mt-2">{job.title} · {job.company}</p>)}

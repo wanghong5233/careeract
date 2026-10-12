@@ -14,10 +14,12 @@ from websockets.exceptions import WebSocketException
 from services.browser.sessions.context import SiteScope
 from services.browser.sessions.steel import SessionsResponse
 from services.browser.site_adapters.boss import (
+    BossConversationSummary,
     BossPageState,
     BossReadOnlyPage,
     boss_auth_page_state,
     parse_boss_page,
+    parse_boss_rendered_conversations,
 )
 
 BOSS_SCOPE = SiteScope("boss", ("https://www.zhipin.com",), ("zhipin.com", "www.zhipin.com"))
@@ -34,6 +36,7 @@ class BossPageSnapshot:
     url: str
     title: str
     html: str
+    conversations: tuple[BossConversationSummary, ...] = ()
 
 
 class BossContextReader:
@@ -103,10 +106,14 @@ class BossContextReader:
                 for capture_index in range(3):
                     snapshot = await self.page_snapshot()
                     page = parse_boss_page(
-                        url=snapshot.url, title=snapshot.title, html=snapshot.html
+                        url=snapshot.url,
+                        title=snapshot.title,
+                        html=snapshot.html,
+                        rendered_conversations=snapshot.conversations,
                     )
                     if (
                         page.state not in {BossPageState.UNSTABLE, BossPageState.UNKNOWN}
+                        or page.conversations
                         or capture_index == 2
                     ):
                         return page
@@ -298,6 +305,19 @@ class BossContextReader:
                     params={"nodeId": body["nodeId"]},
                     session_id=attached["sessionId"],
                 )
+                conversations: tuple[BossConversationSummary, ...] = ()
+                if page_url.path == "/web/geek/chat":
+                    rendered = await cdp.send.Runtime.evaluate(
+                        params={
+                            "expression": BOSS_RENDERED_CONVERSATIONS,
+                            "returnByValue": True,
+                        },
+                        session_id=attached["sessionId"],
+                    )
+                    value = rendered.get("result", {}).get("value")
+                    if not isinstance(value, str) or rendered.get("exceptionDetails"):
+                        raise ValueError("BOSS rendered conversation capture is incomplete")
+                    conversations = parse_boss_rendered_conversations(value)
                 current = await cdp.send.Target.getTargetInfo(
                     params={"targetId": pages[0]["targetId"]}
                 )
@@ -318,7 +338,34 @@ class BossContextReader:
                         "BOSS body exceeds capture bound bytes=%d", len(html.encode("utf-8"))
                     )
                     raise ValueError("BOSS page snapshot is too large")
-                return BossPageSnapshot(url=url, title=title, html=html)
+                return BossPageSnapshot(
+                    url=url, title=title, html=html, conversations=conversations
+                )
         finally:
             async with asyncio.timeout(5):
                 await cast(Callable[[], Awaitable[None]], cdp.stop)()
+
+
+BOSS_RENDERED_CONVERSATIONS = """JSON.stringify((() => {
+    const list = document.querySelector('.user-list-content');
+    if (list?.__vue__?.$props?.dataKey !== 'uniqueId') return [];
+    const normalize = value => typeof value === 'string'
+        ? value.replace(/\\s+/g, ' ').trim() : null;
+    return Array.from(list.querySelectorAll('.friend-content-warp')).flatMap(row => {
+        const component = row.__vue__;
+        const source = component?.$props?.source;
+        if (component?.$options?.name !== 'boss-item' || !source
+            || row.parentElement?.__vue__?.$props?.uniqueKey !== source.uniqueId
+            || typeof source.uniqueId !== 'string'
+            || !Number.isSafeInteger(source.lastMsgId) || source.lastMsgId <= 0
+            || !Number.isSafeInteger(source.unreadCount) || source.unreadCount < 0)
+            return [];
+        const name = normalize(row.querySelector('.name-text')?.textContent);
+        const preview = normalize(row.querySelector('.last-msg-text')?.textContent);
+        if (!name || name !== normalize(source.name)
+            || preview === null || preview !== normalize(source.lastText)) return [];
+        return [{conversation_id: source.uniqueId, recruiter_name: name,
+            last_message: preview, last_message_id: String(source.lastMsgId),
+            unread: source.unreadCount > 0}];
+    });
+})())"""

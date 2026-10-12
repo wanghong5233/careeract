@@ -17,6 +17,7 @@ from services.api.app.factory import create_app
 from services.api.application.context import ActorContext
 from services.api.application.ports.boss_page import (
     BossConversationObservation,
+    BossMessageObservation,
     BossPageObservation,
 )
 from services.api.application.ports.browser_control import (
@@ -124,8 +125,8 @@ async def test_read_runner_reuses_lifecycle_and_reconciles_browser_cleanup() -> 
         state="ready",
         jobs=(),
         signals=(),
-        conversations=(),
-        messages=(),
+        conversations=(BossConversationObservation("c1", None, None, None, None, False, None),),
+        messages=(BossMessageObservation("m1", "recruiter", "Synthetic message", None, "c1"),),
     )
     repository.reserve_browser.return_value = context
     page_reader.read_boss_page.return_value = observation
@@ -251,6 +252,62 @@ async def test_read_runner_does_not_complete_unusable_pages(
         outcome="read_failed",
         observation=page_reader.read_boss_page.return_value,
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "invalid", ["empty", "list_only", "unbound", "wrong_thread", "duplicate", "unknown_sender"]
+)
+async def test_read_runner_requires_messages_bound_to_the_observed_conversation(
+    invalid: str,
+) -> None:
+    repository, control, page_reader = AsyncMock(), AsyncMock(), AsyncMock()
+    actor = ActorContext(user_id="runner-user", request_id=str(uuid4()))
+    context = BrowserControlContext(
+        actor.user_id,
+        uuid4(),
+        uuid4(),
+        uuid4(),
+        datetime.now(UTC) + timedelta(minutes=5),
+        uuid4(),
+        uuid4(),
+        "boss-read",
+    )
+    conversation = BossConversationObservation("c1", None, None, None, None, False, None)
+    message = BossMessageObservation(
+        "m1",
+        "unknown" if invalid == "unknown_sender" else "recruiter",
+        "Synthetic message",
+        None,
+        None if invalid == "unbound" else "c2" if invalid == "wrong_thread" else "c1",
+    )
+    observation = BossPageObservation(
+        "https://www.zhipin.com/web/geek/chat",
+        "Synthetic BOSS",
+        "conversations",
+        "ready",
+        (),
+        (),
+        () if invalid == "empty" else (conversation,),
+        ()
+        if invalid in {"empty", "list_only"}
+        else (message, message)
+        if invalid == "duplicate"
+        else (message,),
+    )
+    repository.reserve_browser.return_value = context
+    page_reader.read_boss_page.return_value = observation
+    with pytest.raises(ExecutionUnavailable):
+        await ReadExecutionService(repository).run_boss_read(
+            actor, context.task_id, control=control, page_reader=page_reader
+        )
+    repository.finish_browser.assert_awaited_once_with(
+        actor, context.task_id, outcome="read_failed", observation=observation
+    )
+    assert control.mock_calls[-2:] == [
+        call.send(context, "revoke"),
+        call.lifecycle(context, "release"),
+    ]
 
 
 @integration
@@ -686,6 +743,14 @@ async def test_read_prototype_runs_once_and_restores_owned_results(
             ),
         ),
         (),
+    )
+    observation = replace(
+        observation,
+        messages=(
+            BossMessageObservation(
+                "m1", "recruiter", "Synthetic message", None, "synthetic-conversation"
+            ),
+        ),
     )
     reader.read_boss_page.return_value = observation
     app.state.browser_control, app.state.boss_page_reader = control, reader

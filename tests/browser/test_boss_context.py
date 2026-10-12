@@ -140,7 +140,21 @@ async def test_page_observation_waits_for_structure_without_replaying_navigation
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "changed",
-    [None, "owner", "multiple", "site", "login", "verify", "navigation", "oversize", "malformed"],
+    [
+        None,
+        "owner",
+        "multiple",
+        "site",
+        "login",
+        "verify",
+        "navigation",
+        "oversize",
+        "malformed",
+        "rendered",
+        "rendered_invalid",
+        "rendered_exception",
+        "rendered_timeout",
+    ],
 )
 async def test_page_snapshot_is_read_only_scoped_and_bounded(
     monkeypatch: pytest.MonkeyPatch,
@@ -198,6 +212,27 @@ async def test_page_snapshot_is_read_only_scoped_and_bounded(
                     }
                 ),
             ),
+            Runtime=SimpleNamespace(
+                evaluate=AsyncMock(
+                    side_effect=TimeoutError if changed == "rendered_timeout" else None,
+                    return_value={
+                        "result": {
+                            "value": "invalid"
+                            if changed == "rendered_invalid"
+                            else '[{"conversation_id":"thread-1","recruiter_name":"Synthetic HR",'
+                            '"last_message":"Synthetic preview",'
+                            '"last_message_id":"123","unread":true}]'
+                            if changed == "rendered"
+                            else "[]"
+                        },
+                        **(
+                            {"exceptionDetails": {"text": "private"}}
+                            if changed == "rendered_exception"
+                            else {}
+                        ),
+                    },
+                )
+            ),
         ),
     )
     monkeypatch.setattr(
@@ -229,7 +264,7 @@ async def test_page_snapshot_is_read_only_scoped_and_bounded(
     )
 
     reader = BossContextReader(client, AnyHttpUrl("http://cdp"), session_id)
-    if changed is not None and changed not in {"login", "verify"}:
+    if changed is not None and changed not in {"login", "verify", "rendered"}:
         with pytest.raises(BossContextUnavailable):
             await reader.page_snapshot()
     elif changed in {"login", "verify"}:
@@ -239,16 +274,23 @@ async def test_page_snapshot_is_read_only_scoped_and_bounded(
         cdp.send.Target.attachToTarget.assert_not_awaited()
         cdp.send.DOM.getDocument.assert_not_awaited()
         cdp.send.DOM.getOuterHTML.assert_not_awaited()
+        cdp.send.Runtime.evaluate.assert_not_awaited()
     else:
         snapshot = await reader.page_snapshot()
         assert snapshot.url.endswith("/web/geek/chat")
         assert snapshot.title == "BOSS直聘"
         assert snapshot.html == "<main data-page='chat'></main>"
         assert snapshot.html not in repr(snapshot)
+        if changed == "rendered":
+            assert snapshot.conversations[0].conversation_id == "thread-1"
+            assert snapshot.conversations[0].last_message_id == "123"
+        else:
+            assert snapshot.conversations == ()
         cdp.send.DOM.getOuterHTML.assert_awaited_once_with(
             params={"nodeId": 2}, session_id="owned-attachment"
         )
     if changed in {"owner", "multiple", "site"}:
         cdp.send.DOM.getOuterHTML.assert_not_awaited()
+        cdp.send.Runtime.evaluate.assert_not_awaited()
     if changed != "owner":
         cdp.stop.assert_awaited_once()

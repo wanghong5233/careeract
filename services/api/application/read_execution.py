@@ -4,7 +4,11 @@ from datetime import timedelta
 from uuid import UUID, uuid4
 
 from services.api.application.context import ActorContext
-from services.api.application.ports.boss_page import BossPageObservation, BossPageReader
+from services.api.application.ports.boss_page import (
+    BossPageObservation,
+    BossPageReader,
+    has_bound_conversation_messages,
+)
 from services.api.application.ports.browser_control import (
     BrowserControlConflict,
     BrowserControlContext,
@@ -204,7 +208,12 @@ class ReadExecutionService:
             observation = await page_reader.read_boss_page(
                 replace(context, owner_id="boss-page-reader")
             )
-            if observation.state == "ready" and observation.kind != "unknown":
+            if observation.state == "ready" and (
+                observation.kind == "conversations"
+                and has_bound_conversation_messages(observation)
+                or observation.kind in {"job_list", "job_detail"}
+                and bool(observation.jobs)
+            ):
                 outcome = "read_completed"
             elif observation.state in {"needs_login", "risk"}:
                 outcome = "read_failed"

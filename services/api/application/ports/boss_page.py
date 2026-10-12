@@ -23,6 +23,7 @@ class BossConversationObservation:
     last_message: str | None
     unread: bool
     url: str | None
+    last_message_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -31,6 +32,7 @@ class BossMessageObservation:
     sender: Literal["recruiter", "candidate", "system", "unknown"]
     content: str
     sent_at: str | None
+    conversation_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -47,3 +49,22 @@ class BossPageObservation:
 
 class BossPageReader(Protocol):
     async def read_boss_page(self, context: BrowserControlContext) -> BossPageObservation: ...
+
+
+def has_bound_conversation_messages(page: BossPageObservation) -> bool:
+    conversation_ids = [item.conversation_id for item in page.conversations]
+    message_keys = [(item.conversation_id, item.message_id) for item in page.messages]
+    return (
+        bool(conversation_ids)
+        and bool(message_keys)
+        and all(conversation_ids)
+        and len(set(conversation_ids)) == len(conversation_ids)
+        and len(set(message_keys)) == len(message_keys)
+        and all(
+            message.conversation_id in conversation_ids
+            and bool(message.message_id)
+            and bool(message.content.strip())
+            and message.sender != "unknown"
+            for message in page.messages
+        )
+    )
