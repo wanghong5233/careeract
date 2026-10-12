@@ -17,7 +17,7 @@ type ReadResult = {
     jobs: { job_id: string; title: string; company: string }[];
     conversations: { conversation_id: string; recruiter_name: string | null; company: string | null; last_message: string | null }[];
     messages: { message_id: string; conversation_id: string | null; content: string; sender: string; sent_at: string | null; resume_attachment?: { filename: string; sent_by_candidate: boolean; request_message_id: string | null } | null }[];
-    resume_control?: { conversation_id: string; state: "available" | "unavailable" | "unknown"; attachment_reported: boolean | null } | null;
+    resume_control?: { conversation_id: string; state: "available" | "unavailable" | "unknown"; attachment_reported: boolean | null; material_state: "present_unidentified" | "absent" | "unknown" } | null;
   };
 };
 
@@ -206,7 +206,7 @@ export function BossReadTask({ connectionId, version, blocked }: { connectionId:
       {result.page.conversations.map(conversation => <div key={conversation.conversation_id} className="mt-2"><div className="flex items-center justify-between gap-2"><p>{conversation.recruiter_name ?? "招聘方"} · {conversation.company ?? ""}</p><Button variant="ghost" disabled={blocked || active || loading || task?.task_status === "accepted"} onClick={() => { setSelectedConversation({ id: conversation.conversation_id, name: conversation.recruiter_name ?? "招聘方" }); setConfirmOpen(true); }}>读取会话详情</Button></div><p className="text-muted-foreground">{conversation.last_message}</p>{result.page.messages.filter(message => message.conversation_id === conversation.conversation_id).map(message => <div key={message.message_id} className="mt-2 rounded border p-2"><p className="text-muted-foreground">{({ recruiter: "招聘方", candidate: "我", system: "平台提示" } as Record<string, string>)[message.sender] ?? "方向待核验"} · {message.sent_at ? new Date(message.sent_at).toLocaleString() : "时间待核验"}</p><p className="whitespace-pre-wrap">{message.content}</p></div>)}</div>)}
       {result.page.messages.length > 0 && <p className="mt-2 text-muted-foreground">已核验当前加载的消息与最新消息标识；不代表全部历史记录，尚未开放自动回复或简历发送。</p>}
       {result.page.messages.filter(message => message.resume_attachment).map(message => <p key={`resume-${message.message_id}`} className="mt-2 text-muted-foreground">历史简历卡片（{message.sender === "candidate" ? "我方消息" : message.sender === "recruiter" ? "招聘方消息" : "平台消息"}）：{message.resume_attachment!.filename}。这是当前加载的历史记录，不能证明发送成功、待发送材料的版本或再次发送许可。</p>)}
-      {result.page.resume_control && <p className="mt-2 text-muted-foreground">简历入口：{({ available: "页面可用", unavailable: "页面当前不可用", unknown: "尚未核验" })[result.page.resume_control.state]}。材料身份与版本尚未确认，不能据此自动发送。</p>}
+      {result.page.resume_control && <p className="mt-2 text-muted-foreground">简历入口：{({ available: "页面可用", unavailable: "页面当前不可用", unknown: "尚未核验" })[result.page.resume_control.state]}；平台材料：{({ present_unidentified: "存在但身份待核验", absent: "当前未发现", unknown: "尚未核验" })[result.page.resume_control.material_state]}。不能据此自动发送。</p>}
       {result.page.kind === "conversations" && result.page.conversations.length === 0 && result.page.messages.length === 0 && <p className="mt-2 text-muted-foreground">已识别沟通页，尚未提取到可核验的会话或消息。</p>}
     </div>}
     {error && <p role="alert" className="mt-3 text-xs text-destructive">{error}</p>}

@@ -72,6 +72,7 @@ class BossResumeControl:
     conversation_id: str
     state: Literal["available", "unavailable", "unknown"]
     attachment_reported: bool | None
+    material_state: Literal["present_unidentified", "absent", "unknown"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,6 +124,7 @@ class _RenderedResumeControl(BaseModel):
     last_message_id: str = Field(min_length=1, max_length=20, pattern=r"^[1-9][0-9]*$")
     state: Literal["available", "unavailable", "unknown"]
     attachment_reported: bool | None
+    material_state: Literal["present_unidentified", "absent", "unknown"]
 
 
 def parse_boss_resume_control(
@@ -138,7 +140,12 @@ def parse_boss_resume_control(
         or control.last_message_id != messages[-1].message_id
     ):
         raise ValueError("BOSS resume control binding is incomplete")
-    return BossResumeControl(control.conversation_id, control.state, control.attachment_reported)
+    return BossResumeControl(
+        control.conversation_id,
+        control.state,
+        control.attachment_reported,
+        control.material_state,
+    )
 
 
 def parse_boss_rendered_messages(

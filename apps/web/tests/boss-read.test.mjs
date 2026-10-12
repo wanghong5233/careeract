@@ -96,7 +96,7 @@ test("selected conversation is persisted before execution and restored with mess
       return Response.json(current);
     }
     return Response.json(url.endsWith("/result") ? { ...observation, page: { ...page,
-      resume_control: detailed ? { conversation_id: "thread-1", state: "unavailable", attachment_reported: false } : null,
+      resume_control: detailed ? { conversation_id: "thread-1", state: "unavailable", attachment_reported: false, material_state: "absent" } : null,
       messages: detailed ? [{ message_id: "123", conversation_id: "thread-1", sender: "recruiter", content: "Synthetic detail", sent_at: null }] : [] } } : current);
   });
   await settle();

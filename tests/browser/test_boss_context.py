@@ -295,7 +295,8 @@ async def test_page_snapshot_is_read_only_scoped_and_bounded(
             elif expression == BOSS_RESUME_CONTROL.replace("__TARGET__", '"thread-1"'):
                 value = (
                     '{"conversation_id":"thread-1","last_message_id":"123",'
-                    '"state":"unavailable","attachment_reported":false}'
+                    '"state":"unavailable","attachment_reported":false,'
+                    '"material_state":"absent"}'
                 )
             elif expression == BOSS_OPEN_CONVERSATION.replace("__TARGET__", '"thread-1"'):
                 clicks += 1

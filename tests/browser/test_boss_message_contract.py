@@ -147,3 +147,6 @@ const document = {querySelector: () => box, querySelectorAll: () => [selected]};
             "unavailable" if changed == "disabled" else "unknown" if changed else "available"
         )
         assert control["attachment_reported"] is (False if changed in {None, "disabled"} else None)
+        assert control["material_state"] == (
+            "absent" if changed in {None, "disabled"} else "unknown"
+        )

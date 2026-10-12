@@ -471,9 +471,10 @@ Web 126 项回归、lint/typecheck/build、冻结依赖同步、Ruff/mypy 和秘
 真实 BOSS 读取与产品回读另有上述证据，没有消息或简历发送。
 
 简历入口观察已接入同一受保护读取并真实保存：`ConversationToolbar` 内唯一 `resumeBtn` 的
-按钮状态、同会话 `Editor` 身份和最新消息 ID 一起核验；当前真实样本是 `unable`，
-`choose-upload-resume.hasResume` 为 false。只保存入口可用/不可用/未知及附件标记，
-不读取简历正文，不把组件标记当作账号材料清单或发送许可；未知/改版结构拒绝推断。
+按钮状态、同会话 `Editor` 身份和最新消息 ID 一起核验；最新真实样本入口可用，
+`choose-upload-resume.hasResume` 为 false。产品将当前页面状态拆为 `present_unidentified`、
+`absent`、`unknown`；这里的 `absent` 只表示页面组件当前未报告材料，不是账号没有简历的证明。
+只保存入口状态及附件标记，不读取简历正文，不把组件标记当作账号材料清单或发送许可；未知/改版结构拒绝推断。
 该合同通过实际 JS 合成 DOM、解析与 API 收件人绑定回归；真实签名读取仍返回 5 条消息并保存入口状态。
 
 下一增量是只读核实材料身份与可发送限制，并完成接管、交还后重新观察及

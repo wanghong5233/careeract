@@ -329,6 +329,7 @@ def test_resume_control_is_bound_to_verified_messages(changed: str | None) -> No
         "last_message_id": "124" if changed == "latest" else "123",
         "state": "enabled" if changed == "state" else "unavailable",
         "attachment_reported": False,
+        "material_state": "absent",
     }
     if changed == "extra":
         control["resume_content"] = "must not be collected"
@@ -339,6 +340,7 @@ def test_resume_control_is_bound_to_verified_messages(changed: str | None) -> No
     else:
         result = parse_boss_resume_control(value, messages, "thread-1")
         assert result.state == "unavailable" and result.attachment_reported is False
+        assert result.material_state == "absent"
 
 
 @pytest.mark.parametrize("changed", [None, "title", "direction", "path", "request", "extra"])

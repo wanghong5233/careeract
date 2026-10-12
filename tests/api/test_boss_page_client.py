@@ -210,6 +210,7 @@ async def test_selected_conversation_is_signed_and_response_cannot_switch_recipi
                         else "thread-1",
                         "state": "unavailable",
                         "attachment_reported": False,
+                        "material_state": "absent",
                     },
                 },
             },

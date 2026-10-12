@@ -510,7 +510,7 @@ BOSS_RESUME_CONTROL = """JSON.stringify((() => {
         || box.__vue__.selectedFriend$?.uniqueId !== target
         || !Number.isSafeInteger(source.lastMsgId) || source.lastMsgId <= 0) return null;
     const result = {conversation_id: target, last_message_id: String(source.lastMsgId),
-        state: 'unknown', attachment_reported: null};
+        state: 'unknown', attachment_reported: null, material_state: 'unknown'};
     const toolbars = Array.from(box.querySelectorAll('.chat-editor')).filter(node =>
         node.__vue__?.$options?.name === 'ConversationToolbar');
     const editors = Array.from(box.querySelectorAll('.editor-container')).filter(node =>
@@ -531,6 +531,8 @@ BOSS_RESUME_CONTROL = """JSON.stringify((() => {
         node.__vue__?.$options?.name === 'choose-upload-resume');
     const hasResume = uploads.length === 1 ? uploads[0].__vue__.$props?.hasResume : null;
     result.attachment_reported = typeof hasResume === 'boolean' ? hasResume : null;
+    result.material_state = hasResume === true ? 'present_unidentified'
+        : hasResume === false ? 'absent' : 'unknown';
     return result;
 })())"""
 
