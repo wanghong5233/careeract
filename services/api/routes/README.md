@@ -33,12 +33,16 @@ read tasks, and binds a new current login task. Superseded login commands and ke
 the new task must still pass login verification and physical release before becoming connected.
 
 `POST /api/v1/connections/boss/{id}/read` accepts a bounded `boss.read` task with
-JSON `{version, authorize_read: true}` and a UUID `Idempotency-Key`. It validates
+JSON `{version, authorize_read: true, conversation_id?}` and a UUID `Idempotency-Key`. It validates
 the owned connected resource and its current version, atomically persists the task,
 authorization and attempt, and returns 201. Authorization expires within 15 minutes
 of database acceptance; replay retains the original task, deadline and cancellation.
 Acceptance does not start a browser or read HR data. The bounded read includes initial
 navigation to the fixed BOSS conversation page during guarded session creation;
+an optional stable conversation ID binds the task and signed command to one conversation.
+Opening that uniquely verified row uses an exclusive executor lease and may mark messages
+read. Same-key requests with a different target conflict; refresh restores the saved
+result without navigation or replay. Currently loaded messages are not all history.
 login and messaging permissions remain separate. The authenticated Web BFF is connected.
 `GET /api/v1/connections/boss/{id}/read/{task_id}` reads that task;
 `DELETE` cancels an unstarted task and revokes its authorization, preserving history.

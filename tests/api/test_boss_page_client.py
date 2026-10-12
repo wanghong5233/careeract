@@ -140,3 +140,75 @@ async def test_page_client_validates_scope_binding_and_nested_response(failure: 
         with pytest.raises(BrowserControlRejected):
             await adapter.read_boss_page(replace(context, owner_id="saved-login-viewer"))
         assert calls == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("wrong_target", [False, True, "resume"])
+async def test_selected_conversation_is_signed_and_response_cannot_switch_recipient(
+    wrong_target: bool | str,
+) -> None:
+    key = Ed25519PrivateKey.generate()
+    context = replace(control_context(), owner_id="boss-page-reader", conversation_id="thread-1")
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/boss/conversation")
+        claims = jwt.decode(
+            request.headers["Authorization"].removeprefix("Bearer "),
+            key.public_key(),
+            algorithms=["EdDSA"],
+            audience="careeract-browser",
+        )
+        assert claims["conversation_id"] == "thread-1" and claims["action"] == "conversation"
+        return httpx.Response(
+            200,
+            json={
+                "session_id": str(context.session_id),
+                "page": {
+                    "url": "https://www.zhipin.com/web/geek/chat",
+                    "title": "Synthetic",
+                    "jobs": [],
+                    "signals": [],
+                    "kind": "conversations",
+                    "state": "ready",
+                    "conversations": [
+                        {
+                            "conversation_id": "thread-1",
+                            "recruiter_name": None,
+                            "company": None,
+                            "job_title": None,
+                            "last_message": None,
+                            "unread": False,
+                            "url": None,
+                        }
+                    ],
+                    "messages": [
+                        {
+                            "conversation_id": "other-thread"
+                            if wrong_target is True
+                            else "thread-1",
+                            "message_id": "123",
+                            "sender": "recruiter",
+                            "content": "Synthetic",
+                            "sent_at": None,
+                        }
+                    ],
+                    "resume_control": {
+                        "conversation_id": "other-thread"
+                        if wrong_target == "resume"
+                        else "thread-1",
+                        "state": "unavailable",
+                        "attachment_reported": False,
+                    },
+                },
+            },
+        )
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(respond), base_url="http://browser"
+    ) as client:
+        reader = BossPageClient(client, BrowserCommandSigner(key))
+        if wrong_target:
+            with pytest.raises(BrowserControlUncertain):
+                await reader.read_boss_page(context)
+        else:
+            assert (await reader.read_boss_page(context)).messages[0].conversation_id == "thread-1"

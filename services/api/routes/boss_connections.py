@@ -3,7 +3,7 @@ from typing import Annotated, Literal, cast
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from services.api.application.boss_connections import BossConnectionService
 from services.api.application.boss_login import BossLoginService
@@ -52,6 +52,9 @@ class StartLoginBody(RevokeConnectionBody):
 
 class StartReadBody(RevokeConnectionBody):
     authorize_read: Literal[True]
+    conversation_id: str | None = Field(
+        default=None, min_length=1, max_length=200, pattern=r"^[A-Za-z0-9_-]+$"
+    )
 
     @field_validator("authorize_read", mode="before")
     @classmethod
@@ -243,6 +246,7 @@ async def accept_read(
             connection_id=connection_id,
             expected_version=body.version,
             request_key=idempotency_key,
+            conversation_id=body.conversation_id,
         )
     )
 

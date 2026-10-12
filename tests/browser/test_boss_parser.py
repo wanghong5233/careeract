@@ -267,3 +267,75 @@ def test_rendered_list_preview_is_not_a_full_message_observation() -> None:
         html="", url="https://www.zhipin.com/web/user/", title="", rendered_conversations=previews
     )
     assert login.state == "needs_login" and login.conversations == ()
+
+
+@pytest.mark.parametrize(
+    "invalid", [None, "target", "duplicate", "latest", "sender", "blank", "missing", "extra"]
+)
+def test_rendered_messages_require_exact_identity_direction_and_latest_message(
+    invalid: str | None,
+) -> None:
+    import json
+
+    from services.browser.site_adapters.boss import (
+        parse_boss_rendered_conversations,
+        parse_boss_rendered_messages,
+    )
+
+    previews = parse_boss_rendered_conversations(
+        '[{"conversation_id":"thread-1","recruiter_name":"Synthetic HR",'
+        '"last_message":"Synthetic preview","last_message_id":"123","unread":true}]'
+    )
+    row = {
+        "conversation_id": "thread-1",
+        "message_id": "123",
+        "sender": "recruiter",
+        "content": "Synthetic message",
+        "sent_at": "2026-10-12T01:00:00.000Z",
+    }
+    if invalid == "target":
+        row["conversation_id"] = "other-thread"
+    elif invalid == "latest":
+        row["message_id"] = "122"
+    elif invalid == "sender":
+        row["sender"] = "unknown"
+    elif invalid == "blank":
+        row["content"] = "   "
+    elif invalid == "missing":
+        previews = ()
+    elif invalid == "extra":
+        row["securityId"] = "synthetic"
+    value = json.dumps([row, row] if invalid == "duplicate" else [row])
+    if invalid:
+        with pytest.raises(ValueError):
+            parse_boss_rendered_messages(value, previews, "thread-1")
+    else:
+        messages = parse_boss_rendered_messages(value, previews, "thread-1")
+        assert messages[0].conversation_id == "thread-1"
+        assert messages[0].sender == "recruiter" and messages[0].message_id == "123"
+
+
+@pytest.mark.parametrize(
+    "changed", [None, "target", "latest", "empty", "state", "extra", "oversize"]
+)
+def test_resume_control_is_bound_to_verified_messages(changed: str | None) -> None:
+    import json
+
+    from services.browser.site_adapters.boss import BossMessageSummary, parse_boss_resume_control
+
+    messages = (BossMessageSummary("123", "recruiter", "Synthetic", None, "thread-1"),)
+    control = {
+        "conversation_id": "other" if changed == "target" else "thread-1",
+        "last_message_id": "124" if changed == "latest" else "123",
+        "state": "enabled" if changed == "state" else "unavailable",
+        "attachment_reported": False,
+    }
+    if changed == "extra":
+        control["resume_content"] = "must not be collected"
+    value = " " * 2049 if changed == "oversize" else json.dumps(control)
+    if changed:
+        with pytest.raises(ValueError):
+            parse_boss_resume_control(value, () if changed == "empty" else messages, "thread-1")
+    else:
+        result = parse_boss_resume_control(value, messages, "thread-1")
+        assert result.state == "unavailable" and result.attachment_reported is False

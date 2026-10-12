@@ -59,6 +59,13 @@ class BossMessageSummary:
 
 
 @dataclass(frozen=True, slots=True)
+class BossResumeControl:
+    conversation_id: str
+    state: Literal["available", "unavailable", "unknown"]
+    attachment_reported: bool | None
+
+
+@dataclass(frozen=True, slots=True)
 class BossReadOnlyPage:
     url: str
     title: str
@@ -68,16 +75,77 @@ class BossReadOnlyPage:
     signals: tuple[str, ...]
     conversations: tuple[BossConversationSummary, ...] = ()
     messages: tuple[BossMessageSummary, ...] = ()
+    resume_control: BossResumeControl | None = None
 
 
 class _RenderedConversation(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, hide_input_in_errors=True)
 
-    conversation_id: str = Field(min_length=1, max_length=200, pattern=r"^[\w-]+$")
+    conversation_id: str = Field(min_length=1, max_length=200, pattern=r"^[A-Za-z0-9_-]+$")
     recruiter_name: str = Field(min_length=1, max_length=200)
     last_message: str = Field(max_length=10000)
     last_message_id: str = Field(min_length=1, max_length=20, pattern=r"^[1-9][0-9]*$")
     unread: bool
+
+
+class _RenderedMessage(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, hide_input_in_errors=True)
+
+    conversation_id: str = Field(min_length=1, max_length=200, pattern=r"^[A-Za-z0-9_-]+$")
+    message_id: str = Field(min_length=1, max_length=20, pattern=r"^[1-9][0-9]*$")
+    sender: Literal["recruiter", "candidate", "system"]
+    content: str = Field(min_length=1, max_length=10000)
+    sent_at: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$")
+
+
+class _RenderedResumeControl(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, hide_input_in_errors=True)
+
+    conversation_id: str = Field(min_length=1, max_length=200, pattern=r"^[A-Za-z0-9_-]+$")
+    last_message_id: str = Field(min_length=1, max_length=20, pattern=r"^[1-9][0-9]*$")
+    state: Literal["available", "unavailable", "unknown"]
+    attachment_reported: bool | None
+
+
+def parse_boss_resume_control(
+    value: str, messages: tuple[BossMessageSummary, ...], conversation_id: str
+) -> BossResumeControl:
+    if len(value.encode("utf-8")) > 2048:
+        raise ValueError("BOSS resume control exceeds capture limit")
+    control = _RenderedResumeControl.model_validate_json(value)
+    if (
+        not messages
+        or control.conversation_id != conversation_id
+        or messages[-1].conversation_id != conversation_id
+        or control.last_message_id != messages[-1].message_id
+    ):
+        raise ValueError("BOSS resume control binding is incomplete")
+    return BossResumeControl(control.conversation_id, control.state, control.attachment_reported)
+
+
+def parse_boss_rendered_messages(
+    value: str, conversations: tuple[BossConversationSummary, ...], conversation_id: str
+) -> tuple[BossMessageSummary, ...]:
+    if len(value.encode("utf-8")) > 512 * 1024:
+        raise ValueError("BOSS rendered messages exceed capture limit")
+    rows = TypeAdapter(list[_RenderedMessage]).validate_json(value)
+    target = [item for item in conversations if item.conversation_id == conversation_id]
+    if not rows:
+        return ()
+    if (
+        len(target) != 1
+        or len(rows) > 200
+        or len({item.message_id for item in rows}) != len(rows)
+        or any(item.conversation_id != conversation_id or not item.content.strip() for item in rows)
+        or rows[-1].message_id != target[0].last_message_id
+    ):
+        raise ValueError("BOSS rendered message binding is incomplete")
+    return tuple(
+        BossMessageSummary(
+            row.message_id, row.sender, row.content, row.sent_at, row.conversation_id
+        )
+        for row in rows
+    )
 
 
 def parse_boss_rendered_conversations(value: str) -> tuple[BossConversationSummary, ...]:
@@ -178,6 +246,7 @@ def parse_boss_page(
     url: str,
     title: str,
     rendered_conversations: tuple[BossConversationSummary, ...] = (),
+    rendered_messages: tuple[BossMessageSummary, ...] = (),
 ) -> BossReadOnlyPage:
     parser = _TreeParser()
     parser.feed(html)
@@ -248,15 +317,20 @@ def parse_boss_page(
         )
 
     if _has_conversation_structure(nodes) and rendered_conversations:
-        signals.append("rendered_conversation_previews")
+        signals.append(
+            "rendered_conversation_messages"
+            if rendered_messages
+            else "rendered_conversation_previews"
+        )
         return _page(
             url,
             title,
             BossPageKind.CONVERSATIONS,
-            BossPageState.UNKNOWN,
+            BossPageState.READY if rendered_messages else BossPageState.UNKNOWN,
             (),
             signals,
             rendered_conversations,
+            rendered_messages,
         )
 
     if _has_conversation_structure(nodes):

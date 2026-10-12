@@ -64,6 +64,40 @@ const observation = {
   page: { title: "Synthetic BOSS page", url: "https://www.zhipin.com/", state: "ready", kind: "job_list", jobs: [{ job_id: "job-a", title: "Synthetic job", company: "Synthetic company" }], conversations: [], messages: [] },
 };
 
+test("selected conversation is persisted before execution and restored with message direction", async () => {
+  let current = { ...accepted, task_status: "failed" };
+  let detailed = false;
+  const writes = [];
+  const page = { ...observation.page, kind: "conversations", state: "unknown", jobs: [],
+    conversations: [{ conversation_id: "thread-1", recruiter_name: "Synthetic HR", company: null, last_message: "Synthetic preview" }], messages: [] };
+  const fixture = taskCard(async (url, options = {}) => {
+    if (options.method === "POST") {
+      writes.push({ url, options });
+      if (url.endsWith("/run")) { current = { ...accepted, task_status: "completed" }; detailed = true; }
+      else current = accepted;
+      return Response.json(current);
+    }
+    return Response.json(url.endsWith("/result") ? { ...observation, page: { ...page,
+      resume_control: detailed ? { conversation_id: "thread-1", state: "unavailable", attachment_reported: false } : null,
+      messages: detailed ? [{ message_id: "123", conversation_id: "thread-1", sender: "recruiter", content: "Synthetic detail", sent_at: null }] : [] } } : current);
+  });
+  await settle();
+  fixture.button("读取会话详情").props.onClick();
+  assert.match(text(fixture.render()), /标记已读/);
+  fixture.click("允许并读取");
+  await settle();
+  assert.equal(JSON.parse(writes[0].options.body).conversation_id, "thread-1");
+  assert.equal(writes.length, 2);
+  assert.match(text(fixture.render()), /招聘方/);
+  assert.match(text(fixture.render()), /Synthetic detail/);
+  assert.match(text(fixture.render()), /简历入口： 页面当前不可用/);
+  assert.match(text(fixture.render()), /不能据此自动发送/);
+  fixture.click("核对读取结果");
+  await settle();
+  assert.equal(writes.length, 2);
+  fixture.cleanup();
+});
+
 test("read card requires consent, runs the accepted task once and restores persisted results", async () => {
   let current = null;
   const writes = [];

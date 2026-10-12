@@ -127,9 +127,13 @@ in-flight operation and does not release ownership. A failed or cancelled operat
 failed disconnect, or uncertain release blocks further use until reconciliation.
 Stopping during a lease check prevents that not-yet-started operation while allowing cleanup.
 
-These callbacks are wired to PostgreSQL and a real Playwright CDP connection in the
-Steel integration test. They are not yet wired to a production executor registry or
-Viewer proxy. The lock is process-local; it does not fence a second process that has
+The signed BOSS conversation reader now uses these callbacks with PostgreSQL and
+the bounded CDP adapter. Its `executor_action_guard` holds the session row lock across
+navigation, observation and disconnect, checking the task, attempt, authorization,
+owner, lease generation and expiry. A confirmed disconnect permits drain/release;
+an uncertain disconnect preserves ownership for reconciliation. The full executor
+registry and product takeover/return flow remain incomplete. The lifecycle lock is
+process-local; by itself it does not fence a second process that has
 copied a lease or a raw CDP URL. Closing a Playwright connection invalidates its old
 page handles, but does not prevent a new connection using a known raw URL. No public
 browser operation route is exposed until the connection boundary is enforced.

@@ -4,12 +4,18 @@ Recruiting-site-specific navigation, forms, and verification logic live here.
 
 The read-only BOSS adapter exposes `parse_boss_page`. It classifies a captured
 page as ready, login-required, risk, unstable, or unknown and extracts job and
-conversation/message summaries from a declared synthetic HTML contract. The live
-BOSS conversation shell (`chat-container`, `chat-content`, `chat-conversation`) has
-been observed, but its list rows currently expose presentation fields without a
-verified stable conversation ID. Conversation and message selectors therefore remain
-unverified against the live BOSS DOM; successful fixture parsing is not evidence of
-real recruiting-message access. It does not open a
+conversation/message summaries from captured HTML and bounded rendered-component
+contracts. Live list rows bind `source.uniqueId` to the virtual list key and expose
+`lastMsgId`. The selected conversation and each rendered message are checked against
+that identity, stable message IDs, direction, timestamp and rendered content; the
+last loaded message must match the list's latest ID. A real five-message conversation
+has passed the signed product read and persistence path. This covers currently loaded
+messages, not all history or permission to send a resume. The selected conversation
+reader also records the uniquely bound resume button as available/unavailable/unknown
+and the component's attachment flag. The real sample is unavailable with a false
+attachment flag; this does not identify a material or prove the account has no resume.
+Missing/changed controls remain unknown, and material identity/version still requires
+verification before any send. The parser does not open a
 browser, retain a profile, send messages, or write CareerAct domain state. Browser
 drivers must supply the captured URL, title, and HTML; unknown structure fails loudly
 so a caller cannot treat an unverified page as a successful read.
@@ -39,6 +45,12 @@ three-observation window (15 seconds) waits for initial SPA structure without re
 navigation. Unrecognized structure remains a failed business read even when capture succeeds.
 Account navigation and a page snapshot are local observations, not substitutes
 for CareerAct's durable connection status or business read checks.
+The dedicated signed conversation endpoint acquires single-writer control and uses
+`executor_action_guard` with `ExecutorLifecycle`. It clicks the uniquely bound row
+once, then only observes within a bounded window; opening may mark messages read.
+Text extraction excludes delivery/read-status labels. Unknown content, identity or
+latest-message mismatch fails closed. Confirmed CDP disconnection precedes lease
+release; uncertain disconnection keeps ownership for reconciliation.
 When an encryption key is configured, signed creation imports only the user's
 current profile; signed release saves the observed logged-in state before physical
 release. Read tasks restore the saved profile but do not overwrite it during release;

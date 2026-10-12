@@ -60,9 +60,11 @@ class BrowserCommandSigner:
                     "finish",
                     "forget",
                     "snapshot",
+                    "conversation",
                 )
             )
             != (lease_id is None)
+            or (action == "conversation") != (context.conversation_id is not None)
         ):
             raise BrowserControlRejected("Invalid browser control context")
         issued_at = int(datetime.now(UTC).timestamp())
@@ -87,6 +89,7 @@ class BrowserCommandSigner:
                 "owner_id": context.owner_id,
                 "action": action,
                 "lease_id": str(lease_id) if lease_id is not None else None,
+                "conversation_id": context.conversation_id,
             },
             self.private_key,
             algorithm="EdDSA",
@@ -101,7 +104,16 @@ class BrowserControlClient:
     async def send(
         self, context: BrowserControlContext, action: BrowserAction, lease_id: UUID | None = None
     ) -> BrowserLease | None:
-        if action in ("viewer", "watcher", "create", "release", "finish", "forget", "snapshot"):
+        if action in (
+            "viewer",
+            "watcher",
+            "create",
+            "release",
+            "finish",
+            "forget",
+            "snapshot",
+            "conversation",
+        ):
             raise BrowserControlRejected("Browser action requires its dedicated adapter")
         token = self.signer.sign(context, action, lease_id)
         prefix = "" if action in ("register", "revoke") else "lease/"

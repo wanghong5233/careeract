@@ -19,6 +19,61 @@ pytestmark = pytest.mark.skipif(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("transition", ["drain", "revoke"])
+async def test_executor_action_serializes_control_change_and_rejects_stale_writer(
+    database_url: str, transition: str
+) -> None:
+    engine = create_async_engine(database_url)
+    store = PostgresLeaseStore(engine)
+    command = BrowserCommand.model_validate(
+        command_payload() | {"action": "acquire", "owner_id": "synthetic-executor"}
+    )
+    await store.register(command.session_id, command.sub, command.task_id, command.authorization_id)
+    try:
+        lease = await store.execute(command)
+        check = command.model_copy(update={"action": "check", "lease_id": lease.lease_id})
+        for field, value in (
+            ("sub", "other-user"),
+            ("task_id", uuid4()),
+            ("authorization_id", uuid4()),
+            ("attempt_id", uuid4()),
+            ("owner_id", "other-executor"),
+            ("lease_id", uuid4()),
+            ("action", "snapshot"),
+            ("iat", 1),
+        ):
+            with pytest.raises((CommandRejected, LeaseConflict)):
+                async with store.executor_action_guard(check.model_copy(update={field: value})):
+                    pytest.fail("Invalid action must not enter browser execution")
+        stop = check.model_copy(update={"action": "stop", "jti": uuid4()})
+        async with store.executor_action_guard(check):
+            changing = asyncio.create_task(
+                store.execute(stop) if transition == "drain" else store.revoke(command.session_id)
+            )
+            await asyncio.sleep(0.1)
+            assert not changing.done()
+        await changing
+        with pytest.raises((CommandRejected, LeaseConflict)):
+            async with store.executor_action_guard(check):
+                pytest.fail("Stopped writer must not admit another action")
+        await store.confirm_stopped(command.session_id, lease.lease_id)
+        if transition == "drain":
+            replacement = command.model_copy(update={"attempt_id": uuid4(), "jti": uuid4()})
+            next_lease = await store.execute(replacement)
+            with pytest.raises(LeaseConflict):
+                async with store.executor_action_guard(check):
+                    pytest.fail("Old generation must not admit actions")
+            await store.execute(
+                replacement.model_copy(
+                    update={"action": "stop", "lease_id": next_lease.lease_id, "jti": uuid4()}
+                )
+            )
+            await store.confirm_stopped(command.session_id, next_lease.lease_id)
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_snapshot_excludes_writer_and_revocation_waits_for_capture(database_url: str) -> None:
     engine = create_async_engine(database_url)
     store = PostgresLeaseStore(engine)

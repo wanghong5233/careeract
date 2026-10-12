@@ -38,10 +38,11 @@ class ReadExecutionService:
         connection_id: UUID,
         expected_version: UUID,
         request_key: UUID,
+        conversation_id: str | None = None,
     ) -> ReadExecution:
         return await self.repository.accept(
             actor,
-            target=BossReadTarget(connection_id, expected_version),
+            target=BossReadTarget(connection_id, expected_version, conversation_id),
             request_key=request_key,
             authorization_lifetime=timedelta(minutes=15),
         )
@@ -190,6 +191,8 @@ class ReadExecutionService:
         page_reader: BossPageReader,
     ) -> BossPageObservation:
         context = await self.repository.reserve_browser(actor, task_id, uuid4())
+        conversation_id = context.conversation_id
+        context = replace(context, conversation_id=None)
         registered = False
         create_attempted = False
         created = False
@@ -206,13 +209,28 @@ class ReadExecutionService:
             await control.lifecycle(context, "create")
             created = True
             observation = await page_reader.read_boss_page(
-                replace(context, owner_id="boss-page-reader")
+                replace(
+                    context,
+                    owner_id="boss-page-reader",
+                    conversation_id=conversation_id,
+                )
             )
-            if observation.state == "ready" and (
-                observation.kind == "conversations"
-                and has_bound_conversation_messages(observation)
-                or observation.kind in {"job_list", "job_detail"}
-                and bool(observation.jobs)
+            if (
+                observation.state == "ready"
+                and (
+                    observation.kind == "conversations"
+                    and has_bound_conversation_messages(observation)
+                    or observation.kind in {"job_list", "job_detail"}
+                    and bool(observation.jobs)
+                )
+                and (
+                    conversation_id is None
+                    or observation.kind == "conversations"
+                    and bool(observation.messages)
+                    and all(
+                        item.conversation_id == conversation_id for item in observation.messages
+                    )
+                )
             ):
                 outcome = "read_completed"
             elif observation.state in {"needs_login", "risk"}:

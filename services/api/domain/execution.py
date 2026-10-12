@@ -69,6 +69,7 @@ class LoginExecution:
 class BossReadTarget:
     connection_id: UUID
     connection_version: UUID
+    conversation_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

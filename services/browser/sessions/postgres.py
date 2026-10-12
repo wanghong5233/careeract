@@ -166,6 +166,35 @@ class PostgresLeaseStore:
         await self.execute(command.model_copy(update={"action": "check", "lease_id": lease_id}))
 
     @asynccontextmanager
+    async def executor_action_guard(self, command: BrowserCommand) -> AsyncIterator[None]:
+        if command.action != "check" or command.lease_id is None:
+            raise CommandRejected("Not an executor action command")
+        async with self.engine.begin() as connection:
+            row = await self._lock(connection, command.session_id)
+            now = cast(datetime, await connection.scalar(text("SELECT clock_timestamp()")))
+            if (
+                row["revoked"]
+                or row["user_id"] != command.sub
+                or row["task_id"] != command.task_id
+                or row["authorization_id"] != command.authorization_id
+                or not command.is_current(now.timestamp())
+            ):
+                raise CommandRejected("Executor action is no longer authorized")
+            if (
+                row["lease_id"] != command.lease_id
+                or row["owner_id"] != command.owner_id
+                or row["attempt_id"] != command.attempt_id
+                or row["draining"]
+                or row["expires_at"] is None
+                or row["expires_at"] <= now
+            ):
+                raise LeaseConflict("Executor action does not own an active lease")
+            yield
+            now = cast(datetime, await connection.scalar(text("SELECT clock_timestamp()")))
+            if not command.is_current(now.timestamp()) or row["expires_at"] <= now:
+                raise CommandRejected("Executor action authorization expired during execution")
+
+    @asynccontextmanager
     async def viewer_input_guard(
         self, command: BrowserCommand, lease_id: UUID
     ) -> AsyncIterator[None]:

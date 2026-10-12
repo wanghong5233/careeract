@@ -31,7 +31,7 @@ test("recruiting communication surface exposes four honest synthetic views and s
   const content = text(view);
   for (const label of ["待处理会话", "执行任务", "定时委托", "结果记录", "合成演示状态", "等待用户", "结果未知", "继续问 Agent"]) assert.match(content, new RegExp(label));
   assert.match(content, /当前支持 BOSS 登录保存与恢复/);
-  assert.match(content, /只读任务和页面观察保存/);
-  assert.match(content, /HR 会话与消息结构仍待核验，消息发送尚未开放/);
+  assert.match(content, /会话摘要及指定会话当前加载消息的核验和保存/);
+  assert.match(content, /自动回复与简历发送尚未开放/);
   assert.match(content, /普通聊天文本也不会自动成为外部发送授权/);
 });

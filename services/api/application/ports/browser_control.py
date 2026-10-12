@@ -17,6 +17,7 @@ BrowserAction = Literal[
     "finish",
     "forget",
     "snapshot",
+    "conversation",
 ]
 
 
@@ -32,6 +33,7 @@ class BrowserControlContext:
     attempt_id: UUID
     request_id: UUID
     owner_id: str
+    conversation_id: str | None = None
 
 
 @dataclass(frozen=True)

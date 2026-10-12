@@ -103,7 +103,10 @@ def test_read_api_requires_explicit_consent_and_restricts_input(
 
 
 @pytest.mark.asyncio
-async def test_read_runner_reuses_lifecycle_and_reconciles_browser_cleanup() -> None:
+@pytest.mark.parametrize("conversation_id", [None, "c1"])
+async def test_read_runner_reuses_lifecycle_and_reconciles_browser_cleanup(
+    conversation_id: str | None,
+) -> None:
     repository = AsyncMock()
     control = AsyncMock()
     page_reader = AsyncMock()
@@ -128,12 +131,16 @@ async def test_read_runner_reuses_lifecycle_and_reconciles_browser_cleanup() -> 
         conversations=(BossConversationObservation("c1", None, None, None, None, False, None),),
         messages=(BossMessageObservation("m1", "recruiter", "Synthetic message", None, "c1"),),
     )
-    repository.reserve_browser.return_value = context
+    repository.reserve_browser.return_value = replace(context, conversation_id=conversation_id)
     page_reader.read_boss_page.return_value = observation
     result = await ReadExecutionService(repository).run_boss_read(
         actor, context.task_id, control=control, page_reader=page_reader
     )
     assert result == observation
+    page_reader.read_boss_page.assert_awaited_once_with(
+        replace(context, owner_id="boss-page-reader", conversation_id=conversation_id)
+    )
+    assert all(item.args[0].conversation_id is None for item in control.mock_calls)
     assert control.mock_calls == [
         call.send(context, "register"),
         call.lifecycle(context, "create"),
@@ -325,6 +332,7 @@ async def test_read_tasks_keep_login_and_bind_owned_versioned_resources(scenario
         )
     repository = PostgresReadExecutionRepository(scenario.engine)
     target = BossReadTarget(scenario.connection_id, connection_version)
+    target = replace(target, conversation_id="synthetic-thread")
     request_key = uuid4()
 
     async def accept() -> ReadExecution:
@@ -339,6 +347,14 @@ async def test_read_tasks_keep_login_and_bind_owned_versioned_resources(scenario
     assert all(item == accepted[0] for item in accepted)
     current = accepted[0]
     assert current.authorization.scope == "boss.read"
+    assert current.target == target
+    with pytest.raises(ExecutionConflict):
+        await repository.accept(
+            scenario.actor,
+            target=replace(target, conversation_id="other-thread"),
+            request_key=request_key,
+            authorization_lifetime=timedelta(minutes=5),
+        )
     assert current.task.connection_id is None and current.attempt.browser_session_id is None
     assert await repository.read(scenario.other, current.task.id) is None
     with pytest.raises(ExecutionConflict):
@@ -572,9 +588,11 @@ async def test_read_browser_reservation_rechecks_authorization_and_persists_outc
         connection_id=scenario.connection_id,
         expected_version=version,
         request_key=uuid4(),
+        conversation_id="synthetic-thread",
     )
     context = await repository.reserve_browser(scenario.actor, accepted.task.id, uuid4())
     assert context.owner_id == "boss-read"
+    assert context.conversation_id == "synthetic-thread"
     running = await repository.read(scenario.actor, accepted.task.id)
     assert running is not None and running.task.status == "running"
     completed = await repository.finish_browser(

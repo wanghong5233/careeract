@@ -16,7 +16,8 @@ type ReadResult = {
     title: string; url: string; kind: string; state: "ready" | "needs_login" | "risk" | "unstable" | "unknown";
     jobs: { job_id: string; title: string; company: string }[];
     conversations: { conversation_id: string; recruiter_name: string | null; company: string | null; last_message: string | null }[];
-    messages: { message_id: string; content: string; sender: string }[];
+    messages: { message_id: string; conversation_id: string | null; content: string; sender: string; sent_at: string | null }[];
+    resume_control?: { conversation_id: string; state: "available" | "unavailable" | "unknown"; attachment_reported: boolean | null } | null;
   };
 };
 
@@ -30,6 +31,7 @@ export function BossReadTask({ connectionId, version, blocked }: { connectionId:
   const [task, setTask] = useState<ReadTask | null>(null);
   const [result, setResult] = useState<ReadResult | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [selectedConversation, setSelectedConversation] = useState<{ id: string; name: string } | null>(null);
   const [executing, setExecuting] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -107,7 +109,7 @@ export function BossReadTask({ connectionId, version, blocked }: { connectionId:
         requestKey.current ??= crypto.randomUUID();
         const response = await fetch(base, {
           method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": requestKey.current },
-          body: JSON.stringify({ version, authorize_read: true }),
+          body: JSON.stringify({ version, authorize_read: true, ...(selectedConversation ? { conversation_id: selectedConversation.id } : {}) }),
           signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15_000)]),
         });
         if (!response.ok) throw new Error("Read acceptance unconfirmed");
@@ -187,7 +189,7 @@ export function BossReadTask({ connectionId, version, blocked }: { connectionId:
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div><h3 className="text-sm font-medium">页面读取</h3><p className="mt-1 text-xs text-muted-foreground">从保存登录恢复并打开沟通页，读取结果可在刷新后找回。不会发送消息或简历。</p></div>
       <div className="flex items-center gap-2">
-        <Button disabled={blocked || active || loading} variant="outline" onClick={() => task?.task_status === "accepted" ? void start(true) : setConfirmOpen(true)}>{executing && <LoaderCircle className="size-3.5 animate-spin" />}{task?.task_status === "accepted" ? "执行已受理读取" : "读取 BOSS 页面"}</Button>
+        <Button disabled={blocked || active || loading} variant="outline" onClick={() => { if (task?.task_status === "accepted") void start(true); else { setSelectedConversation(null); setConfirmOpen(true); } }}>{executing && <LoaderCircle className="size-3.5 animate-spin" />}{task?.task_status === "accepted" ? "执行已受理读取" : "读取 BOSS 页面"}</Button>
         <Button variant="ghost" onClick={() => void refresh()}><RefreshCw className="size-3.5" />核对读取结果</Button>
         {task && ["accepted", "running", "waiting"].includes(task.task_status) && <Button disabled={stopping} variant="outline" onClick={() => void stop()}>{stopping ? "正在停止" : task.task_status === "waiting" ? "核对停止并释放" : "停止读取"}</Button>}
         {task?.task_status === "unknown" && <Button disabled={executing || stopping} variant="outline" onClick={() => void reconcile()}>核对释放并结束</Button>}
@@ -201,11 +203,12 @@ export function BossReadTask({ connectionId, version, blocked }: { connectionId:
       <p className="mt-1 font-medium">{result.page.title}</p><p className="break-all text-muted-foreground">{result.page.url}</p>
       {task?.task_status !== "completed" && <p className="mt-2 text-amber-700 dark:text-amber-300">{task?.task_status === "failed" ? "这是已保存的页面观察；本次未完成有效业务读取。" : "这是已保存的页面观察；本次任务尚未确认完成。"}</p>}
       {result.page.jobs.map(job => <p key={job.job_id} className="mt-2">{job.title} · {job.company}</p>)}
-      {result.page.conversations.map(conversation => <div key={conversation.conversation_id} className="mt-2"><p>{conversation.recruiter_name ?? "招聘方"} · {conversation.company ?? ""}</p><p className="text-muted-foreground">{conversation.last_message}</p></div>)}
-      {result.page.messages.map(message => <p key={message.message_id} className="mt-2 whitespace-pre-wrap">{message.content}</p>)}
+      {result.page.conversations.map(conversation => <div key={conversation.conversation_id} className="mt-2"><div className="flex items-center justify-between gap-2"><p>{conversation.recruiter_name ?? "招聘方"} · {conversation.company ?? ""}</p><Button variant="ghost" disabled={blocked || active || loading || task?.task_status === "accepted"} onClick={() => { setSelectedConversation({ id: conversation.conversation_id, name: conversation.recruiter_name ?? "招聘方" }); setConfirmOpen(true); }}>读取会话详情</Button></div><p className="text-muted-foreground">{conversation.last_message}</p>{result.page.messages.filter(message => message.conversation_id === conversation.conversation_id).map(message => <div key={message.message_id} className="mt-2 rounded border p-2"><p className="text-muted-foreground">{({ recruiter: "招聘方", candidate: "我", system: "平台提示" } as Record<string, string>)[message.sender] ?? "方向待核验"} · {message.sent_at ? new Date(message.sent_at).toLocaleString() : "时间待核验"}</p><p className="whitespace-pre-wrap">{message.content}</p></div>)}</div>)}
+      {result.page.messages.length > 0 && <p className="mt-2 text-muted-foreground">已核验当前加载的消息与最新消息标识；不代表全部历史记录，尚未开放自动回复或简历发送。</p>}
+      {result.page.resume_control && <p className="mt-2 text-muted-foreground">简历入口：{({ available: "页面可用", unavailable: "页面当前不可用", unknown: "尚未核验" })[result.page.resume_control.state]}。材料身份与版本尚未确认，不能据此自动发送。</p>}
       {result.page.kind === "conversations" && result.page.conversations.length === 0 && result.page.messages.length === 0 && <p className="mt-2 text-muted-foreground">已识别沟通页，尚未提取到可核验的会话或消息。</p>}
     </div>}
     {error && <p role="alert" className="mt-3 text-xs text-destructive">{error}</p>}
-    <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}><DialogContent><DialogTitle>允许读取 BOSS 页面？</DialogTitle><DialogDescription>本次将恢复已保存登录，打开 BOSS 沟通页并读取会话信息，保存读取结果。授权最长 15 分钟，不包含消息回复、简历发送或自动重试。</DialogDescription><DialogFooter><Button variant="outline" onClick={() => setConfirmOpen(false)}>取消</Button><Button onClick={() => void start()}>允许并读取</Button></DialogFooter></DialogContent></Dialog>
+    <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}><DialogContent><DialogTitle>{selectedConversation ? `读取 ${selectedConversation.name} 的会话？` : "允许读取 BOSS 页面？"}</DialogTitle><DialogDescription>{selectedConversation ? "本次会打开指定招聘方的会话，核验当前加载的消息并保存结果。打开会话可能标记已读。" : "本次将恢复已保存登录，打开 BOSS 沟通页并读取会话信息，保存读取结果。"}授权最长 15 分钟，不包含消息回复、简历发送或自动重试。</DialogDescription><DialogFooter><Button variant="outline" onClick={() => setConfirmOpen(false)}>取消</Button><Button onClick={() => void start()}>允许并读取</Button></DialogFooter></DialogContent></Dialog>
   </section>;
 }

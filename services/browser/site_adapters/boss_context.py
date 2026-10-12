@@ -1,7 +1,8 @@
 import asyncio
+import json
 import logging
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import cast
 from urllib.parse import urlsplit, urlunsplit
 from uuid import UUID
@@ -15,11 +16,15 @@ from services.browser.sessions.context import SiteScope
 from services.browser.sessions.steel import SessionsResponse
 from services.browser.site_adapters.boss import (
     BossConversationSummary,
+    BossMessageSummary,
     BossPageState,
     BossReadOnlyPage,
+    BossResumeControl,
     boss_auth_page_state,
     parse_boss_page,
     parse_boss_rendered_conversations,
+    parse_boss_rendered_messages,
+    parse_boss_resume_control,
 )
 
 BOSS_SCOPE = SiteScope("boss", ("https://www.zhipin.com",), ("zhipin.com", "www.zhipin.com"))
@@ -31,12 +36,18 @@ class BossContextUnavailable(Exception):
     pass
 
 
+class BossDisconnectUnconfirmed(BossContextUnavailable):
+    pass
+
+
 @dataclass(frozen=True, slots=True, repr=False)
 class BossPageSnapshot:
     url: str
     title: str
     html: str
     conversations: tuple[BossConversationSummary, ...] = ()
+    messages: tuple[BossMessageSummary, ...] = ()
+    resume_control: BossResumeControl | None = None
 
 
 class BossContextReader:
@@ -110,6 +121,7 @@ class BossContextReader:
                         title=snapshot.title,
                         html=snapshot.html,
                         rendered_conversations=snapshot.conversations,
+                        rendered_messages=snapshot.messages,
                     )
                     if (
                         page.state not in {BossPageState.UNSTABLE, BossPageState.UNKNOWN}
@@ -122,6 +134,29 @@ class BossContextReader:
             logger.warning("BOSS page observation timed out session=%s", self.session_id)
             raise BossContextUnavailable("BOSS page observation unavailable") from None
         raise BossContextUnavailable("BOSS page observation unavailable")
+
+    async def read_conversation(self, conversation_id: str) -> BossReadOnlyPage:
+        try:
+            snapshot = await self._page_snapshot(conversation_id=conversation_id)
+            page = parse_boss_page(
+                url=snapshot.url,
+                title=snapshot.title,
+                html=snapshot.html,
+                rendered_conversations=snapshot.conversations,
+                rendered_messages=snapshot.messages,
+            )
+            return replace(page, resume_control=snapshot.resume_control)
+        except BossDisconnectUnconfirmed:
+            raise
+        except (
+            httpx.HTTPError,
+            WebSocketException,
+            OSError,
+            TimeoutError,
+            RuntimeError,
+            ValueError,
+        ):
+            raise BossContextUnavailable("BOSS conversation observation unavailable") from None
 
     async def _storage_state(self) -> object:
         inventory = await self.client.get("/v1/sessions", follow_redirects=False, timeout=5)
@@ -240,7 +275,7 @@ class BossContextReader:
             async with asyncio.timeout(5):
                 await cast(Callable[[], Awaitable[None]], cdp.stop)()
 
-    async def _page_snapshot(self) -> BossPageSnapshot:
+    async def _page_snapshot(self, *, conversation_id: str | None = None) -> BossPageSnapshot:
         inventory = await self.client.get("/v1/sessions", follow_redirects=False, timeout=5)
         inventory.raise_for_status()
         active = [
@@ -272,7 +307,7 @@ class BossContextReader:
         )
         cdp = CDPClient(endpoint)
         try:
-            async with asyncio.timeout(8):
+            async with asyncio.timeout(20 if conversation_id else 8):
                 await cast(Callable[[], Awaitable[None]], cdp.start)()
                 targets = await cdp.send.Target.getTargets()
                 pages = [target for target in targets["targetInfos"] if target["type"] == "page"]
@@ -292,6 +327,55 @@ class BossContextReader:
                 attached = await cdp.send.Target.attachToTarget(
                     params={"targetId": pages[0]["targetId"], "flatten": True}
                 )
+                if conversation_id is not None:
+                    for capture_index in range(6):
+                        preview = await cdp.send.Runtime.evaluate(
+                            params={
+                                "expression": BOSS_RENDERED_CONVERSATIONS,
+                                "returnByValue": True,
+                            },
+                            session_id=attached["sessionId"],
+                        )
+                        preview_value = preview.get("result", {}).get("value")
+                        if preview.get("exceptionDetails") or not isinstance(preview_value, str):
+                            raise ValueError("BOSS conversation contract unavailable")
+                        previews = parse_boss_rendered_conversations(preview_value)
+                        if any(item.conversation_id == conversation_id for item in previews):
+                            break
+                        if capture_index == 5:
+                            raise ValueError("BOSS conversation target unavailable")
+                        await asyncio.sleep(1)
+                    expression = BOSS_OPEN_CONVERSATION.replace(
+                        "__TARGET__", json.dumps(conversation_id)
+                    )
+                    opened = await cdp.send.Runtime.evaluate(
+                        params={"expression": expression, "returnByValue": True},
+                        session_id=attached["sessionId"],
+                    )
+                    if (
+                        opened.get("exceptionDetails")
+                        or opened.get("result", {}).get("value") is not True
+                    ):
+                        raise ValueError("BOSS conversation target unavailable")
+                    detail_value = "[]"
+                    for capture_index in range(8):
+                        captured_detail = await cdp.send.Runtime.evaluate(
+                            params={
+                                "expression": BOSS_RENDERED_MESSAGES.replace(
+                                    "__TARGET__", json.dumps(conversation_id)
+                                ),
+                                "returnByValue": True,
+                            },
+                            session_id=attached["sessionId"],
+                        )
+                        detail_value = captured_detail.get("result", {}).get("value")
+                        if not isinstance(detail_value, str) or captured_detail.get(
+                            "exceptionDetails"
+                        ):
+                            raise ValueError("BOSS message contract unavailable")
+                        if detail_value != "[]" or capture_index == 7:
+                            break
+                        await asyncio.sleep(1)
                 document = await cdp.send.DOM.getDocument(
                     session_id=attached["sessionId"],
                 )
@@ -306,6 +390,8 @@ class BossContextReader:
                     session_id=attached["sessionId"],
                 )
                 conversations: tuple[BossConversationSummary, ...] = ()
+                messages: tuple[BossMessageSummary, ...] = ()
+                resume_control: BossResumeControl | None = None
                 if page_url.path == "/web/geek/chat":
                     rendered = await cdp.send.Runtime.evaluate(
                         params={
@@ -318,6 +404,28 @@ class BossContextReader:
                     if not isinstance(value, str) or rendered.get("exceptionDetails"):
                         raise ValueError("BOSS rendered conversation capture is incomplete")
                     conversations = parse_boss_rendered_conversations(value)
+                    if conversation_id is not None:
+                        messages = parse_boss_rendered_messages(
+                            detail_value, conversations, conversation_id
+                        )
+                        if messages:
+                            captured_control = await cdp.send.Runtime.evaluate(
+                                params={
+                                    "expression": BOSS_RESUME_CONTROL.replace(
+                                        "__TARGET__", json.dumps(conversation_id)
+                                    ),
+                                    "returnByValue": True,
+                                },
+                                session_id=attached["sessionId"],
+                            )
+                            control_value = captured_control.get("result", {}).get("value")
+                            if not isinstance(control_value, str) or captured_control.get(
+                                "exceptionDetails"
+                            ):
+                                raise ValueError("BOSS resume control unavailable")
+                            resume_control = parse_boss_resume_control(
+                                control_value, messages, conversation_id
+                            )
                 current = await cdp.send.Target.getTargetInfo(
                     params={"targetId": pages[0]["targetId"]}
                 )
@@ -339,11 +447,19 @@ class BossContextReader:
                     )
                     raise ValueError("BOSS page snapshot is too large")
                 return BossPageSnapshot(
-                    url=url, title=title, html=html, conversations=conversations
+                    url=url,
+                    title=title,
+                    html=html,
+                    conversations=conversations,
+                    messages=messages,
+                    resume_control=resume_control,
                 )
         finally:
-            async with asyncio.timeout(5):
-                await cast(Callable[[], Awaitable[None]], cdp.stop)()
+            try:
+                async with asyncio.timeout(5):
+                    await cast(Callable[[], Awaitable[None]], cdp.stop)()
+            except (WebSocketException, OSError, TimeoutError, RuntimeError):
+                raise BossDisconnectUnconfirmed("BOSS executor disconnection unconfirmed") from None
 
 
 BOSS_RENDERED_CONVERSATIONS = """JSON.stringify((() => {
@@ -368,4 +484,95 @@ BOSS_RENDERED_CONVERSATIONS = """JSON.stringify((() => {
             last_message: preview, last_message_id: String(source.lastMsgId),
             unread: source.unreadCount > 0}];
     });
+})())"""
+
+BOSS_OPEN_CONVERSATION = """(() => {
+    if (location.origin !== 'https://www.zhipin.com'
+        || location.pathname !== '/web/geek/chat') return false;
+    const rows = Array.from(document.querySelectorAll('.friend-content-warp')).filter(row =>
+        row.__vue__?.$options?.name === 'boss-item'
+        && row.__vue__?.$props?.source?.uniqueId === __TARGET__
+        && row.parentElement?.__vue__?.$props?.uniqueKey === __TARGET__);
+    const target = rows.length === 1 ? rows[0].querySelector('.friend-content') : null;
+    if (!target) return false;
+    target.click();
+    return true;
+})()"""
+
+BOSS_RESUME_CONTROL = """JSON.stringify((() => {
+    const target = __TARGET__;
+    const box = document.querySelector('.chat-conversation');
+    const selected = Array.from(document.querySelectorAll('.friend-content-warp'))
+        .filter(row => row.querySelector('.friend-content.selected'));
+    const source = selected.length === 1 ? selected[0].__vue__?.$props?.source : null;
+    if (!source || source.uniqueId !== target
+        || box?.__vue__?.$options?.name !== 'conversation-box'
+        || box.__vue__.selectedFriend$?.uniqueId !== target
+        || !Number.isSafeInteger(source.lastMsgId) || source.lastMsgId <= 0) return null;
+    const result = {conversation_id: target, last_message_id: String(source.lastMsgId),
+        state: 'unknown', attachment_reported: null};
+    const toolbars = Array.from(box.querySelectorAll('.chat-editor')).filter(node =>
+        node.__vue__?.$options?.name === 'ConversationToolbar');
+    const editors = Array.from(box.querySelectorAll('.editor-container')).filter(node =>
+        node.__vue__?.$options?.name === 'Editor');
+    if (toolbars.length !== 1 || editors.length !== 1
+        || editors[0].__vue__.$props?.uniqueId !== target) return result;
+    const resumes = Array.from(toolbars[0].querySelectorAll('.toolbar-btn-content'))
+        .filter(node => node.__vue__?.$options?.name === 'resumeBtn');
+    if (resumes.length !== 1) return result;
+    const controls = resumes[0].querySelectorAll('.toolbar-btn');
+    if (controls.length !== 1) return result;
+    const button = controls[0];
+    const disabled = button.classList.contains('unable') || button.hasAttribute('disabled')
+        || button.getAttribute('aria-disabled') === 'true';
+    if (!disabled && button.getClientRects().length === 0) return result;
+    result.state = disabled ? 'unavailable' : 'available';
+    const uploads = Array.from(resumes[0].querySelectorAll('*')).filter(node =>
+        node.__vue__?.$options?.name === 'choose-upload-resume');
+    const hasResume = uploads.length === 1 ? uploads[0].__vue__.$props?.hasResume : null;
+    result.attachment_reported = typeof hasResume === 'boolean' ? hasResume : null;
+    return result;
+})())"""
+
+BOSS_RENDERED_MESSAGES = """JSON.stringify((() => {
+    const target = __TARGET__;
+    const selected = Array.from(document.querySelectorAll('.friend-content-warp'))
+        .filter(row => row.querySelector('.friend-content.selected'));
+    const source = selected.length === 1 ? selected[0].__vue__?.$props?.source : null;
+    const box = document.querySelector('.chat-conversation');
+    if (!source || source.uniqueId !== target || box?.__vue__?.$options?.name !== 'conversation-box'
+        || box.__vue__.selectedFriend$?.uniqueId !== target) return [];
+    const normalize = value => typeof value === 'string'
+        ? value.replace(/\\s+/g, ' ').trim() : null;
+    const rows = Array.from(box.querySelectorAll('.im-list > .message-item'));
+    if (!rows.length || rows.length > 200) return [];
+    const messages = [];
+    for (const row of rows) {
+        const component = row.__vue__, message = component?.$props?.message;
+        const content = row.querySelector('.message-content,.text');
+        const contentComponent = content?.__vue__?.$options?.name;
+        if (component?.$options?.name !== 'ChatMessage' || !message
+            || message.uniqueId !== target || message.friendId !== source.friendId
+            || !Number.isSafeInteger(message.mid) || message.mid <= 0
+            || component.$vnode?.key !== message.mid
+            || !Number.isSafeInteger(message.time) || message.time <= 1e12
+            || message.time > Date.now() + 300000
+            || typeof message.isSelf !== 'boolean'
+            || !['MessageText', 'MessageSystem', 'message-article', 'message-hyperlink']
+                .includes(contentComponent)) return [];
+        const sender = row.classList.contains('item-system') ? 'system'
+            : row.classList.contains('item-myself') && message.isSelf ? 'candidate'
+            : row.classList.contains('item-friend') && !message.isSelf ? 'recruiter' : null;
+        const textNodes = contentComponent === 'MessageText'
+            ? content.querySelectorAll('.text > p > .text-content') : null;
+        if (textNodes && textNodes.length !== 1) return [];
+        const text = normalize(textNodes ? textNodes[0].textContent : content.textContent);
+        if (!sender || !text || text.length > 10000
+            || (contentComponent === 'MessageText' && text !== normalize(message.text))) return [];
+        messages.push({conversation_id: target, message_id: String(message.mid), sender,
+            content: text, sent_at: new Date(message.time).toISOString()});
+    }
+    if (messages.at(-1)?.message_id !== String(source.lastMsgId)
+        || box.__vue__.selectedFriend$?.uniqueId !== target) return [];
+    return messages;
 })())"""

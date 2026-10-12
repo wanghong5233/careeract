@@ -31,7 +31,9 @@ from services.api.infrastructure.execution import (
 
 def target_from_row(row: RowMapping) -> ReadTarget:
     if row["kind"] == "boss_connection":
-        return BossReadTarget(row["connection_id"], row["connection_version"])
+        return BossReadTarget(
+            row["connection_id"], row["connection_version"], row["conversation_id"]
+        )
     if row["kind"] == "material_version":
         return MaterialReadTarget(
             row["material_id"], row["material_version_id"], row["material_version"]
@@ -207,9 +209,9 @@ class PostgresReadExecutionRepository:
                     text(
                         "INSERT INTO career.execution_resources "
                         "(task_id,user_id,kind,connection_id,connection_version,material_id,"
-                        "material_version_id,material_version) "
+                        "material_version_id,material_version,conversation_id) "
                         "VALUES (:task,:user,:resource_kind,:connection,:connection_version,"
-                        ":material,:material_version_id,:material_version)"
+                        ":material,:material_version_id,:material_version,:conversation_id)"
                     ),
                     {
                         "task": task_id,
@@ -231,6 +233,9 @@ class PostgresReadExecutionRepository:
                         else None,
                         "material_version": target.material_version
                         if isinstance(target, MaterialReadTarget)
+                        else None,
+                        "conversation_id": target.conversation_id
+                        if isinstance(target, BossReadTarget)
                         else None,
                     },
                 )
@@ -458,6 +463,7 @@ class PostgresReadExecutionRepository:
                     attempt_id=execution.attempt.id,
                     request_id=execution.attempt.request_id,
                     owner_id="boss-read",
+                    conversation_id=execution.target.conversation_id,
                 )
         except (DBAPIError, PoolTimeoutError):
             raise ExecutionUnavailable("Read execution storage is unavailable") from None

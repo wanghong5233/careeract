@@ -23,6 +23,7 @@ Action = Literal[
     "finish",
     "forget",
     "snapshot",
+    "conversation",
 ]
 
 
@@ -47,6 +48,9 @@ class BrowserCommand(BaseModel):
     owner_id: str = Field(min_length=1, max_length=256)
     action: Action
     lease_id: UUID | None = None
+    conversation_id: str | None = Field(
+        default=None, min_length=1, max_length=200, pattern=r"^[A-Za-z0-9_-]+$"
+    )
 
     def is_current(self, timestamp: float) -> bool:
         return self.iat - 2 <= timestamp < self.exp and 0 < self.exp - self.iat <= 60
@@ -91,9 +95,11 @@ class CommandVerifier:
                     "finish",
                     "forget",
                     "snapshot",
+                    "conversation",
                 )
             )
             != (command.lease_id is None)
+            or (action == "conversation") != (command.conversation_id is not None)
         ):
             raise CommandRejected("Invalid browser command scope")
         return command

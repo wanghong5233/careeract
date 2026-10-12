@@ -36,6 +36,13 @@ class BossMessageObservation:
 
 
 @dataclass(frozen=True, slots=True, repr=False)
+class BossResumeControlObservation:
+    conversation_id: str
+    state: Literal["available", "unavailable", "unknown"]
+    attachment_reported: bool | None
+
+
+@dataclass(frozen=True, slots=True, repr=False)
 class BossPageObservation:
     url: str
     title: str
@@ -45,6 +52,7 @@ class BossPageObservation:
     signals: tuple[str, ...]
     conversations: tuple[BossConversationObservation, ...]
     messages: tuple[BossMessageObservation, ...]
+    resume_control: BossResumeControlObservation | None = None
 
 
 class BossPageReader(Protocol):

@@ -154,6 +154,10 @@ async def test_page_observation_waits_for_structure_without_replaying_navigation
         "rendered_invalid",
         "rendered_exception",
         "rendered_timeout",
+        "conversation",
+        "conversation_pending",
+        "conversation_missing",
+        "disconnect",
     ],
 )
 async def test_page_snapshot_is_read_only_scoped_and_bounded(
@@ -264,6 +268,73 @@ async def test_page_snapshot_is_read_only_scoped_and_bounded(
     )
 
     reader = BossContextReader(client, AnyHttpUrl("http://cdp"), session_id)
+    if changed in {"conversation", "conversation_pending", "conversation_missing", "disconnect"}:
+        from services.browser.site_adapters.boss_context import (
+            BOSS_OPEN_CONVERSATION,
+            BOSS_RENDERED_CONVERSATIONS,
+            BOSS_RESUME_CONTROL,
+            BossDisconnectUnconfirmed,
+        )
+
+        preview = (
+            '[{"conversation_id":"thread-1","recruiter_name":"Synthetic HR",'
+            '"last_message":"Synthetic preview","last_message_id":"123","unread":true}]'
+        )
+        detail = (
+            '[{"conversation_id":"thread-1","message_id":"123","sender":"recruiter",'
+            '"content":"Synthetic detail","sent_at":"2026-10-12T00:00:00.000Z"}]'
+        )
+        clicks = 0
+        captures = 0
+
+        async def evaluate(*, params: dict[str, object], session_id: str) -> object:
+            nonlocal clicks, captures
+            expression = params["expression"]
+            if expression == BOSS_RENDERED_CONVERSATIONS:
+                value: object = "[]" if changed == "conversation_missing" else preview
+            elif expression == BOSS_RESUME_CONTROL.replace("__TARGET__", '"thread-1"'):
+                value = (
+                    '{"conversation_id":"thread-1","last_message_id":"123",'
+                    '"state":"unavailable","attachment_reported":false}'
+                )
+            elif expression == BOSS_OPEN_CONVERSATION.replace("__TARGET__", '"thread-1"'):
+                clicks += 1
+                value = True
+            else:
+                captures += 1
+                value = "[]" if changed == "conversation_pending" and captures == 1 else detail
+            return {"result": {"value": value}}
+
+        cdp.send.Runtime.evaluate.side_effect = evaluate
+        cdp.send.DOM.getOuterHTML.return_value = {
+            "outerHTML": '<main class="chat-container"><div class="chat-content"></div>'
+            '<div class="chat-conversation"></div><div class="chat-user"></div></main>'
+        }
+        monkeypatch.setattr(
+            "services.browser.site_adapters.boss_context.asyncio.sleep", AsyncMock()
+        )
+        if changed == "disconnect":
+            cdp.stop.side_effect = TimeoutError
+        if changed in {"conversation_missing", "disconnect"}:
+            with pytest.raises(
+                BossDisconnectUnconfirmed if changed == "disconnect" else BossContextUnavailable
+            ):
+                await reader.read_conversation("thread-1")
+        else:
+            page = await reader.read_conversation("thread-1")
+            assert page.messages[0].message_id == "123"
+            assert page.resume_control is not None
+            assert page.resume_control.state == "unavailable"
+        assert clicks == (0 if changed == "conversation_missing" else 1)
+        assert captures == (
+            2
+            if changed == "conversation_pending"
+            else 0
+            if changed == "conversation_missing"
+            else 1
+        )
+        cdp.stop.assert_awaited_once()
+        return
     if changed is not None and changed not in {"login", "verify", "rendered"}:
         with pytest.raises(BossContextUnavailable):
             await reader.page_snapshot()

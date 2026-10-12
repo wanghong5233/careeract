@@ -30,14 +30,15 @@ class BossPageClient:
     async def read_boss_page(self, context: BrowserControlContext) -> BossPageObservation:
         if context.owner_id != "boss-page-reader":
             raise BrowserControlRejected("Browser page read requires its dedicated scope")
-        token = self.signer.sign(context, "snapshot")
+        token = self.signer.sign(context, "conversation" if context.conversation_id else "snapshot")
+        endpoint = "conversation" if context.conversation_id else "page"
         try:
             async with self.client.stream(
                 "POST",
-                f"/internal/v1/sessions/{context.session_id}/boss/page",
+                f"/internal/v1/sessions/{context.session_id}/boss/{endpoint}",
                 headers={"Authorization": "Bearer " + token},
                 follow_redirects=False,
-                timeout=20,
+                timeout=30,
             ) as response:
                 if response.status_code in (401, 403):
                     raise BrowserControlRejected("Browser page read rejected")
@@ -77,7 +78,23 @@ class BossPageClient:
         if (
             result.session_id != context.session_id
             or invalid_url
+            or (
+                result.page.resume_control is not None
+                and (
+                    context.conversation_id is None
+                    or result.page.resume_control.conversation_id != context.conversation_id
+                    or not result.page.messages
+                )
+            )
             or context.authorization_expires_at <= datetime.now(UTC)
+            or (
+                context.conversation_id is not None
+                and result.page.messages
+                and any(
+                    message.conversation_id != context.conversation_id
+                    for message in result.page.messages
+                )
+            )
         ):
             raise BrowserControlUncertain("Browser page read response does not match command")
         return result.page

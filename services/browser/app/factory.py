@@ -26,6 +26,7 @@ from services.browser.sessions.authentication import (
     LifecycleAction,
     SessionAction,
 )
+from services.browser.sessions.execution import ExecutorLifecycle, ExecutorUnavailable
 from services.browser.sessions.lease import LeaseConflict, LeaseNotFound, SessionLease
 from services.browser.sessions.postgres import PostgresLeaseStore
 from services.browser.sessions.profiles import (
@@ -49,7 +50,12 @@ from services.browser.sessions.viewer import (
     viewer_context,
     viewer_cookie_name,
 )
-from services.browser.site_adapters.boss_context import BossContextReader, BossContextUnavailable
+from services.browser.site_adapters.boss import BossReadOnlyPage
+from services.browser.site_adapters.boss_context import (
+    BossContextReader,
+    BossContextUnavailable,
+    BossDisconnectUnconfirmed,
+)
 
 
 class ViewerAuthorizationRevoked(Exception):
@@ -320,6 +326,64 @@ def create_app(
                 type(failure).__name__,
             )
             raise HTTPException(503, "Browser page read unavailable") from None
+        return JSONResponse(
+            {"session_id": str(session_id), "page": asdict(result)},
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @app.post("/internal/v1/sessions/{session_id}/boss/conversation")
+    async def read_boss_conversation(
+        session_id: UUID, authorization: str = Header(default="")
+    ) -> Response:
+        command = authenticate(session_id, "conversation", authorization)
+        if command.owner_id != "boss-page-reader" or command.conversation_id is None:
+            raise HTTPException(403, "Conversation read rejected")
+        if context_reader is None or store is None:
+            raise HTTPException(503, "Browser reader is not configured")
+        try:
+            lease = await store.execute(command.model_copy(update={"action": "acquire"}))
+            check = command.model_copy(update={"action": "check", "lease_id": lease.lease_id})
+
+            async def check_lease() -> None:
+                await store.execute(check)
+
+            async def drain() -> None:
+                await store.execute(check.model_copy(update={"action": "stop", "jti": uuid4()}))
+
+            async def disconnected() -> None:
+                pass
+
+            async def release() -> None:
+                await store.confirm_stopped(session_id, lease.lease_id)
+
+            lifecycle = ExecutorLifecycle(
+                check_lease=check_lease,
+                mark_draining=drain,
+                disconnect=disconnected,
+                release=release,
+            )
+
+            async def observe() -> BossReadOnlyPage | None:
+                async with store.executor_action_guard(check):
+                    try:
+                        return await context_reader(session_id).read_conversation(
+                            command.conversation_id or ""
+                        )
+                    except BossDisconnectUnconfirmed:
+                        raise
+                    except BossContextUnavailable:
+                        return None
+
+            result = await lifecycle.run(observe)
+            await lifecycle.stop()
+            if result is None:
+                raise HTTPException(503, "Conversation observation unavailable")
+        except CommandRejected:
+            raise HTTPException(403, "Conversation authorization rejected") from None
+        except (LeaseNotFound, LeaseConflict):
+            raise HTTPException(409, "Conversation control requires reconciliation") from None
+        except (DBAPIError, PoolTimeoutError, BossContextUnavailable, ExecutorUnavailable):
+            raise HTTPException(503, "Conversation execution requires reconciliation") from None
         return JSONResponse(
             {"session_id": str(session_id), "page": asdict(result)},
             headers={"Cache-Control": "no-store"},
