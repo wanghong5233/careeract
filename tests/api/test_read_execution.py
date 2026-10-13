@@ -42,7 +42,10 @@ from services.api.infrastructure.execution import PostgresExecutionRepository
 from services.api.infrastructure.materials import PostgresMaterialRepository
 from services.api.infrastructure.read_execution import PostgresReadExecutionRepository
 from services.browser.app.factory import create_app as create_browser_app
-from services.browser.sessions.authentication import CommandVerifier
+from services.browser.sessions.authentication import (
+    CommandRejected,
+    CommandVerifier,
+)
 from services.browser.sessions.postgres import PostgresLeaseStore
 from services.browser.sessions.steel import SteelSessionManager
 from tests.api.test_execution_semantics import Scenario
@@ -56,6 +59,260 @@ integration = pytest.mark.skipif(
     os.environ.get("RUN_BROWSER_POSTGRES_TESTS") != "1",
     reason="Opt-in isolated PostgreSQL integration",
 )
+
+
+@integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("changed,disconnect", [(False, True), (True, True), (False, False)])
+async def test_human_control_returns_same_session_and_fences_old_input(
+    scenario: Scenario,
+    changed: bool,
+    disconnect: bool,
+) -> None:
+    async with scenario.engine.begin() as database:
+        version = await database.scalar(
+            text(
+                "UPDATE career.boss_connections SET status='connected', "
+                "browser_session_id=:session "
+                "WHERE id=:id RETURNING version"
+            ),
+            {"id": scenario.connection_id, "session": uuid4()},
+        )
+    repository = PostgresReadExecutionRepository(scenario.engine)
+    service = ReadExecutionService(repository)
+    request_key = uuid4()
+    accepted = await service.accept_boss(
+        scenario.actor,
+        connection_id=scenario.connection_id,
+        expected_version=version,
+        request_key=request_key,
+        conversation_id="c1",
+        human_control=True,
+    )
+    with pytest.raises(ExecutionConflict):
+        await service.accept_boss(
+            scenario.actor,
+            connection_id=scenario.connection_id,
+            expected_version=version,
+            request_key=request_key,
+            conversation_id="c1",
+        )
+    observation = BossPageObservation(
+        "https://www.zhipin.com/web/geek/chat",
+        "Synthetic BOSS",
+        "conversations",
+        "ready",
+        (),
+        (),
+        (BossConversationObservation("c1", None, None, None, None, False, None),),
+        (BossMessageObservation("m1", "recruiter", "Synthetic message", None, "c1"),),
+    )
+    page_reader = AsyncMock()
+    page_reader.read_boss_page.return_value = observation
+    key, steel = Ed25519PrivateKey.generate(), SyntheticSteel()
+    signer = BrowserCommandSigner(key)
+    store = PostgresLeaseStore(scenario.engine)
+    issuer = PostgresBrowserViewerTicketIssuer(scenario.engine, signer)
+    async with httpx.AsyncClient(
+        base_url="http://steel", transport=httpx.MockTransport(steel.respond)
+    ) as steel_client:
+        browser = create_browser_app(
+            verifier=CommandVerifier(key.public_key()),
+            store=store,
+            steel_sessions=SteelSessionManager(steel_client, scenario.engine),
+        )
+        async with httpx.AsyncClient(
+            base_url="http://browser", transport=httpx.ASGITransport(app=browser)
+        ) as client:
+            control = BrowserControlClient(client, signer)
+            waiting = await service.execute_boss(
+                scenario.actor,
+                scenario.connection_id,
+                accepted.task.id,
+                control=control,
+                page_reader=page_reader,
+            )
+            assert waiting.task.status == "waiting"
+            assert waiting.attempt.outcome == "read_human_control"
+            assert waiting.authorization.status == "active"
+            assert waiting.attempt.finished_at is None
+            session_id = waiting.attempt.browser_session_id
+            assert session_id is not None
+            await scenario.engine.dispose()
+            assert await repository.read(scenario.actor, accepted.task.id) == waiting
+            before = await repository.read_page_result(scenario.actor, accepted.task.id)
+            assert before is not None
+            with pytest.raises(BrowserViewerTicketRejected):
+                await issuer.issue(scenario.other, session_id, mode="control")
+            ticket = await issuer.issue(scenario.actor, session_id, mode="control")
+            viewer = CommandVerifier(key.public_key()).verify(ticket.token, session_id, "viewer")
+            lease = await store.acquire_viewer(viewer)
+            async with store.viewer_input_guard(viewer, lease.lease_id):
+                pass
+            page_reader.read_boss_page.return_value = replace(
+                observation,
+                messages=(
+                    BossMessageObservation(
+                        "m2",
+                        "recruiter",
+                        "Synthetic fresh message",
+                        None,
+                        "c2" if changed else "c1",
+                    ),
+                ),
+            )
+            returning = asyncio.create_task(
+                service.handback_boss(
+                    scenario.actor,
+                    scenario.connection_id,
+                    accepted.task.id,
+                    control=control,
+                    page_reader=page_reader,
+                )
+            )
+            for _ in range(100):
+                current = await repository.read(scenario.actor, accepted.task.id)
+                if current is not None and current.attempt.outcome == "read_handback_started":
+                    break
+                await asyncio.sleep(0.01)
+            assert current is not None and current.attempt.outcome == "read_handback_started"
+            with pytest.raises(CommandRejected):
+                async with store.viewer_input_guard(viewer, lease.lease_id):
+                    pytest.fail("Handback must reject late input")
+            with pytest.raises(CommandRejected):
+                await store.acquire_viewer(viewer.model_copy(update={"jti": uuid4()}))
+            with pytest.raises(BrowserViewerTicketRejected):
+                await issuer.issue(scenario.actor, session_id, mode="control")
+            with pytest.raises(ExecutionConflict):
+                await service.handback_boss(
+                    scenario.actor,
+                    scenario.connection_id,
+                    accepted.task.id,
+                    control=control,
+                    page_reader=page_reader,
+                )
+            assert not returning.done()
+            assert page_reader.read_boss_page.await_count == 1
+            if not disconnect:
+                unfinished = await returning
+                assert unfinished.task.status == "unknown"
+                assert unfinished.attempt.outcome == "read_unknown"
+                assert page_reader.read_boss_page.await_count == 1
+                after = await repository.read_page_result(scenario.actor, accepted.task.id)
+                assert after == before
+                async with scenario.engine.connect() as database:
+                    remaining_lease = await database.scalar(
+                        text("SELECT lease_id FROM browser.sessions WHERE session_id=:session"),
+                        {"session": session_id},
+                    )
+                assert remaining_lease == lease.lease_id
+                await store.confirm_stopped(session_id, lease.lease_id)
+                stopped = await service.reconcile_boss(
+                    scenario.actor, scenario.connection_id, accepted.task.id, control=control
+                )
+                assert stopped.task.status == "failed"
+                assert page_reader.read_boss_page.await_count == 1
+                return
+            await store.confirm_stopped(session_id, lease.lease_id)
+            finished = await returning
+            assert finished.task.status == ("failed" if changed else "completed")
+            assert finished.authorization.status == "revoked"
+            assert finished.attempt.browser_session_id == session_id
+            assert page_reader.read_boss_page.await_count == 2
+            fresh_context = page_reader.read_boss_page.call_args.args[0]
+            assert fresh_context.session_id == session_id
+            assert fresh_context.conversation_id == "c1" and fresh_context.observe_only
+            after = await repository.read_page_result(scenario.actor, accepted.task.id)
+            assert after is not None and after.observed_at > before.observed_at
+            assert after.page.messages[0].message_id == "m2"
+            with pytest.raises(BrowserViewerTicketRejected):
+                await issuer.issue(scenario.actor, session_id, mode="watch")
+
+
+@integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reason", ["unbound", "cancelled", "expired", "stale"])
+async def test_human_control_cancellation_expiry_and_stale_resource(
+    scenario: Scenario, reason: str
+) -> None:
+    async with scenario.engine.begin() as database:
+        version = await database.scalar(
+            text(
+                "UPDATE career.boss_connections SET status='connected', "
+                "browser_session_id=:session "
+                "WHERE id=:id RETURNING version"
+            ),
+            {"id": scenario.connection_id, "session": uuid4()},
+        )
+    repository = PostgresReadExecutionRepository(scenario.engine)
+    service = ReadExecutionService(repository)
+    if reason == "unbound":
+        with pytest.raises(ExecutionConflict):
+            await service.accept_boss(
+                scenario.actor,
+                connection_id=scenario.connection_id,
+                expected_version=version,
+                request_key=uuid4(),
+                human_control=True,
+            )
+        return
+    accepted = await service.accept_boss(
+        scenario.actor,
+        connection_id=scenario.connection_id,
+        expected_version=version,
+        request_key=uuid4(),
+        conversation_id="c1",
+        human_control=True,
+    )
+    await repository.reserve_browser(scenario.actor, accepted.task.id, uuid4())
+    async with scenario.engine.begin() as database:
+        await database.execute(
+            text("UPDATE career.execution_tasks SET status='waiting' WHERE id=:task"),
+            {"task": accepted.task.id},
+        )
+        await database.execute(
+            text(
+                "UPDATE career.execution_attempts SET status='waiting', "
+                "outcome='read_human_control' WHERE task_id=:task"
+            ),
+            {"task": accepted.task.id},
+        )
+        if reason == "expired":
+            await database.execute(
+                text(
+                    "UPDATE career.execution_authorizations SET "
+                    "expires_at=clock_timestamp()-interval '1 second' WHERE task_id=:task"
+                ),
+                {"task": accepted.task.id},
+            )
+        if reason == "stale":
+            await database.execute(
+                text("UPDATE career.boss_connections SET version=:version WHERE id=:id"),
+                {"version": uuid4(), "id": scenario.connection_id},
+            )
+    with pytest.raises(ExecutionConflict):
+        await repository.claim_handback(scenario.other, accepted.task.id)
+    if reason == "cancelled":
+        stopped = await repository.cancel(scenario.actor, accepted.task.id)
+        assert stopped.task.status == "waiting" and stopped.authorization.status == "revoked"
+        assert stopped.attempt.outcome == "read_stop_requested"
+    with pytest.raises(ExecutionConflict):
+        await repository.claim_handback(scenario.actor, accepted.task.id)
+
+
+def test_older_resume_observation_remains_readable() -> None:
+    from pydantic import TypeAdapter
+
+    from services.api.application.ports.boss_page import BossResumeControlObservation
+
+    value = TypeAdapter(BossResumeControlObservation).validate_python(
+        {
+            "conversation_id": "c1",
+            "state": "available",
+            "attachment_reported": True,
+        }
+    )
+    assert value.material_state == "unknown"
 
 
 def test_read_api_requires_explicit_consent_and_restricts_input(
@@ -80,6 +337,8 @@ def test_read_api_requires_explicit_consent_and_restricts_input(
             {"version": version},
             {"version": version, "authorize_read": False},
             {"version": version, "authorize_read": 1},
+            {"version": version, "authorize_read": True, "human_control": 1},
+            {"version": version, "authorize_read": True, "human_control": "true"},
             {"version": version, "authorize_read": True, "scope": "boss.send"},
             {"version": version, "authorize_read": True, "user_id": "another-user"},
             {"version": version, "authorize_read": True, "browser_session_id": str(uuid4())},

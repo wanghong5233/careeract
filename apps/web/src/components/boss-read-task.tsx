@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogTitle } f
 import { createLatestRequest } from "@/lib/latest-request";
 
 type TaskStatus = "accepted" | "running" | "waiting" | "failed" | "timed_out" | "cancelled" | "completed" | "unknown";
-type ReadTask = { task_id: string; task_status: TaskStatus; browser_session_id: string | null; outcome: string | null };
+type ReadTask = { task_id: string; task_status: TaskStatus; browser_session_id: string | null; outcome: string | null; authorization_expires_at?: string; authorization_status?: string };
 type ReadResult = {
   observed_at: string;
   page: {
@@ -17,7 +17,7 @@ type ReadResult = {
     jobs: { job_id: string; title: string; company: string }[];
     conversations: { conversation_id: string; recruiter_name: string | null; company: string | null; last_message: string | null }[];
     messages: { message_id: string; conversation_id: string | null; content: string; sender: string; sent_at: string | null; resume_attachment?: { filename: string; sent_by_candidate: boolean; request_message_id: string | null } | null }[];
-    resume_control?: { conversation_id: string; state: "available" | "unavailable" | "unknown"; attachment_reported: boolean | null; material_state: "present_unidentified" | "absent" | "unknown" } | null;
+    resume_control?: { conversation_id: string; state: "available" | "unavailable" | "unknown"; attachment_reported: boolean | null; material_state?: "present_unidentified" | "absent" | "unknown" } | null;
   };
 };
 
@@ -29,11 +29,13 @@ const pageLabels = { ready: "已识别页面", needs_login: "需要重新登录"
 
 export function BossReadTask({ connectionId, version, blocked }: { connectionId: string; version: string; blocked: boolean }) {
   const [task, setTask] = useState<ReadTask | null>(null);
+  const [expiredTaskId, setExpiredTaskId] = useState<string | null>(null);
   const [result, setResult] = useState<ReadResult | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const [selectedConversation, setSelectedConversation] = useState<{ id: string; name: string } | null>(null);
+  const [selectedConversation, setSelectedConversation] = useState<{ id: string; name: string; humanControl?: boolean } | null>(null);
   const [executing, setExecuting] = useState(false);
   const [stopping, setStopping] = useState(false);
+  const [returning, setReturning] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const reads = useRef(createLatestRequest());
@@ -49,6 +51,7 @@ export function BossReadTask({ connectionId, version, blocked }: { connectionId:
       if (!response.ok) throw new Error("Read task unavailable");
       const current = await response.json() as ReadTask | null;
       if (!reads.current.isCurrent(controller)) return;
+      if (current?.authorization_expires_at && !(Date.parse(current.authorization_expires_at) > Date.now())) setExpiredTaskId(current.task_id);
       setTask(current);
       if (current) {
         const observed = await fetch(`${base}/${current.task_id}/result`, { cache: "no-store", signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15_000)]) });
@@ -88,6 +91,13 @@ export function BossReadTask({ connectionId, version, blocked }: { connectionId:
     return () => { stopped = true; clearTimeout(timer); };
   }, [executing, task?.task_status, refresh]);
 
+  useEffect(() => {
+    if (!task?.authorization_expires_at || task.outcome !== "read_human_control") return;
+    const remaining = Date.parse(task.authorization_expires_at) - Date.now();
+    const timer = setTimeout(() => setExpiredTaskId(task.task_id), Number.isFinite(remaining) ? Math.max(0, remaining) : 0);
+    return () => clearTimeout(timer);
+  }, [task?.task_id, task?.outcome, task?.authorization_expires_at]);
+
   const execute = async (accepted: ReadTask, controller: AbortController) => {
     const response = await fetch(`${base}/${accepted.task_id}/run`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
@@ -109,7 +119,7 @@ export function BossReadTask({ connectionId, version, blocked }: { connectionId:
         requestKey.current ??= crypto.randomUUID();
         const response = await fetch(base, {
           method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": requestKey.current },
-          body: JSON.stringify({ version, authorize_read: true, ...(selectedConversation ? { conversation_id: selectedConversation.id } : {}) }),
+          body: JSON.stringify({ version, authorize_read: true, ...(selectedConversation ? { conversation_id: selectedConversation.id, ...(selectedConversation.humanControl ? { human_control: true } : {}) } : {}) }),
           signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15_000)]),
         });
         if (!response.ok) throw new Error("Read acceptance unconfirmed");
@@ -137,6 +147,37 @@ export function BossReadTask({ connectionId, version, blocked }: { connectionId:
   };
 
   const active = executing || stopping || task?.task_status === "running" || task?.task_status === "waiting" || task?.task_status === "unknown";
+  const humanWaiting = task?.task_status === "waiting" && task.outcome === "read_human_control";
+  const manualAuthorized = humanWaiting && task.authorization_status === "active" && !!task.authorization_expires_at && expiredTaskId !== task.task_id;
+  const handback = async () => {
+    if (writes.current || stops.current || !task || !manualAuthorized) return;
+    const controller = new AbortController();
+    writes.current = controller;
+    setReturning(true);
+    setExecuting(true);
+    setError(null);
+    try {
+      const response = await fetch(`${base}/${task.task_id}/handback`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+        signal: AbortSignal.any([controller.signal, AbortSignal.timeout(120_000)]),
+      });
+      if (!response.ok) throw new Error("Control handback unconfirmed");
+      const current = await response.json() as ReadTask;
+      if (controller.signal.aborted) return;
+      reads.current.cancel();
+      setTask(current);
+      await refresh();
+      if (current.task_status !== "completed") setError("人工操作后的会话未通过核验，请查看状态；不会自动发送或重试。");
+    } catch (failure) {
+      if (controller.signal.aborted) return;
+      if (!(failure instanceof Error)) throw failure;
+      await refresh();
+      if (!controller.signal.aborted) setError("归还结果尚未确认，请核对状态；不会重放浏览器操作。");
+    } finally {
+      if (writes.current === controller) writes.current = null;
+      if (!controller.signal.aborted) { setReturning(false); setExecuting(false); }
+    }
+  };
   const stop = async () => {
     if (stops.current || !task || !["accepted", "running", "waiting"].includes(task.task_status)) return;
     const controller = new AbortController();
@@ -191,25 +232,26 @@ export function BossReadTask({ connectionId, version, blocked }: { connectionId:
       <div className="flex items-center gap-2">
         <Button disabled={blocked || active || loading} variant="outline" onClick={() => { if (task?.task_status === "accepted") void start(true); else { setSelectedConversation(null); setConfirmOpen(true); } }}>{executing && <LoaderCircle className="size-3.5 animate-spin" />}{task?.task_status === "accepted" ? "执行已受理读取" : "读取 BOSS 页面"}</Button>
         <Button variant="ghost" onClick={() => void refresh()}><RefreshCw className="size-3.5" />核对读取结果</Button>
-        {task && ["accepted", "running", "waiting"].includes(task.task_status) && <Button disabled={stopping} variant="outline" onClick={() => void stop()}>{stopping ? "正在停止" : task.task_status === "waiting" ? "核对停止并释放" : "停止读取"}</Button>}
+        {manualAuthorized && <Button disabled={returning || stopping} onClick={() => void handback()}>归还控制并重新核验</Button>}
+        {task && ["accepted", "running", "waiting"].includes(task.task_status) && <Button disabled={stopping} variant="outline" onClick={() => void stop()}>{stopping ? "正在停止" : humanWaiting ? "结束人工操作并释放" : task.task_status === "waiting" ? "核对停止并释放" : "停止读取"}</Button>}
         {task?.task_status === "unknown" && <Button disabled={executing || stopping} variant="outline" onClick={() => void reconcile()}>核对释放并结束</Button>}
       </div>
     </div>
     {blocked && <p className="mt-2 text-xs text-muted-foreground">请先关闭上方观看现场，以释放本机浏览器会话。</p>}
-    {task && <p role="status" className="mt-3 text-xs">{task.outcome === "read_stop_requested" ? "停止已请求 · 等待浏览器释放核验" : labels[task.task_status]}{executing && task.task_status === "accepted" ? " · 执行请求已发出" : ""}</p>}
-    {(task?.task_status === "running" || task?.task_status === "waiting") && task.browser_session_id && <BrowserScene key={task.browser_session_id} sessionId={task.browser_session_id} />}
+    {task && <p role="status" className="mt-3 text-xs">{returning || task.outcome === "read_handback_started" ? "正在归还控制并重新核验" : humanWaiting ? (manualAuthorized ? "自动执行已暂停 · 当前由你操作" : "人工操作授权已到期 · 请结束并释放现场") : task.outcome === "read_stop_requested" ? "停止已请求 · 等待浏览器释放核验" : labels[task.task_status]}{executing && task.task_status === "accepted" ? " · 执行请求已发出" : ""}</p>}
+    {!returning && !stopping && (task?.task_status === "running" || (task?.task_status === "waiting" && (!humanWaiting || manualAuthorized))) && task.browser_session_id && <BrowserScene key={`${task.browser_session_id}:${manualAuthorized ? "control" : "watch"}`} sessionId={task.browser_session_id} controlMode={manualAuthorized ? "control" : "watch"} />}
     {result && <div className="mt-3 rounded-lg border bg-background p-3 text-xs leading-5">
       <p>{result.page.kind === "conversations" && result.page.conversations.length > 0 && result.page.messages.length === 0 ? "已读取会话列表摘要 · 消息详情待核验" : pageLabels[result.page.state]} · {new Date(result.observed_at).toLocaleString()}</p>
       <p className="mt-1 font-medium">{result.page.title}</p><p className="break-all text-muted-foreground">{result.page.url}</p>
-      {task?.task_status !== "completed" && <p className="mt-2 text-amber-700 dark:text-amber-300">{task?.task_status === "failed" ? "这是已保存的页面观察；本次未完成有效业务读取。" : "这是已保存的页面观察；本次任务尚未确认完成。"}</p>}
+      {task?.task_status !== "completed" && <p className="mt-2 text-amber-700 dark:text-amber-300">{humanWaiting ? "这是接管前的观察。人工操作后的页面将在归还控制时重新核验。" : task?.task_status === "failed" ? "这是已保存的页面观察；本次未完成有效业务读取。" : "这是已保存的页面观察；本次任务尚未确认完成。"}</p>}
       {result.page.jobs.map(job => <p key={job.job_id} className="mt-2">{job.title} · {job.company}</p>)}
-      {result.page.conversations.map(conversation => <div key={conversation.conversation_id} className="mt-2"><div className="flex items-center justify-between gap-2"><p>{conversation.recruiter_name ?? "招聘方"} · {conversation.company ?? ""}</p><Button variant="ghost" disabled={blocked || active || loading || task?.task_status === "accepted"} onClick={() => { setSelectedConversation({ id: conversation.conversation_id, name: conversation.recruiter_name ?? "招聘方" }); setConfirmOpen(true); }}>读取会话详情</Button></div><p className="text-muted-foreground">{conversation.last_message}</p>{result.page.messages.filter(message => message.conversation_id === conversation.conversation_id).map(message => <div key={message.message_id} className="mt-2 rounded border p-2"><p className="text-muted-foreground">{({ recruiter: "招聘方", candidate: "我", system: "平台提示" } as Record<string, string>)[message.sender] ?? "方向待核验"} · {message.sent_at ? new Date(message.sent_at).toLocaleString() : "时间待核验"}</p><p className="whitespace-pre-wrap">{message.content}</p></div>)}</div>)}
+      {result.page.conversations.map(conversation => <div key={conversation.conversation_id} className="mt-2"><div className="flex items-center justify-between gap-2"><p>{conversation.recruiter_name ?? "招聘方"} · {conversation.company ?? ""}</p><div className="flex gap-1"><Button variant="ghost" disabled={blocked || active || loading || task?.task_status === "accepted"} onClick={() => { setSelectedConversation({ id: conversation.conversation_id, name: conversation.recruiter_name ?? "招聘方" }); setConfirmOpen(true); }}>读取会话详情</Button><Button variant="outline" disabled={blocked || active || loading || task?.task_status === "accepted"} onClick={() => { setSelectedConversation({ id: conversation.conversation_id, name: conversation.recruiter_name ?? "招聘方", humanControl: true }); setConfirmOpen(true); }}>打开并人工操作</Button></div></div><p className="text-muted-foreground">{conversation.last_message}</p>{result.page.messages.filter(message => message.conversation_id === conversation.conversation_id).map(message => <div key={message.message_id} className="mt-2 rounded border p-2"><p className="text-muted-foreground">{({ recruiter: "招聘方", candidate: "我", system: "平台提示" } as Record<string, string>)[message.sender] ?? "方向待核验"} · {message.sent_at ? new Date(message.sent_at).toLocaleString() : "时间待核验"}</p><p className="whitespace-pre-wrap">{message.content}</p></div>)}</div>)}
       {result.page.messages.length > 0 && <p className="mt-2 text-muted-foreground">已核验当前加载的消息与最新消息标识；不代表全部历史记录，尚未开放自动回复或简历发送。</p>}
       {result.page.messages.filter(message => message.resume_attachment).map(message => <p key={`resume-${message.message_id}`} className="mt-2 text-muted-foreground">历史简历卡片（{message.sender === "candidate" ? "我方消息" : message.sender === "recruiter" ? "招聘方消息" : "平台消息"}）：{message.resume_attachment!.filename}。这是当前加载的历史记录，不能证明发送成功、待发送材料的版本或再次发送许可。</p>)}
-      {result.page.resume_control && <p className="mt-2 text-muted-foreground">简历入口：{({ available: "页面可用", unavailable: "页面当前不可用", unknown: "尚未核验" })[result.page.resume_control.state]}；平台材料：{({ present_unidentified: "存在但身份待核验", absent: "当前未发现", unknown: "尚未核验" })[result.page.resume_control.material_state]}。不能据此自动发送。</p>}
+      {result.page.resume_control && <p className="mt-2 text-muted-foreground">简历入口：{({ available: "页面可用", unavailable: "页面当前不可用", unknown: "尚未核验" })[result.page.resume_control.state]}；平台材料：{({ present_unidentified: "存在但身份待核验", absent: "当前未发现", unknown: "尚未核验" })[result.page.resume_control.material_state ?? "unknown"]}。不能据此自动发送。</p>}
       {result.page.kind === "conversations" && result.page.conversations.length === 0 && result.page.messages.length === 0 && <p className="mt-2 text-muted-foreground">已识别沟通页，尚未提取到可核验的会话或消息。</p>}
     </div>}
     {error && <p role="alert" className="mt-3 text-xs text-destructive">{error}</p>}
-    <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}><DialogContent><DialogTitle>{selectedConversation ? `读取 ${selectedConversation.name} 的会话？` : "允许读取 BOSS 页面？"}</DialogTitle><DialogDescription>{selectedConversation ? "本次会打开指定招聘方的会话，核验当前加载的消息并保存结果。打开会话可能标记已读。" : "本次将恢复已保存登录，打开 BOSS 沟通页并读取会话信息，保存读取结果。"}授权最长 15 分钟，不包含消息回复、简历发送或自动重试。</DialogDescription><DialogFooter><Button variant="outline" onClick={() => setConfirmOpen(false)}>取消</Button><Button onClick={() => void start()}>允许并读取</Button></DialogFooter></DialogContent></Dialog>
+    <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}><DialogContent><DialogTitle>{selectedConversation?.humanControl ? `打开 ${selectedConversation.name} 的会话并人工操作？` : selectedConversation ? `读取 ${selectedConversation.name} 的会话？` : "允许读取 BOSS 页面？"}</DialogTitle><DialogDescription>{selectedConversation ? "本次会打开指定招聘方的会话，核验当前加载的消息并保存结果。打开会话可能标记已读。" : "本次将恢复已保存登录，打开 BOSS 沟通页并读取会话信息，保存读取结果。"}{selectedConversation?.humanControl ? "核验后暂停自动执行，由你操作同一浏览器。归还时先断开人工输入，再核验原会话；切换会话或页面不一致时停止。" : ""}授权最长 15 分钟，不包含自动消息回复、简历发送或自动重试。</DialogDescription><DialogFooter><Button variant="outline" onClick={() => setConfirmOpen(false)}>取消</Button><Button onClick={() => void start()}>{selectedConversation?.humanControl ? "允许并打开" : "允许并读取"}</Button></DialogFooter></DialogContent></Dialog>
   </section>;
 }

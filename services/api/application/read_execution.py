@@ -39,10 +39,11 @@ class ReadExecutionService:
         expected_version: UUID,
         request_key: UUID,
         conversation_id: str | None = None,
+        human_control: bool = False,
     ) -> ReadExecution:
         return await self.repository.accept(
             actor,
-            target=BossReadTarget(connection_id, expected_version, conversation_id),
+            target=BossReadTarget(connection_id, expected_version, conversation_id, human_control),
             request_key=request_key,
             authorization_lifetime=timedelta(minutes=15),
         )
@@ -159,6 +160,10 @@ class ReadExecutionService:
             )
             try:
                 await control.send(context, "revoke")
+                with suppress(
+                    BrowserControlConflict, BrowserControlRejected, BrowserControlUncertain
+                ):
+                    await control.lifecycle(context, "release")
             except BrowserControlRejected:
                 # Registration may fail before Browser Service persists a session row.
                 # Repository reconciliation still requires either a released row or no row.
@@ -196,6 +201,7 @@ class ReadExecutionService:
         registered = False
         create_attempted = False
         created = False
+        held = False
         outcome = "read_unknown"
         observation: BossPageObservation | None = None
         try:
@@ -235,12 +241,20 @@ class ReadExecutionService:
                 outcome = "read_completed"
             elif observation.state in {"needs_login", "risk"}:
                 outcome = "read_failed"
+            if outcome == "read_completed" and context.human_control:
+                waiting = await self.repository.finish_browser(
+                    actor, task_id, outcome="read_human_control", observation=observation
+                )
+                held = (
+                    waiting.task.status == "waiting"
+                    and waiting.attempt.outcome == "read_human_control"
+                )
         except (BrowserControlRejected, BrowserControlConflict):
             outcome = "read_failed"
         except BrowserControlUncertain:
             outcome = "read_unknown"
         finally:
-            if registered:
+            if registered and not held:
                 try:
                     await control.send(context, "revoke")
                     if create_attempted:
@@ -249,6 +263,63 @@ class ReadExecutionService:
                         outcome = "read_failed"
                 except (BrowserControlConflict, BrowserControlRejected, BrowserControlUncertain):
                     outcome = "read_unknown"
+            if not held:
+                finished = await self.repository.finish_browser(
+                    actor, task_id, outcome=outcome, observation=observation
+                )
+                if (
+                    finished.task.status == "waiting"
+                    and finished.attempt.outcome == "read_stop_requested"
+                ):
+                    with suppress(ExecutionConflict):
+                        await self.repository.reconcile_released(actor, task_id)
+        if observation is None or outcome != "read_completed":
+            if outcome == "read_failed":
+                raise ExecutionUnavailable("BOSS read execution was rejected")
+            raise ExecutionUnavailable("BOSS read execution requires reconciliation")
+        return observation
+
+    async def handback_boss(
+        self,
+        actor: ActorContext,
+        connection_id: UUID,
+        task_id: UUID,
+        *,
+        control: BrowserSessionControl,
+        page_reader: BossPageReader,
+    ) -> ReadExecution:
+        await self.read_boss(actor, connection_id, task_id)
+        context = await self.repository.claim_handback(actor, task_id)
+        session_context = replace(context, conversation_id=None, observe_only=False)
+        observation: BossPageObservation | None = None
+        outcome = "read_unknown"
+        try:
+            await control.send(session_context, "block_viewer")
+            observation = await page_reader.read_boss_page(
+                replace(context, owner_id="boss-page-reader")
+            )
+            if (
+                observation.state == "ready"
+                and observation.kind == "conversations"
+                and has_bound_conversation_messages(observation)
+                and all(
+                    message.conversation_id == context.conversation_id
+                    for message in observation.messages
+                )
+            ):
+                outcome = "read_completed"
+            else:
+                outcome = "read_failed"
+        except (BrowserControlRejected, BrowserControlConflict, BrowserControlUncertain):
+            outcome = "read_unknown"
+        finally:
+            try:
+                await control.send(session_context, "revoke")
+                await control.lifecycle(session_context, "release")
+                if outcome == "read_unknown":
+                    outcome = "read_failed"
+            except (BrowserControlRejected, BrowserControlConflict, BrowserControlUncertain):
+                outcome = "read_unknown"
             finished = await self.repository.finish_browser(
                 actor, task_id, outcome=outcome, observation=observation
             )
@@ -258,8 +329,4 @@ class ReadExecutionService:
             ):
                 with suppress(ExecutionConflict):
                     await self.repository.reconcile_released(actor, task_id)
-        if observation is None or outcome != "read_completed":
-            if outcome == "read_failed":
-                raise ExecutionUnavailable("BOSS read execution was rejected")
-            raise ExecutionUnavailable("BOSS read execution requires reconciliation")
-        return observation
+        return await self.read_boss(actor, connection_id, task_id)

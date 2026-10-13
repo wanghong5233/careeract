@@ -20,7 +20,7 @@ function text(value) {
   return typeof value === "string" ? value : "";
 }
 
-function taskCard(fetch, blocked = false) {
+function taskCard(fetch, blocked = false, globals = {}) {
   const states = [], refs = [], effects = [];
   let stateIndex = 0, refIndex = 0;
   const { BossReadTask } = loadSource("components/boss-read-task.tsx", {
@@ -43,7 +43,7 @@ function taskCard(fetch, blocked = false) {
       DialogContent: Container, DialogDescription: Container, DialogFooter: Container, DialogTitle: Container,
     },
     "@/lib/latest-request": loadSource("lib/latest-request.ts"),
-  }, { fetch });
+  }, { fetch, ...globals });
   const render = () => { stateIndex = 0; refIndex = 0; return BossReadTask({ connectionId, version: "v1", blocked }); };
   render();
   const cleanup = effects[0]();
@@ -54,10 +54,92 @@ function taskCard(fetch, blocked = false) {
     assert.equal(element.props.disabled, undefined, label);
     element.props.onClick();
   };
-  return { render, button, click, cleanup, states };
+  return { render, button, click, cleanup, states, runExpiryEffect: () => effects.at(-1)() };
 }
 
 const settle = () => new Promise(resolve => setImmediate(resolve));
+
+test("manual control restores from durable waiting state and disconnects the scene before handback", async () => {
+  let current = { task_id: taskId, task_status: "waiting", outcome: "read_human_control", browser_session_id: "session-1",
+    authorization_status: "active", authorization_expires_at: new Date(Date.now() + 60_000).toISOString() };
+  let release;
+  const writes = [];
+  const fixture = taskCard(async (url, options = {}) => {
+    if (options.method === "POST") {
+      writes.push(url);
+      await new Promise(resolve => { release = resolve; });
+      current = { ...current, task_status: "completed", outcome: "read_completed" };
+    }
+    return Response.json(url.endsWith("/result") ? null : current);
+  });
+  await settle();
+  assert.match(text(fixture.render()), /自动执行已暂停 · 当前由你操作/);
+  assert.ok(elements(fixture.render()).some(element => element.props.controlMode === "control"));
+  fixture.button("归还控制并重新核验").props.onClick();
+  assert.equal(elements(fixture.render()).some(element => element.props.sessionId), false);
+  fixture.button("归还控制并重新核验").props.onClick();
+  assert.equal(writes.length, 1);
+  assert.ok(writes[0].endsWith("/handback"));
+  release();
+  await settle();
+  assert.match(text(fixture.render()), /读取完成/);
+  assert.equal(elements(fixture.render()).some(element => element.props.controlMode === "control"), false);
+  assert.equal(fixture.button("归还控制并重新核验"), undefined);
+  fixture.cleanup();
+});
+
+test("expired human control removes input scene and retains explicit cleanup", async () => {
+  const fixture = taskCard(async url => Response.json(url.endsWith("/result") ? null : {
+    task_id: taskId, task_status: "waiting", outcome: "read_human_control", browser_session_id: "session-1",
+    authorization_status: "active", authorization_expires_at: new Date(Date.now() - 60_000).toISOString(),
+  }));
+  await settle();
+  assert.match(text(fixture.render()), /人工操作授权已到期/);
+  assert.equal(elements(fixture.render()).some(element => element.props.sessionId), false);
+  assert.equal(fixture.button("归还控制并重新核验"), undefined);
+  assert.ok(fixture.button("结束人工操作并释放"));
+  fixture.cleanup();
+});
+
+test("human input disconnects at its deadline even when task polling has not returned", async () => {
+  let expire;
+  const fixture = taskCard(async url => Response.json(url.endsWith("/result") ? null : {
+    task_id: taskId, task_status: "waiting", outcome: "read_human_control", browser_session_id: "session-1",
+    authorization_status: "active", authorization_expires_at: new Date(Date.now() + 60_000).toISOString(),
+  }), false, {
+    setTimeout: (callback, delay) => { assert.ok(delay > 0 && delay <= 60_000); expire = callback; return 1; },
+    clearTimeout: () => {},
+  });
+  await settle();
+  assert.ok(elements(fixture.render()).some(element => element.props.controlMode === "control"));
+  const cleanup = fixture.runExpiryEffect();
+  expire();
+  assert.equal(elements(fixture.render()).some(element => element.props.sessionId), false);
+  assert.match(text(fixture.render()), /人工操作授权已到期/);
+  cleanup();
+  fixture.cleanup();
+});
+
+test("manual opening persists explicit intent with the selected conversation", async () => {
+  let current = { task_id: taskId, task_status: "completed", outcome: "read_completed", browser_session_id: null };
+  const page = { observed_at: "2026-10-13T00:00:00Z", page: { title: "Synthetic", url: "https://www.zhipin.com/web/geek/chat", kind: "conversations", state: "ready", jobs: [], messages: [],
+    conversations: [{ conversation_id: "c1", recruiter_name: "Synthetic HR", last_message: "Synthetic preview" }] } };
+  const writes = [];
+  const fixture = taskCard(async (url, options = {}) => {
+    if (options.method === "POST") {
+      writes.push({ url, options });
+      current = { ...current, task_status: url.endsWith("/run") ? "waiting" : "accepted" };
+    }
+    return Response.json(url.endsWith("/result") ? page : current);
+  });
+  await settle();
+  fixture.button("打开并人工操作").props.onClick();
+  fixture.click("允许并打开");
+  await settle();
+  assert.equal(writes.length, 2);
+  assert.deepEqual(JSON.parse(writes[0].options.body), { version: "v1", authorize_read: true, conversation_id: "c1", human_control: true });
+  fixture.cleanup();
+});
 const accepted = { task_id: taskId, task_status: "accepted", browser_session_id: null, outcome: null };
 const observation = {
   observed_at: "2026-10-10T00:00:00Z",

@@ -32,7 +32,10 @@ from services.api.infrastructure.execution import (
 def target_from_row(row: RowMapping) -> ReadTarget:
     if row["kind"] == "boss_connection":
         return BossReadTarget(
-            row["connection_id"], row["connection_version"], row["conversation_id"]
+            row["connection_id"],
+            row["connection_version"],
+            row["conversation_id"],
+            row["human_control"],
         )
     if row["kind"] == "material_version":
         return MaterialReadTarget(
@@ -209,9 +212,9 @@ class PostgresReadExecutionRepository:
                     text(
                         "INSERT INTO career.execution_resources "
                         "(task_id,user_id,kind,connection_id,connection_version,material_id,"
-                        "material_version_id,material_version,conversation_id) "
+                        "material_version_id,material_version,conversation_id,human_control) "
                         "VALUES (:task,:user,:resource_kind,:connection,:connection_version,"
-                        ":material,:material_version_id,:material_version,:conversation_id)"
+                        ":material,:material_version_id,:material_version,:conversation_id,:human_control)"
                     ),
                     {
                         "task": task_id,
@@ -237,6 +240,8 @@ class PostgresReadExecutionRepository:
                         "conversation_id": target.conversation_id
                         if isinstance(target, BossReadTarget)
                         else None,
+                        "human_control": isinstance(target, BossReadTarget)
+                        and target.human_control,
                     },
                 )
                 result = await self._read(database, actor, task_id)
@@ -252,6 +257,8 @@ class PostgresReadExecutionRepository:
         database: AsyncConnection, actor: ActorContext, target: ReadTarget
     ) -> None:
         if isinstance(target, BossReadTarget):
+            if target.human_control and target.conversation_id is None:
+                raise ExecutionConflict("Human control requires a selected conversation")
             resource = (
                 (
                     await database.execute(
@@ -307,7 +314,10 @@ class PostgresReadExecutionRepository:
                 )
                 if stopping:
                     return current
-                if current.task.status not in {"accepted", "running"}:
+                if current.task.status not in {"accepted", "running"} and not (
+                    current.task.status == "waiting"
+                    and current.attempt.outcome == "read_human_control"
+                ):
                     raise ExecutionConflict("Started read execution requires reconciliation")
                 started = current.attempt.browser_session_id is not None
                 parameters = {"task": task_id, "user": actor.user_id}
@@ -464,6 +474,7 @@ class PostgresReadExecutionRepository:
                     request_id=execution.attempt.request_id,
                     owner_id="boss-read",
                     conversation_id=execution.target.conversation_id,
+                    human_control=execution.target.human_control,
                 )
         except (DBAPIError, PoolTimeoutError):
             raise ExecutionUnavailable("Read execution storage is unavailable") from None
@@ -476,12 +487,13 @@ class PostgresReadExecutionRepository:
         outcome: str,
         observation: BossPageObservation | None = None,
     ) -> ReadExecution:
-        if outcome not in {"read_completed", "read_failed", "read_unknown"}:
+        if outcome not in {"read_completed", "read_failed", "read_unknown", "read_human_control"}:
             raise ExecutionConflict("Unsupported read execution outcome")
         status = {
             "read_completed": "completed",
             "read_failed": "failed",
             "read_unknown": "unknown",
+            "read_human_control": "waiting",
         }[outcome]
         try:
             async with self.engine.begin() as database:
@@ -497,6 +509,35 @@ class PostgresReadExecutionRepository:
                     return execution
                 if execution.task.status != "running" or execution.attempt.status != "running":
                     raise ExecutionConflict("Read execution is not running")
+                if outcome == "read_human_control":
+                    now = cast(datetime, await database.scalar(text("SELECT clock_timestamp()")))
+                    if (
+                        not isinstance(execution.target, BossReadTarget)
+                        or not execution.target.human_control
+                        or observation is None
+                        or execution.authorization.status != "active"
+                        or execution.authorization.expires_at <= now
+                    ):
+                        raise ExecutionConflict("Human control is not authorized")
+                    await self._validate_target(database, actor, execution.target)
+                    available = await database.scalar(
+                        text(
+                            "SELECT true FROM browser.sessions s "
+                            "JOIN browser.steel_operations o ON o.session_id=s.session_id "
+                            "AND o.state='live' WHERE s.session_id=:session AND s.user_id=:user "
+                            "AND s.task_id=:task AND s.authorization_id=:authorization "
+                            "AND s.revoked=false AND s.viewer_blocked=false AND s.lease_id IS NULL "
+                            "FOR UPDATE OF s"
+                        ),
+                        {
+                            "session": execution.attempt.browser_session_id,
+                            "user": actor.user_id,
+                            "task": task_id,
+                            "authorization": execution.authorization.id,
+                        },
+                    )
+                    if not available:
+                        raise ExecutionConflict("Automatic control disconnection is not confirmed")
                 if observation is not None:
                     payload = json.dumps(asdict(observation), ensure_ascii=False)
                     if len(payload.encode()) > 512 * 1024:
@@ -504,7 +545,9 @@ class PostgresReadExecutionRepository:
                     await database.execute(
                         text(
                             "INSERT INTO career.execution_read_results (task_id, user_id, page) "
-                            "VALUES (:task, :user, CAST(:page AS jsonb))"
+                            "VALUES (:task, :user, CAST(:page AS jsonb)) "
+                            "ON CONFLICT (task_id) DO UPDATE SET page=EXCLUDED.page, "
+                            "observed_at=clock_timestamp()"
                         ),
                         {"task": task_id, "user": actor.user_id, "page": payload},
                     )
@@ -512,14 +555,20 @@ class PostgresReadExecutionRepository:
                     text(
                         "UPDATE career.execution_authorizations SET status='revoked', "
                         "revoked_at=COALESCE(revoked_at,clock_timestamp()) "
-                        "WHERE task_id=:task AND user_id=:user"
+                        "WHERE task_id=:task AND user_id=:user AND :revoke"
                     ),
-                    {"task": task_id, "user": actor.user_id},
+                    {
+                        "task": task_id,
+                        "user": actor.user_id,
+                        "revoke": outcome != "read_human_control",
+                    },
                 )
                 await database.execute(
                     text(
                         "UPDATE career.execution_attempts SET status=:status, outcome=:outcome, "
-                        "finished_at=clock_timestamp(), updated_at=clock_timestamp() "
+                        "finished_at=CASE WHEN :status='waiting' THEN NULL "
+                        "ELSE clock_timestamp() END, "
+                        "updated_at=clock_timestamp() "
                         "WHERE id=:attempt AND user_id=:user"
                     ),
                     {
@@ -541,6 +590,71 @@ class PostgresReadExecutionRepository:
                 return result
         except (DBAPIError, PoolTimeoutError):
             raise ExecutionUnavailable("Read execution storage is unavailable") from None
+
+    async def claim_handback(self, actor: ActorContext, task_id: UUID) -> BrowserControlContext:
+        try:
+            async with self.engine.begin() as database:
+                execution = await self._read(database, actor, task_id, lock=True)
+                now = cast(datetime, await database.scalar(text("SELECT clock_timestamp()")))
+                if (
+                    execution is None
+                    or not isinstance(execution.target, BossReadTarget)
+                    or not execution.target.human_control
+                    or execution.task.status != "waiting"
+                    or execution.attempt.status != "waiting"
+                    or execution.attempt.outcome != "read_human_control"
+                    or execution.attempt.browser_session_id is None
+                    or execution.authorization.status != "active"
+                    or execution.authorization.expires_at <= now
+                ):
+                    raise ExecutionConflict("Human control cannot be returned")
+                await self._validate_target(database, actor, execution.target)
+                blocked = await database.scalar(
+                    text(
+                        "UPDATE browser.sessions SET viewer_blocked=true, "
+                        "draining=(lease_id IS NOT NULL) "
+                        "WHERE session_id=:session AND user_id=:user AND task_id=:task "
+                        "AND authorization_id=:authorization AND revoked=false "
+                        "RETURNING true"
+                    ),
+                    {
+                        "session": execution.attempt.browser_session_id,
+                        "user": actor.user_id,
+                        "task": task_id,
+                        "authorization": execution.authorization.id,
+                    },
+                )
+                if not blocked:
+                    raise ExecutionConflict("Human browser is unavailable")
+                await database.execute(
+                    text(
+                        "UPDATE career.execution_tasks SET status='running', "
+                        "updated_at=clock_timestamp() WHERE id=:task AND user_id=:user"
+                    ),
+                    {"task": task_id, "user": actor.user_id},
+                )
+                await database.execute(
+                    text(
+                        "UPDATE career.execution_attempts SET status='running', "
+                        "outcome='read_handback_started', updated_at=clock_timestamp() "
+                        "WHERE id=:attempt AND user_id=:user"
+                    ),
+                    {"attempt": execution.attempt.id, "user": actor.user_id},
+                )
+                return BrowserControlContext(
+                    actor.user_id,
+                    execution.attempt.browser_session_id,
+                    task_id,
+                    execution.authorization.id,
+                    execution.authorization.expires_at,
+                    execution.attempt.id,
+                    execution.attempt.request_id,
+                    "boss-read",
+                    execution.target.conversation_id,
+                    observe_only=True,
+                )
+        except (DBAPIError, PoolTimeoutError):
+            raise ExecutionUnavailable("Handback storage is unavailable") from None
 
     async def read_latest_boss(
         self, actor: ActorContext, connection_id: UUID

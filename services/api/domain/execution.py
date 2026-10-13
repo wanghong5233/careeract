@@ -70,6 +70,7 @@ class BossReadTarget:
     connection_id: UUID
     connection_version: UUID
     conversation_id: str | None = None
+    human_control: bool = False
 
 
 @dataclass(frozen=True, slots=True)

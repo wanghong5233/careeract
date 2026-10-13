@@ -5,12 +5,12 @@ import { forward } from "../../_helpers";
 
 export type ReadContext = { params: Promise<{ connectionId: string; taskId?: string }> };
 
-export async function readRequest(request: NextRequest, context: ReadContext, method: "GET" | "POST" | "DELETE", operation?: "task" | "run" | "result" | "reconcile") {
+export async function readRequest(request: NextRequest, context: ReadContext, method: "GET" | "POST" | "DELETE", operation?: "task" | "run" | "result" | "reconcile" | "handback") {
   const { connectionId, taskId } = await context.params;
   if (!validProjectId(connectionId) || (operation && (!taskId || !validProjectId(taskId)))) {
     return failure(422, "invalid_read_execution", "读取任务标识无效。", crypto.randomUUID());
   }
   const suffix = operation ? `/${taskId}${operation === "task" ? "" : `/${operation}`}` : "";
-  const timeout = operation === "run" ? 120_000 : method === "DELETE" || operation === "reconcile" ? 75_000 : 15_000;
+  const timeout = operation === "run" || operation === "handback" ? 120_000 : method === "DELETE" || operation === "reconcile" ? 75_000 : 15_000;
   return forward(request, `/api/v1/connections/boss/${connectionId}/read${suffix}`, method, timeout);
 }

@@ -33,7 +33,7 @@ read tasks, and binds a new current login task. Superseded login commands and ke
 the new task must still pass login verification and physical release before becoming connected.
 
 `POST /api/v1/connections/boss/{id}/read` accepts a bounded `boss.read` task with
-JSON `{version, authorize_read: true, conversation_id?}` and a UUID `Idempotency-Key`. It validates
+JSON `{version, authorize_read: true, conversation_id?, human_control?}` and a UUID `Idempotency-Key`. It validates
 the owned connected resource and its current version, atomically persists the task,
 authorization and attempt, and returns 201. Authorization expires within 15 minutes
 of database acceptance; replay retains the original task, deadline and cancellation.
@@ -52,6 +52,20 @@ physical release is confirmed it remains `waiting` and can be reconciled after r
 or a process interruption. Cancellation replays safely and never reruns the read.
 Missing, other-owned or differently bound task IDs return the same 404 error envelope.
 These responses use `Cache-Control: no-store`.
+
+`human_control: true` requires a selected conversation and explicit user intent. After a
+successful initial read and confirmed executor disconnection, the task remains
+`waiting/read_human_control`; its existing deadline is retained. Only this state can
+issue manual Viewer tickets for the business session. Refresh restores the same task
+without navigating or creating another browser. The initial observation is a snapshot,
+not the result of subsequent manual actions.
+`POST /api/v1/connections/boss/{id}/read/{task_id}/handback` with empty JSON atomically
+fences old input credentials and claims the handback once. It waits for the human
+channel to disconnect, then observes the same session without clicking a conversation.
+A changed target, login/risk page or missing messages fails verification. Unconfirmed
+disconnection retains the lease and an unknown outcome; explicit reconciliation can
+release through the guarded lifecycle and closes only on durable release evidence.
+Handback never grants messaging permission or reruns a browser action.
 
 The shared execution adapter reserves a fresh browser session only after rechecking the
 owned connected resource, current version, active authorization and expiry. It uses the

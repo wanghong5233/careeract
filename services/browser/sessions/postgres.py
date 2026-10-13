@@ -41,6 +41,8 @@ class PostgresLeaseStore:
             now = cast(datetime, await connection.scalar(text("SELECT clock_timestamp()")))
             if (
                 row["revoked"]
+                or command.owner_id == "viewer"
+                and row["viewer_blocked"]
                 or row["user_id"] != command.sub
                 or row["task_id"] != command.task_id
                 or row["authorization_id"] != command.authorization_id
@@ -124,6 +126,7 @@ class PostgresLeaseStore:
             now = cast(datetime, await connection.scalar(text("SELECT clock_timestamp()")))
             if (
                 row["revoked"]
+                or row["viewer_blocked"]
                 or row["user_id"] != command.sub
                 or row["task_id"] != command.task_id
                 or row["authorization_id"] != command.authorization_id
@@ -205,6 +208,7 @@ class PostgresLeaseStore:
             now = cast(datetime, await connection.scalar(text("SELECT clock_timestamp()")))
             if (
                 row["revoked"]
+                or row["viewer_blocked"]
                 or row["user_id"] != command.sub
                 or row["task_id"] != command.task_id
                 or row["authorization_id"] != command.authorization_id
@@ -250,7 +254,10 @@ class PostgresLeaseStore:
             )
 
     async def manage(self, command: BrowserCommand) -> None:
-        if command.action not in ("register", "revoke") or command.lease_id is not None:
+        if (
+            command.action not in ("register", "revoke", "block_viewer")
+            or command.lease_id is not None
+        ):
             raise CommandRejected("Not a session command")
         async with self.engine.begin() as connection:
             created = await connection.scalar(
@@ -295,6 +302,16 @@ class PostgresLeaseStore:
             if command.action == "register":
                 if created is None:
                     raise LeaseConflict("Session already exists and cannot be rebound")
+            elif command.action == "block_viewer":
+                if created is not None or row["revoked"]:
+                    raise CommandRejected("Control handback requires an active session")
+                await connection.execute(
+                    text(
+                        "UPDATE browser.sessions SET viewer_blocked=true, "
+                        "draining=(lease_id IS NOT NULL) WHERE session_id=:session"
+                    ),
+                    {"session": command.session_id},
+                )
             else:
                 await connection.execute(
                     text(
@@ -341,7 +358,7 @@ class PostgresLeaseStore:
                 raise CommandRejected("Browser command was already consumed")
 
     async def wait_for_viewer_stop(self, command: BrowserCommand) -> None:
-        if command.action not in ("release", "finish"):
+        if command.action not in ("release", "finish", "block_viewer"):
             raise CommandRejected("Only release can wait for disconnection")
         try:
             async with asyncio.timeout(7):
@@ -352,7 +369,11 @@ class PostgresLeaseStore:
                             datetime, await connection.scalar(text("SELECT clock_timestamp()"))
                         )
                         if (
-                            not row["revoked"]
+                            not (
+                                row["viewer_blocked"]
+                                if command.action == "block_viewer"
+                                else row["revoked"]
+                            )
                             or row["user_id"] != command.sub
                             or row["task_id"] != command.task_id
                             or row["authorization_id"] != command.authorization_id

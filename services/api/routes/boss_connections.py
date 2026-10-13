@@ -52,6 +52,7 @@ class StartLoginBody(RevokeConnectionBody):
 
 class StartReadBody(RevokeConnectionBody):
     authorize_read: Literal[True]
+    human_control: bool = Field(default=False, strict=True)
     conversation_id: str | None = Field(
         default=None, min_length=1, max_length=200, pattern=r"^[A-Za-z0-9_-]+$"
     )
@@ -247,6 +248,7 @@ async def accept_read(
             expected_version=body.version,
             request_key=idempotency_key,
             conversation_id=body.conversation_id,
+            human_control=body.human_control,
         )
     )
 
@@ -292,6 +294,32 @@ async def run_read_execution(
     response.headers["Cache-Control"] = "no-store"
     return serialize_read(
         await service.execute_boss(
+            actor,
+            connection_id,
+            task_id,
+            control=cast(BrowserSessionControl, control),
+            page_reader=cast(BossPageReader, reader),
+        )
+    )
+
+
+@router.post("/{connection_id}/read/{task_id}/handback", response_model=ReadExecutionResponse)
+async def handback_read_execution(
+    connection_id: UUID,
+    task_id: UUID,
+    body: RunReadBody,
+    response: Response,
+    request: Request,
+    service: Annotated[ReadExecutionService, Depends(get_read_service)],
+    actor: Annotated[ActorContext, Depends(get_actor)],
+) -> ReadExecutionResponse:
+    control = getattr(request.app.state, "browser_control", None)
+    reader = getattr(request.app.state, "boss_page_reader", None)
+    if control is None or reader is None:
+        raise HTTPException(503, "Browser handback is not configured")
+    response.headers["Cache-Control"] = "no-store"
+    return serialize_read(
+        await service.handback_boss(
             actor,
             connection_id,
             task_id,

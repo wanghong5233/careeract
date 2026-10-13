@@ -157,6 +157,8 @@ async def test_page_observation_waits_for_structure_without_replaying_navigation
         "conversation",
         "conversation_pending",
         "conversation_missing",
+        "observe_only",
+        "observe_wrong_thread",
         "disconnect",
     ],
 )
@@ -268,7 +270,14 @@ async def test_page_snapshot_is_read_only_scoped_and_bounded(
     )
 
     reader = BossContextReader(client, AnyHttpUrl("http://cdp"), session_id)
-    if changed in {"conversation", "conversation_pending", "conversation_missing", "disconnect"}:
+    if changed in {
+        "conversation",
+        "conversation_pending",
+        "conversation_missing",
+        "disconnect",
+        "observe_only",
+        "observe_wrong_thread",
+    }:
         from services.browser.site_adapters.boss_context import (
             BOSS_OPEN_CONVERSATION,
             BOSS_RENDERED_CONVERSATIONS,
@@ -303,7 +312,15 @@ async def test_page_snapshot_is_read_only_scoped_and_bounded(
                 value = True
             else:
                 captures += 1
-                value = "[]" if changed == "conversation_pending" and captures == 1 else detail
+                value = (
+                    "[]"
+                    if (
+                        changed == "conversation_pending"
+                        and captures == 1
+                        or changed == "observe_wrong_thread"
+                    )
+                    else detail
+                )
             return {"result": {"value": value}}
 
         cdp.send.Runtime.evaluate.side_effect = evaluate
@@ -322,13 +339,22 @@ async def test_page_snapshot_is_read_only_scoped_and_bounded(
             ):
                 await reader.read_conversation("thread-1")
         else:
-            page = await reader.read_conversation("thread-1")
-            assert page.messages[0].message_id == "123"
-            assert page.resume_control is not None
-            assert page.resume_control.state == "unavailable"
-        assert clicks == (0 if changed == "conversation_missing" else 1)
+            page = await reader.read_conversation(
+                "thread-1", navigate=changed not in {"observe_only", "observe_wrong_thread"}
+            )
+            if changed == "observe_wrong_thread":
+                assert page.messages == () and page.resume_control is None
+            else:
+                assert page.messages[0].message_id == "123"
+                assert page.resume_control is not None
+                assert page.resume_control.state == "unavailable"
+        assert clicks == (
+            0 if changed in {"conversation_missing", "observe_only", "observe_wrong_thread"} else 1
+        )
         assert captures == (
-            2
+            8
+            if changed == "observe_wrong_thread"
+            else 2
             if changed == "conversation_pending"
             else 0
             if changed == "conversation_missing"

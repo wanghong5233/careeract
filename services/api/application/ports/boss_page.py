@@ -49,7 +49,7 @@ class BossResumeControlObservation:
     conversation_id: str
     state: Literal["available", "unavailable", "unknown"]
     attachment_reported: bool | None
-    material_state: Literal["present_unidentified", "absent", "unknown"]
+    material_state: Literal["present_unidentified", "absent", "unknown"] = "unknown"
 
 
 @dataclass(frozen=True, slots=True, repr=False)

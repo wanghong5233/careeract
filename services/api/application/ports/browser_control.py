@@ -6,6 +6,7 @@ from uuid import UUID
 BrowserAction = Literal[
     "register",
     "revoke",
+    "block_viewer",
     "acquire",
     "renew",
     "stop",
@@ -18,6 +19,7 @@ BrowserAction = Literal[
     "forget",
     "snapshot",
     "conversation",
+    "observe_conversation",
 ]
 
 
@@ -34,6 +36,8 @@ class BrowserControlContext:
     request_id: UUID
     owner_id: str
     conversation_id: str | None = None
+    human_control: bool = False
+    observe_only: bool = False
 
 
 @dataclass(frozen=True)

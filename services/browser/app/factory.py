@@ -207,6 +207,8 @@ def create_app(
         assert store is not None
         try:
             await store.manage(command)
+            if action == "block_viewer":
+                await store.wait_for_viewer_stop(command)
         except CommandRejected:
             raise HTTPException(403, "Browser command rejected") from None
         except LeaseConflict:
@@ -331,11 +333,13 @@ def create_app(
             headers={"Cache-Control": "no-store"},
         )
 
-    @app.post("/internal/v1/sessions/{session_id}/boss/conversation")
+    @app.post("/internal/v1/sessions/{session_id}/boss/{action}")
     async def read_boss_conversation(
-        session_id: UUID, authorization: str = Header(default="")
+        session_id: UUID,
+        action: Literal["conversation", "observe_conversation"],
+        authorization: str = Header(default=""),
     ) -> Response:
-        command = authenticate(session_id, "conversation", authorization)
+        command = authenticate(session_id, action, authorization)
         if command.owner_id != "boss-page-reader" or command.conversation_id is None:
             raise HTTPException(403, "Conversation read rejected")
         if context_reader is None or store is None:
@@ -366,9 +370,12 @@ def create_app(
             async def observe() -> BossReadOnlyPage | None:
                 async with store.executor_action_guard(check):
                     try:
-                        return await context_reader(session_id).read_conversation(
-                            command.conversation_id or ""
-                        )
+                        reader = context_reader(session_id)
+                        if action == "observe_conversation":
+                            return await reader.read_conversation(
+                                command.conversation_id or "", navigate=False
+                            )
+                        return await reader.read_conversation(command.conversation_id or "")
                     except BossDisconnectUnconfirmed:
                         raise
                     except BossContextUnavailable:

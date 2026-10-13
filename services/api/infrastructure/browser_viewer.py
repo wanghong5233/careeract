@@ -119,8 +119,6 @@ class PostgresBrowserViewerTicketIssuer:
                     .one_or_none()
                 )
                 if row is None:
-                    if mode != "watch":
-                        raise BrowserViewerTicketRejected("Saved login viewers are read-only")
                     row = (
                         (
                             await connection.execute(
@@ -147,17 +145,24 @@ class PostgresBrowserViewerTicketIssuer:
                                     "AND o.state='live' "
                                     "WHERE s.session_id=:session_id AND t.user_id=:user_id "
                                     "AND t.kind='boss_read' AND r.kind='boss_connection' "
-                                    "AND t.status='running' AND a.status='running' "
+                                    "AND ((:mode='watch' AND t.status='running' "
+                                    "AND a.status='running') "
+                                    "OR (t.status='waiting' AND a.status='waiting' "
+                                    "AND a.outcome='read_human_control' AND r.human_control=true "
+                                    "AND s.viewer_blocked=false "
+                                    "AND (s.lease_id IS NULL OR s.owner_id='viewer'))) "
                                     "AND z.scope='boss.read' AND z.status='active' "
                                     "AND z.expires_at>clock_timestamp()"
                                 ),
-                                {"session_id": session_id, "user_id": actor.user_id},
+                                {"session_id": session_id, "user_id": actor.user_id, "mode": mode},
                             )
                         )
                         .mappings()
                         .one_or_none()
                     )
                 if row is None:
+                    if mode != "watch":
+                        raise BrowserViewerTicketRejected("Browser manual control is unavailable")
                     row = (
                         (
                             await connection.execute(

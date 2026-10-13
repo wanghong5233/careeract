@@ -256,6 +256,17 @@ require separate verification.
 
 ## Signed current-page reads
 
+Business human control reuses the same Viewer lease and relay. Signed `block_viewer`
+commands durably fence old Viewer credentials and drain input; they do not revoke the
+executor authorization. A subsequent executor can acquire control only after confirmed
+channel disconnection. The API also persists this fence before dispatch, so a crash
+cannot reactivate old input tickets. Watchers remain unable to write.
+`/boss/observe_conversation` uses the existing executor lifecycle and action guard to
+observe a bound conversation without navigation. A different selected conversation is
+not silently corrected by clicking the original row. These control paths have isolated
+PostgreSQL/synthetic browser regression evidence; real product handback acceptance is
+still required.
+
 `POST /internal/v1/sessions/{id}/boss/page` accepts the dedicated `snapshot` command
 from `boss-page-reader`. Watcher and login Viewer commands cannot call this endpoint.
 The caller must first validate a business read authorization and session/task ownership;

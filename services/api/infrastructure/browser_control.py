@@ -52,6 +52,7 @@ class BrowserCommandSigner:
                 in (
                     "register",
                     "revoke",
+                    "block_viewer",
                     "acquire",
                     "viewer",
                     "watcher",
@@ -61,10 +62,12 @@ class BrowserCommandSigner:
                     "forget",
                     "snapshot",
                     "conversation",
+                    "observe_conversation",
                 )
             )
             != (lease_id is None)
-            or (action == "conversation") != (context.conversation_id is not None)
+            or (action in {"conversation", "observe_conversation"})
+            != (context.conversation_id is not None)
         ):
             raise BrowserControlRejected("Invalid browser control context")
         issued_at = int(datetime.now(UTC).timestamp())
@@ -113,10 +116,11 @@ class BrowserControlClient:
             "forget",
             "snapshot",
             "conversation",
+            "observe_conversation",
         ):
             raise BrowserControlRejected("Browser action requires its dedicated adapter")
         token = self.signer.sign(context, action, lease_id)
-        prefix = "" if action in ("register", "revoke") else "lease/"
+        prefix = "" if action in ("register", "revoke", "block_viewer") else "lease/"
         try:
             response = await self.client.post(
                 f"/internal/v1/sessions/{context.session_id}/{prefix}{action}",
@@ -132,7 +136,7 @@ class BrowserControlClient:
             raise BrowserControlRejected("Browser command rejected")
         if response.status_code in (404, 409):
             raise BrowserControlConflict("Browser session state conflicts with command")
-        if action in ("register", "revoke"):
+        if action in ("register", "revoke", "block_viewer"):
             if response.status_code != 204:
                 raise BrowserControlUncertain("Browser command result unconfirmed")
             return None

@@ -135,9 +135,11 @@ class BossContextReader:
             raise BossContextUnavailable("BOSS page observation unavailable") from None
         raise BossContextUnavailable("BOSS page observation unavailable")
 
-    async def read_conversation(self, conversation_id: str) -> BossReadOnlyPage:
+    async def read_conversation(
+        self, conversation_id: str, *, navigate: bool = True
+    ) -> BossReadOnlyPage:
         try:
-            snapshot = await self._page_snapshot(conversation_id=conversation_id)
+            snapshot = await self._page_snapshot(conversation_id=conversation_id, navigate=navigate)
             page = parse_boss_page(
                 url=snapshot.url,
                 title=snapshot.title,
@@ -275,7 +277,9 @@ class BossContextReader:
             async with asyncio.timeout(5):
                 await cast(Callable[[], Awaitable[None]], cdp.stop)()
 
-    async def _page_snapshot(self, *, conversation_id: str | None = None) -> BossPageSnapshot:
+    async def _page_snapshot(
+        self, *, conversation_id: str | None = None, navigate: bool = True
+    ) -> BossPageSnapshot:
         inventory = await self.client.get("/v1/sessions", follow_redirects=False, timeout=5)
         inventory.raise_for_status()
         active = [
@@ -345,19 +349,20 @@ class BossContextReader:
                         if capture_index == 5:
                             raise ValueError("BOSS conversation target unavailable")
                         await asyncio.sleep(1)
-                    expression = BOSS_OPEN_CONVERSATION.replace(
-                        "__TARGET__", json.dumps(conversation_id)
-                    )
-                    opened = await cdp.send.Runtime.evaluate(
-                        params={"expression": expression, "returnByValue": True},
-                        session_id=attached["sessionId"],
-                    )
-                    if (
-                        opened.get("exceptionDetails")
-                        or opened.get("result", {}).get("value") is not True
-                    ):
-                        raise ValueError("BOSS conversation target unavailable")
-                    detail_value = "[]"
+                    if navigate:
+                        expression = BOSS_OPEN_CONVERSATION.replace(
+                            "__TARGET__", json.dumps(conversation_id)
+                        )
+                        opened = await cdp.send.Runtime.evaluate(
+                            params={"expression": expression, "returnByValue": True},
+                            session_id=attached["sessionId"],
+                        )
+                        if (
+                            opened.get("exceptionDetails")
+                            or opened.get("result", {}).get("value") is not True
+                        ):
+                            raise ValueError("BOSS conversation target unavailable")
+                    detail_value: object = "[]"
                     for capture_index in range(8):
                         captured_detail = await cdp.send.Runtime.evaluate(
                             params={

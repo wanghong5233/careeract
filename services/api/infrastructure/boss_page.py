@@ -10,6 +10,7 @@ from services.api.application.ports.boss_page import (
     has_bound_conversation_messages,
 )
 from services.api.application.ports.browser_control import (
+    BrowserAction,
     BrowserControlConflict,
     BrowserControlContext,
     BrowserControlRejected,
@@ -33,8 +34,17 @@ class BossPageClient:
     async def read_boss_page(self, context: BrowserControlContext) -> BossPageObservation:
         if context.owner_id != "boss-page-reader":
             raise BrowserControlRejected("Browser page read requires its dedicated scope")
-        token = self.signer.sign(context, "conversation" if context.conversation_id else "snapshot")
-        endpoint = "conversation" if context.conversation_id else "page"
+        endpoint = (
+            ("observe_conversation" if context.observe_only else "conversation")
+            if context.conversation_id
+            else "page"
+        )
+        action: BrowserAction = (
+            ("observe_conversation" if context.observe_only else "conversation")
+            if context.conversation_id
+            else "snapshot"
+        )
+        token = self.signer.sign(context, action)
         try:
             async with self.client.stream(
                 "POST",

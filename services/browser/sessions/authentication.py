@@ -7,7 +7,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 LeaseAction = Literal["acquire", "renew", "stop", "check"]
-SessionAction = Literal["register", "revoke"]
+SessionAction = Literal["register", "revoke", "block_viewer"]
 LifecycleAction = Literal["create", "release", "finish", "forget"]
 Action = Literal[
     "acquire",
@@ -16,6 +16,7 @@ Action = Literal[
     "check",
     "register",
     "revoke",
+    "block_viewer",
     "viewer",
     "watcher",
     "create",
@@ -24,6 +25,7 @@ Action = Literal[
     "forget",
     "snapshot",
     "conversation",
+    "observe_conversation",
 ]
 
 
@@ -88,6 +90,7 @@ class CommandVerifier:
                     "acquire",
                     "register",
                     "revoke",
+                    "block_viewer",
                     "viewer",
                     "watcher",
                     "create",
@@ -96,10 +99,12 @@ class CommandVerifier:
                     "forget",
                     "snapshot",
                     "conversation",
+                    "observe_conversation",
                 )
             )
             != (command.lease_id is None)
-            or (action == "conversation") != (command.conversation_id is not None)
+            or (action in {"conversation", "observe_conversation"})
+            != (command.conversation_id is not None)
         ):
             raise CommandRejected("Invalid browser command scope")
         return command
