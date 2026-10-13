@@ -8,7 +8,11 @@ conversation/message summaries from captured HTML and bounded rendered-component
 contracts. Live list rows bind `source.uniqueId` to the virtual list key and expose
 `lastMsgId`. The selected conversation and each rendered message are checked against
 that identity, stable message IDs, direction, timestamp and rendered content; the
-last loaded message must match the list's latest ID. A real conversation (initially five,
+list's latest ID must identify a loaded message. BOSS can append an information card
+after that anchor without advancing the list ID. Such a suffix is accepted only when
+the anchor text matches the list preview and each appended article binds the same
+message object and one matching article title; an unrelated text suffix fails closed.
+Observation order is preserved. A real conversation (initially five,
 then eight currently loaded messages) has passed the signed product read and persistence path.
 This covers currently loaded
 messages, not all history or permission to send a resume. The selected conversation
@@ -59,6 +63,8 @@ once, then only observes within a bounded window; opening may mark messages read
 Text extraction excludes delivery/read-status labels. Unknown content, identity or
 latest-message mismatch fails closed. Confirmed CDP disconnection precedes lease
 release; uncertain disconnection keeps ownership for reconciliation.
+Failed message binding logs only a fixed boundary code, not message text, identities,
+attachment URLs, or raw DOM. The diagnostic uses the same capture checks.
 When an encryption key is configured, signed creation imports only the user's
 current profile; signed release saves the observed logged-in state before physical
 release. Read tasks restore the saved profile but do not overwrite it during release;

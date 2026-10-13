@@ -4,7 +4,11 @@ import subprocess
 
 import pytest
 
-from services.browser.site_adapters.boss_context import BOSS_RENDERED_MESSAGES, BOSS_RESUME_CONTROL
+from services.browser.site_adapters.boss_context import (
+    BOSS_MESSAGE_DIAGNOSTIC,
+    BOSS_RENDERED_MESSAGES,
+    BOSS_RESUME_CONTROL,
+)
 
 
 @pytest.mark.parametrize(
@@ -25,6 +29,11 @@ from services.browser.site_adapters.boss_context import BOSS_RENDERED_MESSAGES, 
         "resume_request",
         "resume_duplicate",
         "resume_loading",
+        "article_trailer",
+        "article_binding",
+        "article_title",
+        "text_trailer",
+        "anchor_text",
     ],
 )
 def test_live_message_script_separates_delivery_status_and_rejects_changed_binding(
@@ -58,6 +67,22 @@ if (changed === 'latest') source.lastMsgId = 999;
 if (changed === 'text') body.textContent = 'Different text';
 if (changed === 'component') content.__vue__.$options.name = 'Unknown';
 if (changed === 'duplicate') content.querySelectorAll = () => [body, body];
+const trailers = ['article_trailer', 'article_binding', 'article_title',
+    'text_trailer', 'anchor_text'];
+if (trailers.includes(changed)) {
+    source.lastText = changed === 'anchor_text' ? 'Other preview' : message.text;
+    const cardMessage = {...message, mid: 124, text: 'Synthetic job',
+        articles: [{title: 'Synthetic job'}]};
+    const cardContent = {textContent: 'Synthetic job',
+        __vue__: {$options: {name: changed === 'text_trailer' ? 'MessageText' : 'message-article'},
+            $props: {message: changed === 'article_binding' ? {} : cardMessage}},
+        querySelectorAll: () => [{textContent:
+            changed === 'article_title' ? 'Other job' : 'Synthetic job'}]};
+    const cardRow = {...row, __vue__: {...row.__vue__,
+        $props: {message: cardMessage}, $vnode: {key: 124}},
+        querySelector: () => cardContent};
+    box.querySelectorAll = () => [row, cardRow];
+}
 if (changed?.startsWith('resume')) {
     content.__vue__.$options.name = 'message-hyperlink';
     content.textContent = 'Synthetic.pdf 点击预览附件简历';
@@ -73,7 +98,9 @@ if (changed?.startsWith('resume')) {
 """
     expression = BOSS_RENDERED_MESSAGES.replace("__TARGET__", json.dumps("thread-1"))
     script = "const changed = " + json.dumps(changed) + ";\n" + fixture
-    script += "\nprocess.stdout.write(" + expression + ");"
+    diagnostic = BOSS_MESSAGE_DIAGNOSTIC.replace("__TARGET__", json.dumps("thread-1"))
+    script += "\nprocess.stdout.write(JSON.stringify({messages:" + expression
+    script += ",diagnostic:" + diagnostic + "}));"
     result = subprocess.run(
         [node, "-"],
         input=script,
@@ -83,9 +110,32 @@ if (changed?.startsWith('resume')) {
         timeout=5,
         check=True,
     )
-    messages = json.loads(result.stdout)
-    if changed and changed != "resume":
+    observed = json.loads(result.stdout)
+    messages = json.loads(observed["messages"])
+    if changed and changed not in {"resume", "article_trailer"}:
         assert messages == []
+        assert (
+            observed["diagnostic"]
+            == {
+                "selected": "selection",
+                "message": "message_identity",
+                "key": "message_key",
+                "direction": "content",
+                "latest": "latest_message",
+                "text": "content",
+                "component": "content_component",
+                "duplicate": "text_nodes",
+                "resume_title": "resume_binding",
+                "resume_binding": "hyperlink_binding",
+                "resume_request": "resume_binding",
+                "resume_duplicate": "resume_binding",
+                "resume_loading": "hyperlink_binding",
+                "article_binding": "latest_message",
+                "article_title": "latest_message",
+                "text_trailer": "latest_message",
+                "anchor_text": "latest_message",
+            }[changed]
+        )
     elif changed == "resume":
         assert messages[0]["resume_attachment"] == {
             "filename": "Synthetic.pdf",
@@ -94,6 +144,8 @@ if (changed?.startsWith('resume')) {
         }
         assert "url" not in result.stdout
     else:
+        assert observed["diagnostic"] == "ready"
+        assert len(messages) == (2 if changed == "article_trailer" else 1)
         assert messages[0]["content"] == "Synthetic text"
         assert messages[0]["sender"] == "candidate"
         assert messages[0]["message_id"] == "123"

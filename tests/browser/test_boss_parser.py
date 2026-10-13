@@ -343,6 +343,40 @@ def test_resume_control_is_bound_to_verified_messages(changed: str | None) -> No
         assert result.material_state == "absent"
 
 
+def test_list_anchor_before_a_bound_card_preserves_message_order_and_resume_control() -> None:
+    import json
+
+    from services.browser.site_adapters.boss import (
+        parse_boss_rendered_conversations,
+        parse_boss_rendered_messages,
+        parse_boss_resume_control,
+    )
+
+    conversations = parse_boss_rendered_conversations(
+        '[{"conversation_id":"thread-1","recruiter_name":"Synthetic HR",'
+        '"last_message":"Synthetic greeting","last_message_id":"123","unread":true}]'
+    )
+    rows = [
+        {
+            "conversation_id": "thread-1",
+            "message_id": identifier,
+            "sender": "recruiter",
+            "content": content,
+            "sent_at": "2026-10-12T01:00:00.000Z",
+        }
+        for identifier, content in [("123", "Synthetic greeting"), ("124", "Synthetic job card")]
+    ]
+    messages = parse_boss_rendered_messages(json.dumps(rows), conversations, "thread-1")
+    assert [message.message_id for message in messages] == ["123", "124"]
+    control = parse_boss_resume_control(
+        '{"conversation_id":"thread-1","last_message_id":"123","state":"available",'
+        '"attachment_reported":null,"material_state":"unknown"}',
+        messages,
+        "thread-1",
+    )
+    assert control.state == "available" and control.material_state == "unknown"
+
+
 @pytest.mark.parametrize("changed", [None, "title", "direction", "path", "request", "extra"])
 def test_rendered_resume_card_preserves_evidence_without_download_url(changed: str | None) -> None:
     import json

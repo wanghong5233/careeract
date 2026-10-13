@@ -279,6 +279,7 @@ async def test_page_snapshot_is_read_only_scoped_and_bounded(
         "observe_wrong_thread",
     }:
         from services.browser.site_adapters.boss_context import (
+            BOSS_MESSAGE_DIAGNOSTIC,
             BOSS_OPEN_CONVERSATION,
             BOSS_RENDERED_CONVERSATIONS,
             BOSS_RESUME_CONTROL,
@@ -310,6 +311,8 @@ async def test_page_snapshot_is_read_only_scoped_and_bounded(
             elif expression == BOSS_OPEN_CONVERSATION.replace("__TARGET__", '"thread-1"'):
                 clicks += 1
                 value = True
+            elif expression == BOSS_MESSAGE_DIAGNOSTIC.replace("__TARGET__", '"thread-1"'):
+                value = "selection"
             else:
                 captures += 1
                 value = (

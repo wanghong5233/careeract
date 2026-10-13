@@ -54,7 +54,8 @@ function taskCard(fetch, blocked = false, globals = {}) {
     assert.equal(element.props.disabled, undefined, label);
     element.props.onClick();
   };
-  return { render, button, click, cleanup, states, runExpiryEffect: () => effects.at(-1)() };
+  const dialogOpen = () => elements(render()).find(element => Object.hasOwn(element.props, "open"))?.props.open;
+  return { render, button, click, cleanup, states, dialogOpen, runExpiryEffect: () => effects.at(-1)() };
 }
 
 const settle = () => new Promise(resolve => setImmediate(resolve));
@@ -134,6 +135,8 @@ test("manual opening persists explicit intent with the selected conversation", a
   });
   await settle();
   fixture.button("打开并人工操作").props.onClick();
+  assert.equal(writes.length, 0);
+  assert.equal(fixture.dialogOpen(), true);
   fixture.click("允许并打开");
   await settle();
   assert.equal(writes.length, 2);
@@ -183,8 +186,9 @@ test("selected conversation is persisted before execution and restored with mess
   });
   await settle();
   fixture.button("读取会话详情").props.onClick();
-  assert.match(text(fixture.render()), /标记已读/);
-  fixture.click("允许并读取");
+  assert.equal(fixture.dialogOpen(), false);
+  assert.equal(fixture.button("允许并读取"), undefined);
+  fixture.button("读取会话详情")?.props.onClick();
   await settle();
   assert.equal(JSON.parse(writes[0].options.body).conversation_id, "thread-1");
   assert.equal(writes.length, 2);
@@ -198,7 +202,7 @@ test("selected conversation is persisted before execution and restored with mess
   fixture.cleanup();
 });
 
-test("read card requires consent, runs the accepted task once and restores persisted results", async () => {
+test("read card runs directly once and restores persisted results", async () => {
   let current = null;
   const writes = [];
   const fixture = taskCard(async (url, options = {}) => {
@@ -216,8 +220,8 @@ test("read card requires consent, runs the accepted task once and restores persi
   await settle();
   assert.equal(fixture.button("读取 BOSS 页面").props.disabled, false);
   fixture.button("读取 BOSS 页面").props.onClick();
-  assert.equal(writes.length, 0);
-  fixture.click("允许并读取");
+  assert.equal(fixture.dialogOpen(), false);
+  assert.equal(fixture.button("允许并读取"), undefined);
   await settle();
   assert.equal(writes.length, 2);
   assert.deepEqual(JSON.parse(writes[0].options.body), { version: "v1", authorize_read: true });
@@ -247,7 +251,6 @@ test("lost run response is reconciled without replay and unknown task blocks ano
   });
   await settle();
   fixture.button("读取 BOSS 页面").props.onClick();
-  fixture.click("允许并读取");
   await settle();
   assert.match(text(fixture.render()), /结果待核对/);
   assert.match(text(fixture.render()), /本次任务尚未确认完成/);

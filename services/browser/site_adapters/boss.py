@@ -136,8 +136,8 @@ def parse_boss_resume_control(
     if (
         not messages
         or control.conversation_id != conversation_id
-        or messages[-1].conversation_id != conversation_id
-        or control.last_message_id != messages[-1].message_id
+        or any(message.conversation_id != conversation_id for message in messages)
+        or not any(message.message_id == control.last_message_id for message in messages)
     ):
         raise ValueError("BOSS resume control binding is incomplete")
     return BossResumeControl(
@@ -162,7 +162,7 @@ def parse_boss_rendered_messages(
         or len(rows) > 200
         or len({item.message_id for item in rows}) != len(rows)
         or any(item.conversation_id != conversation_id or not item.content.strip() for item in rows)
-        or rows[-1].message_id != target[0].last_message_id
+        or not any(item.message_id == target[0].last_message_id for item in rows)
     ):
         raise ValueError("BOSS rendered message binding is incomplete")
     if any(

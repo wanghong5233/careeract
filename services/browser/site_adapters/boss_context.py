@@ -381,6 +381,41 @@ class BossContextReader:
                         if detail_value != "[]" or capture_index == 7:
                             break
                         await asyncio.sleep(1)
+                    if detail_value == "[]":
+                        diagnostic = await cdp.send.Runtime.evaluate(
+                            params={
+                                "expression": BOSS_MESSAGE_DIAGNOSTIC.replace(
+                                    "__TARGET__", json.dumps(conversation_id)
+                                ),
+                                "returnByValue": True,
+                            },
+                            session_id=attached["sessionId"],
+                        )
+                        reason = diagnostic.get("result", {}).get("value")
+                        if (
+                            not diagnostic.get("exceptionDetails")
+                            and isinstance(reason, str)
+                            and reason
+                            in {
+                                "selection",
+                                "row_count",
+                                "message_identity",
+                                "message_key",
+                                "message_time",
+                                "content_component",
+                                "text_nodes",
+                                "content",
+                                "hyperlink_binding",
+                                "resume_binding",
+                                "latest_message",
+                                "ready",
+                            }
+                        ):
+                            logger.warning(
+                                "BOSS message binding rejected session=%s boundary=%s",
+                                self.session_id,
+                                reason,
+                            )
                 document = await cdp.send.DOM.getDocument(
                     session_id=attached["sessionId"],
                 )
@@ -540,18 +575,19 @@ BOSS_RESUME_CONTROL = """JSON.stringify((() => {
     return result;
 })())"""
 
-BOSS_RENDERED_MESSAGES = """JSON.stringify((() => {
+BOSS_MESSAGE_CAPTURE = """(() => {
     const target = __TARGET__;
+    const reject = reason => ({messages: [], reason});
     const selected = Array.from(document.querySelectorAll('.friend-content-warp'))
         .filter(row => row.querySelector('.friend-content.selected'));
     const source = selected.length === 1 ? selected[0].__vue__?.$props?.source : null;
     const box = document.querySelector('.chat-conversation');
     if (!source || source.uniqueId !== target || box?.__vue__?.$options?.name !== 'conversation-box'
-        || box.__vue__.selectedFriend$?.uniqueId !== target) return [];
+        || box.__vue__.selectedFriend$?.uniqueId !== target) return reject('selection');
     const normalize = value => typeof value === 'string'
         ? value.replace(/\\s+/g, ' ').trim() : null;
     const rows = Array.from(box.querySelectorAll('.im-list > .message-item'));
-    if (!rows.length || rows.length > 200) return [];
+    if (!rows.length || rows.length > 200) return reject('row_count');
     const messages = [];
     for (const row of rows) {
         const component = row.__vue__, message = component?.$props?.message;
@@ -560,25 +596,27 @@ BOSS_RENDERED_MESSAGES = """JSON.stringify((() => {
         if (component?.$options?.name !== 'ChatMessage' || !message
             || message.uniqueId !== target || message.friendId !== source.friendId
             || !Number.isSafeInteger(message.mid) || message.mid <= 0
-            || component.$vnode?.key !== message.mid
-            || !Number.isSafeInteger(message.time) || message.time <= 1e12
-            || message.time > Date.now() + 300000
-            || typeof message.isSelf !== 'boolean'
-            || !['MessageText', 'MessageSystem', 'message-article', 'message-hyperlink']
-                .includes(contentComponent)) return [];
+            || typeof message.isSelf !== 'boolean') return reject('message_identity');
+        if (component.$vnode?.key !== message.mid) return reject('message_key');
+        if (!Number.isSafeInteger(message.time) || message.time <= 1e12
+            || message.time > Date.now() + 300000) return reject('message_time');
+        if (!['MessageText', 'MessageSystem', 'message-article', 'message-hyperlink']
+            .includes(contentComponent)) return reject('content_component');
         const sender = row.classList.contains('item-system') ? 'system'
             : row.classList.contains('item-myself') && message.isSelf ? 'candidate'
             : row.classList.contains('item-friend') && !message.isSelf ? 'recruiter' : null;
         const textNodes = contentComponent === 'MessageText'
             ? content.querySelectorAll('.text > p > .text-content') : null;
-        if (textNodes && textNodes.length !== 1) return [];
+        if (textNodes && textNodes.length !== 1) return reject('text_nodes');
         const text = normalize(textNodes ? textNodes[0].textContent : content.textContent);
         if (!sender || !text || text.length > 10000
-            || (contentComponent === 'MessageText' && text !== normalize(message.text))) return [];
+            || (contentComponent === 'MessageText' && text !== normalize(message.text)))
+            return reject('content');
         let resume_attachment = null;
         if (contentComponent === 'message-hyperlink') {
             const children = Array.from(content.querySelectorAll('*'));
-            if (!children.some(node => node.__vue__?.$props?.message === message)) return [];
+            if (!children.some(node => node.__vue__?.$props?.message === message))
+                return reject('hyperlink_binding');
             const resumes = children.filter(node =>
                 node.__vue__?.$options?.name === 'hyperlink-resume');
             if (resumes.length) {
@@ -591,7 +629,8 @@ BOSS_RENDERED_MESSAGES = """JSON.stringify((() => {
                     || /[\\x00-\\x1f\\x7f/\\\\]/.test(filename)
                     || normalize(titles[0].textContent) !== filename
                     || (request != null && request !== 0
-                        && (!Number.isSafeInteger(request) || request <= 0))) return [];
+                        && (!Number.isSafeInteger(request) || request <= 0)))
+                    return reject('resume_binding');
                 resume_attachment = {filename, sent_by_candidate: message.isSelf,
                     request_message_id: request ? String(request) : null};
             }
@@ -599,7 +638,27 @@ BOSS_RENDERED_MESSAGES = """JSON.stringify((() => {
         messages.push({conversation_id: target, message_id: String(message.mid), sender,
             content: text, sent_at: new Date(message.time).toISOString(), resume_attachment});
     }
-    if (messages.at(-1)?.message_id !== String(source.lastMsgId)
-        || box.__vue__.selectedFriend$?.uniqueId !== target) return [];
-    return messages;
-})())"""
+    const anchor = messages.findIndex(message => message.message_id === String(source.lastMsgId));
+    if (anchor < 0 || box.__vue__.selectedFriend$?.uniqueId !== target)
+        return reject('latest_message');
+    if (anchor !== messages.length - 1) {
+        const anchorMessage = rows[anchor].__vue__.$props.message;
+        if (normalize(source.lastText) !== normalize(anchorMessage.text))
+            return reject('latest_message');
+        for (const row of rows.slice(anchor + 1)) {
+            const message = row.__vue__.$props.message;
+            const content = row.querySelector('.message-content,.text');
+            const titles = content?.querySelectorAll('.message-card-top-title');
+            if (content?.__vue__?.$options?.name !== 'message-article'
+                || content.__vue__.$props?.message !== message
+                || !Array.isArray(message.articles) || message.articles.length !== 1
+                || titles?.length !== 1 || !normalize(message.articles[0]?.title)
+                || normalize(titles[0].textContent) !== normalize(message.articles[0].title))
+                return reject('latest_message');
+        }
+    }
+    return {messages, reason: 'ready'};
+})()"""
+
+BOSS_RENDERED_MESSAGES = f"JSON.stringify(({BOSS_MESSAGE_CAPTURE}).messages)"
+BOSS_MESSAGE_DIAGNOSTIC = f"({BOSS_MESSAGE_CAPTURE}).reason"
