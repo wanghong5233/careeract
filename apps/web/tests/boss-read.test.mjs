@@ -37,6 +37,7 @@ function taskCard(fetch, blocked = false, globals = {}) {
     },
     "lucide-react": { LoaderCircle: Container, RefreshCw: Container },
     "@/components/browser-scene": { BrowserScene: Container },
+    "@/components/workspace-actions": { AgentAction: Button },
     "@/components/ui/button": { Button },
     "@/components/ui/dialog": {
       Dialog: ({ open, children }) => open ? children : null,
@@ -194,6 +195,10 @@ test("selected conversation is persisted before execution and restored with mess
   assert.equal(writes.length, 2);
   assert.match(text(fixture.render()), /招聘方/);
   assert.match(text(fixture.render()), /Synthetic detail/);
+  const draftAction = elements(fixture.render()).find(element => element.props.prompt);
+  assert.ok(draftAction);
+  assert.match(draftAction.props.prompt, /只生成草稿，不发送消息或简历/);
+  assert.match(draftAction.props.prompt, /Synthetic detail/);
   assert.match(text(fixture.render()), /简历入口： 页面当前不可用/);
   assert.match(text(fixture.render()), /不能据此自动发送/);
   fixture.click("核对读取结果");
