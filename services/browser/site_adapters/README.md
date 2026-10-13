@@ -13,8 +13,9 @@ then eight currently loaded messages) has passed the signed product read and per
 This covers currently loaded
 messages, not all history or permission to send a resume. The selected conversation
 reader also records the uniquely bound resume button as available/unavailable/unknown
-and the component's attachment flag. The real sample is unavailable with a false
-attachment flag; this does not identify a material or prove the account has no resume.
+and the component's attachment flag. A false flag leaves material identity unknown:
+the real account's recommendation page displays an attachment tile despite the chat
+control reporting false. Neither this tile nor the flag identifies the current version.
 Missing/changed controls remain unknown, and material identity/version still requires
 verification before any send.
 The reader also observes historical resume cards only after their child component

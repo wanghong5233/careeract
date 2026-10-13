@@ -536,8 +536,7 @@ BOSS_RESUME_CONTROL = """JSON.stringify((() => {
         node.__vue__?.$options?.name === 'choose-upload-resume');
     const hasResume = uploads.length === 1 ? uploads[0].__vue__.$props?.hasResume : null;
     result.attachment_reported = typeof hasResume === 'boolean' ? hasResume : null;
-    result.material_state = hasResume === true ? 'present_unidentified'
-        : hasResume === false ? 'absent' : 'unknown';
+    result.material_state = hasResume === true ? 'present_unidentified' : 'unknown';
     return result;
 })())"""
 

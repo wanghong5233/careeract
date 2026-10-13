@@ -95,6 +95,11 @@ session through Steel mutation and readback, excluding acquisition and revocatio
 while the physical operation is in flight. The existing persistent Steel reservation
 blocks reconstruction or a fresh token from replaying uncertain operations.
 
+Inventory readback allows zero active sessions after release. Reconciliation still
+requires the exact owned session to be reported as released; missing targets do not
+prove release. A valid empty inventory permits new creation only after persistent
+reservations are clear; duplicate IDs and multiple idle/live entries remain rejected.
+
 `BrowserRegistrationService.create` reserves creation in the domain database before
 calling the route. Revision `0021_browser_lifecycle` adds creation/release outcomes;
 confirmed creation associates the connection with the exact session and enters

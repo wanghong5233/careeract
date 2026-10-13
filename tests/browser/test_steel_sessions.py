@@ -154,6 +154,54 @@ async def test_uncertain_operation_survives_adapter_reconstruction_without_repla
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("target_present", [True, False])
+async def test_release_reconciliation_without_idle_session_requires_owned_evidence(
+    engine: AsyncEngine, target_present: bool
+) -> None:
+    steel = SyntheticSteel()
+    session_id = uuid4()
+    async with httpx.AsyncClient(
+        base_url="http://steel", transport=httpx.MockTransport(steel.respond)
+    ) as client:
+        manager = SteelSessionManager(client, engine)
+        await manager.create(session_id)
+        steel.failure = "timeout"
+        with pytest.raises(SteelSessionUncertain):
+            await manager.release(session_id)
+        steel.sessions = [{"id": str(session_id), "status": "released"}] if target_present else []
+        observed = await manager.inspect(session_id)
+        assert (observed is not None) == target_present
+        if target_present:
+            assert (await manager.release(session_id)).status == "released"
+        else:
+            with pytest.raises(SteelSessionConflict):
+                await manager.release(session_id)
+        assert len(steel.writes) == 2
+        async with engine.connect() as connection:
+            state = await connection.scalar(
+                text("SELECT state FROM browser.steel_operations WHERE session_id=:id"),
+                {"id": session_id},
+            )
+        assert state == ("released" if target_present else "releasing")
+        if target_present:
+            steel.failure = None
+            assert (await manager.create(uuid4())).status == "live"
+
+
+@pytest.mark.asyncio
+async def test_empty_valid_inventory_allows_first_owned_creation(engine: AsyncEngine) -> None:
+    steel = SyntheticSteel()
+    steel.sessions = []
+    async with httpx.AsyncClient(
+        base_url="http://steel", transport=httpx.MockTransport(steel.respond)
+    ) as client:
+        manager = SteelSessionManager(client, engine)
+        session_id = uuid4()
+        assert (await manager.create(session_id)).status == "live"
+        assert steel.writes == ["/v1/sessions"]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("failure", ["false-success", "string-success"])
 async def test_release_requires_strict_success(engine: AsyncEngine, failure: str) -> None:
     steel = SyntheticSteel()
@@ -282,7 +330,7 @@ async def test_bad_inventory_cannot_authorize_mutation(engine: AsyncEngine, inve
 
     def respond(request: httpx.Request) -> httpx.Response:
         assert request.method == "GET"
-        return httpx.Response(200, json={"sessions": rows})
+        return httpx.Response(200, json={} if inventory == "missing" else {"sessions": rows})
 
     async with httpx.AsyncClient(
         base_url="http://steel", transport=httpx.MockTransport(respond)

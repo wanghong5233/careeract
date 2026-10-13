@@ -100,8 +100,10 @@ if (changed?.startsWith('resume')) {
 
 
 @pytest.mark.parametrize("changed", [None, "disabled", "hidden", "editor", "duplicate", "selected"])
+@pytest.mark.parametrize("attachment", [True, False, None])
 def test_resume_script_observes_control_without_granting_material_authorization(
     changed: str | None,
+    attachment: bool | None,
 ) -> None:
     node = shutil.which("node")
     if node is None:
@@ -111,7 +113,8 @@ const source = {uniqueId: 'thread-1', lastMsgId: 123};
 const button = {classList: {contains: () => changed === 'disabled'},
     hasAttribute: () => false, getAttribute: () => null,
     getClientRects: () => changed === 'hidden' ? [] : [{}]};
-const upload = {__vue__: {$options: {name: 'choose-upload-resume'}, $props: {hasResume: false}}};
+const upload = {__vue__: {$options: {name: 'choose-upload-resume'},
+    $props: {hasResume: attachment}}};
 const resume = {__vue__: {$options: {name: 'resumeBtn'}},
     querySelectorAll: selector => selector === '.toolbar-btn' ? [button] : [upload]};
 const toolbar = {__vue__: {$options: {name: 'ConversationToolbar'}},
@@ -124,7 +127,15 @@ const box = {__vue__: {$options: {name: 'conversation-box'},
 const selected = {__vue__: {$props: {source}}, querySelector: () => ({})};
 const document = {querySelector: () => box, querySelectorAll: () => [selected]};
 """
-    script = "const changed = " + json.dumps(changed) + ";\n" + fixture
+    script = (
+        "const changed = "
+        + json.dumps(changed)
+        + ";\n"
+        + "const attachment = "
+        + json.dumps(attachment)
+        + ";\n"
+        + fixture
+    )
     script += (
         "\nprocess.stdout.write("
         + BOSS_RESUME_CONTROL.replace("__TARGET__", json.dumps("thread-1"))
@@ -146,7 +157,11 @@ const document = {querySelector: () => box, querySelectorAll: () => [selected]};
         assert control["state"] == (
             "unavailable" if changed == "disabled" else "unknown" if changed else "available"
         )
-        assert control["attachment_reported"] is (False if changed in {None, "disabled"} else None)
+        assert control["attachment_reported"] is (
+            attachment if changed in {None, "disabled"} else None
+        )
         assert control["material_state"] == (
-            "absent" if changed in {None, "disabled"} else "unknown"
+            "present_unidentified"
+            if attachment is True and changed in {None, "disabled"}
+            else "unknown"
         )

@@ -109,7 +109,7 @@ class SteelSessionManager:
             raise SteelSessionUnavailable("Steel inventory invalid") from None
         identifiers = [session.id for session in sessions]
         active = [session for session in sessions if session.status in ("live", "idle")]
-        if len(set(identifiers)) != len(identifiers) or len(active) != 1:
+        if len(set(identifiers)) != len(identifiers) or len(active) > 1:
             raise SteelSessionUnavailable("Steel inventory is ambiguous")
         return sessions
 
