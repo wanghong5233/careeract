@@ -1,4 +1,5 @@
 import asyncio
+import json
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -24,6 +25,32 @@ from services.browser.sessions.authentication import (
 from services.browser.sessions.lease import SessionLease
 from services.browser.sessions.postgres import PostgresLeaseStore
 from services.browser.sessions.viewer import viewer_cookie_name
+
+HUMAN_KEY = json.dumps(
+    {
+        "type": "keyEvent",
+        "pageId": "page-a",
+        "event": {
+            "type": "keyDown",
+            "key": "a",
+            "text": "a",
+            "code": "KeyA",
+            "keyCode": 65,
+        },
+    }
+)
+STEEL_FRAME = json.dumps(
+    {
+        "pageId": "page-a",
+        "data": "synthetic-jpeg",
+        "metadata": {
+            "deviceWidth": 1280,
+            "deviceHeight": 720,
+            "pageScaleFactor": 1,
+            "offsetTop": 0,
+        },
+    }
+)
 
 
 class _Engine:
@@ -236,7 +263,7 @@ def test_watcher_cast_rejects_client_input_without_forwarding() -> None:
             },
         ) as socket,
     ):
-        assert socket.receive_text() == "from-steel"
+        assert socket.receive_text() == STEEL_FRAME
         with pytest.raises(WebSocketDisconnect) as disconnected:
             socket.send_text("forged-input")
             socket.receive_text()
@@ -347,7 +374,7 @@ class _Upstream:
     async def __anext__(self) -> str:
         if self._first:
             self._first = False
-            return "from-steel"
+            return STEEL_FRAME
         await self._stop.wait()
         raise StopAsyncIteration
 
@@ -401,11 +428,12 @@ def test_viewer_cast_uses_cookie_ticket_and_rewrites_upstream_session() -> None:
             },
         ) as socket,
     ):
-        assert socket.receive_text() == "from-steel"
-        socket.send_text("from-viewer")
+        assert socket.receive_text() == STEEL_FRAME
+        socket.send_text(HUMAN_KEY)
 
     assert connector.url.endswith(f"/v1/sessions/cast?pageId=page-a&sessionId={session_id}")
-    assert upstream.sent == ["from-viewer"]
+    assert len(upstream.sent) == 1
+    assert json.loads(upstream.sent[0])["event"]["key"] == "a"
     assert not store.input_active
 
 
@@ -431,9 +459,9 @@ def test_viewer_input_rejected_at_forwarding_does_not_reach_steel() -> None:
             },
         ) as socket,
     ):
-        assert socket.receive_text() == "from-steel"
+        assert socket.receive_text() == STEEL_FRAME
         store.reject = True
-        socket.send_text("stale-input")
+        socket.send_text(HUMAN_KEY)
         with pytest.raises(WebSocketDisconnect) as disconnected:
             socket.receive_text()
         assert disconnected.value.code == 1008
@@ -475,7 +503,7 @@ def test_viewer_renewal_updates_active_channel_and_rejects_changed_scope() -> No
                 "Cookie": f"{viewer_cookie_name(session_id)}={original}",
             },
         ) as socket:
-            assert socket.receive_text() == "from-steel"
+            assert socket.receive_text() == STEEL_FRAME
             assert (
                 client.post(
                     renewal_url, headers={"Authorization": "Bearer " + wrong_scope}
@@ -487,7 +515,7 @@ def test_viewer_renewal_updates_active_channel_and_rejects_changed_scope() -> No
                 == 204
             )
             assert store.commands[-1].jti != payload.jti
-            socket.send_text("finish")
+            socket.send_text(HUMAN_KEY)
     assert store.drained and store.released
 
 
@@ -537,7 +565,7 @@ def test_viewer_cast_closes_when_session_is_revoked_after_connect() -> None:
             },
         ) as socket,
     ):
-        assert socket.receive_text() == "from-steel"
+        assert socket.receive_text() == STEEL_FRAME
         with pytest.raises(WebSocketDisconnect) as disconnected:
             socket.receive_text()
         assert disconnected.value.code == 1008
@@ -567,7 +595,7 @@ def test_viewer_cast_keeps_lease_when_upstream_disconnect_is_uncertain() -> None
             },
         ) as socket,
     ):
-        assert socket.receive_text() == "from-steel"
+        assert socket.receive_text() == STEEL_FRAME
         with pytest.raises(WebSocketDisconnect) as disconnected:
             socket.receive_text()
         assert disconnected.value.code == 1011
@@ -602,7 +630,7 @@ def test_viewer_cast_closes_when_coordination_becomes_unavailable() -> None:
             },
         ) as socket,
     ):
-        assert socket.receive_text() == "from-steel"
+        assert socket.receive_text() == STEEL_FRAME
         with pytest.raises(WebSocketDisconnect) as disconnected:
             socket.receive_text()
         assert disconnected.value.code == 1013

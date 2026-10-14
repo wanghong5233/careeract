@@ -249,8 +249,13 @@ route that accepts a short-lived signed `viewer` command, rechecks the registere
 session, fetches Steel debug HTML without redirects, and returns only rewritten
 HTML with `no-store` and same-origin frame policy. It is still not a product route:
 the API can now issue the matching 60-second command only for an existing, unrevoked
-registered session, and the internal cast route proxies text/binary WebSocket frames
-to Steel after rechecking that cookie. The cast connection acquires the existing durable
+registered session. The internal cast route forwards validated human input JSON to
+Steel after rechecking that cookie; upstream display frames can be text/binary.
+`viewer_input.py` binds input to the server-selected page and the actual upstream
+screencast geometry. Only mouse events, single-key events, selection reads and human
+back/forward/refresh are accepted. Arbitrary URLs, scripts/CDP, batches, binary client
+input, extra fields and out-of-viewport coordinates fail closed. Watchers cannot input.
+The cast connection acquires the existing durable
 writer lease, consumes its ticket, and excludes automatic executors and other Viewers.
 Each input holds the session row lock through authorization/lease validation and the
 bounded upstream send, serializing admission with draining, revocation and replacement.
@@ -286,6 +291,23 @@ The pinned implementation uses shared Profile paths and does not honor arbitrary
 in PostgreSQL with a separate local key. Clean sequential session storage has canary
 evidence, but disk cleanup, production isolation and long-term login validity still
 require separate verification.
+
+## Persistent site risk stops
+
+`site_safety.py` and migration `0034_browser_site_safety` persist the first risk reason
+and originating session per user/site, independently of a task, Profile or process.
+Trusted adapters compose `action_guard` inside the existing executor/lifecycle guard;
+it never replaces command authorization or writer ownership. A typed `SiteRiskDetected`
+commits the stop before propagating failure. New tasks/sessions cannot clear it. The
+session row uses `FOR NO KEY UPDATE`: writers remain exclusive, while the independent
+safety transaction can retain its foreign-key reference without blocking on its caller.
+
+BOSS login navigation and Profile capture use this store; detected risk pages stop
+before further navigation/cookie/DOM work. No clear/expiry/recovery API exists yet.
+New business adapters must also detect visible page risk notices and use this guard;
+the legacy business paths remain deleted and quarantined. Human input and cleanup
+retain their separate authorization and lease checks. Database integration is isolated;
+synthetic Steel input acceptance does not certify a real BOSS action or zero account risk.
 
 ## Signed current-page reads
 

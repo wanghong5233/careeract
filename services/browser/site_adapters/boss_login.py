@@ -1,7 +1,8 @@
 import asyncio
 from collections.abc import Awaitable, Callable
+from contextlib import AbstractAsyncContextManager
 from time import monotonic
-from typing import Literal, cast
+from typing import cast
 from urllib.parse import urlsplit, urlunsplit
 from uuid import UUID
 
@@ -10,10 +11,11 @@ from cdp_use import CDPClient
 from pydantic import AnyHttpUrl
 from websockets.exceptions import WebSocketException
 
+from services.browser.sessions.site_safety import RiskReason, SiteRiskDetected, SiteSafetyBlocked
 from services.browser.sessions.viewer import ViewerRejected, resolve_viewer_page
+from services.browser.site_adapters.boss import BossPageState, boss_auth_page_state
 
 BOSS_LOGIN_URL = "https://www.zhipin.com/web/user/"
-BOSS_CONVERSATIONS_URL = "https://www.zhipin.com/web/geek/chat"
 
 
 class BossLoginUnavailable(Exception):
@@ -26,15 +28,26 @@ class BossLoginNavigator:
         steel_client: httpx.AsyncClient,
         cdp_origin: AnyHttpUrl,
         *,
-        destination: Literal["login", "conversations"] = "login",
+        risk_stop: Callable[[UUID, RiskReason], Awaitable[None]] | None = None,
+        risk_guard: Callable[[UUID], AbstractAsyncContextManager[None]] | None = None,
     ) -> None:
         self.steel_client = steel_client
         self.cdp_origin = str(cdp_origin).rstrip("/")
-        if destination not in {"login", "conversations"}:
-            raise ValueError("Unsupported BOSS navigation destination")
-        self.destination_url = BOSS_LOGIN_URL if destination == "login" else BOSS_CONVERSATIONS_URL
+        self.risk_stop = risk_stop
+        self.risk_guard = risk_guard
 
     async def __call__(self, session_id: UUID) -> None:
+        try:
+            if self.risk_guard is None:
+                await self._navigate(session_id)
+            else:
+                async with self.risk_guard(session_id):
+                    await self._navigate(session_id)
+        except (SiteRiskDetected, SiteSafetyBlocked):
+            raise BossLoginUnavailable("Site risk requires human revalidation") from None
+
+    async def _navigate(self, session_id: UUID) -> None:
+        risk_reason: RiskReason | None = None
         try:
             page_id = await resolve_viewer_page(self.steel_client, session_id, None)
             async with httpx.AsyncClient(base_url=self.cdp_origin, timeout=5) as client:
@@ -72,7 +85,7 @@ class BossLoginNavigator:
                         params={"targetId": page_id, "flatten": True}
                     )
                     result = await cdp_client.send.Page.navigate(
-                        params={"url": self.destination_url, "transitionType": "address_bar"},
+                        params={"url": BOSS_LOGIN_URL, "transitionType": "address_bar"},
                         session_id=attached["sessionId"],
                     )
                 if result.get("errorText"):
@@ -86,6 +99,17 @@ class BossLoginNavigator:
                         )
                         current = urlsplit(info["targetInfo"]["url"])
                         if current.scheme == "https" and current.hostname == "www.zhipin.com":
+                            if boss_auth_page_state(current.geturl()) == BossPageState.RISK:
+                                risk_reason = (
+                                    "denied"
+                                    if current.path == "/web/passport/zp/403.html"
+                                    else "challenge"
+                                )
+                                if self.risk_guard is not None:
+                                    raise SiteRiskDetected(risk_reason)
+                                if self.risk_stop is not None:
+                                    await self.risk_stop(session_id, risk_reason)
+                                raise BossLoginUnavailable("Site risk requires human handling")
                             retained_site = True
                         elif info["targetInfo"]["url"] in {"", "about:blank"}:
                             retained_site = False
@@ -106,6 +130,8 @@ class BossLoginNavigator:
                     async with asyncio.timeout(5):
                         await cast(Callable[[], Awaitable[None]], cdp_client.stop)()
                 except (OSError, WebSocketException, TimeoutError):
+                    if risk_reason is not None and self.risk_guard is not None:
+                        raise SiteRiskDetected(risk_reason) from None
                     raise BossLoginUnavailable("Login browser disconnect unconfirmed") from None
         except (
             httpx.HTTPError,

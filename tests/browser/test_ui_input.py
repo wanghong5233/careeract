@@ -5,15 +5,18 @@ Edge. No real account/site is accessed. Fixture scripts are local test page beha
 """
 
 import asyncio
+import json
 import os
 from collections.abc import AsyncIterator
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
+from typing import Any, cast
 from urllib.parse import urlencode
 from uuid import uuid4
 
 import httpx
 import pytest
+from fastapi import WebSocket
 from patchright.async_api import Page
 from patchright.async_api import async_playwright as async_patchright
 from sqlalchemy import text as sql_text
@@ -21,10 +24,12 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from websockets.asyncio.client import connect
 
 from scripts.smoke_steel_viewer import receive_frame
+from services.browser.app.factory import _relay_websocket
 from services.browser.sessions.authentication import BrowserCommand, CommandRejected
 from services.browser.sessions.lease import LeaseConflict
 from services.browser.sessions.postgres import PostgresLeaseStore
 from services.browser.sessions.ui_input import NormalUIInput, UIInputRejected, UIInputUncertain
+from services.browser.sessions.viewer import ViewerRejected
 from tests.browser.test_command_authentication import command_payload
 from tests.browser.test_postgres_leases import database_url as database_url
 
@@ -340,3 +345,140 @@ async def test_steel_viewer_and_executor_share_unchanged_page(
         details = await client.get(f"/v1/sessions/{sessions[0]['id']}/live-details")
         details.raise_for_status()
         assert page_id in {entry["id"] for entry in details.json()["pages"]}
+
+
+@pytest.mark.asyncio
+async def test_native_human_input_relay_uses_lease_and_real_steel(
+    page: Page, lease: LeaseHarness
+) -> None:
+    api_url = os.environ.get("NORMAL_INPUT_STEEL_URL")
+    if not api_url:
+        pytest.skip("Requires isolated Steel canary")
+    remote = await page.context.new_cdp_session(page)
+    try:
+        info = await remote.send("Target.getTargetInfo")
+        page_id = str(info["targetInfo"]["targetId"])
+    finally:
+        await remote.detach()
+    old_lease = lease.command.lease_id
+    assert old_lease is not None
+    await lease.store.execute(lease.command.model_copy(update={"action": "stop", "jti": uuid4()}))
+    await lease.store.confirm_stopped(lease.command.session_id, old_lease)
+    viewer = lease.command.model_copy(
+        update={"action": "viewer", "lease_id": None, "owner_id": "viewer", "jti": uuid4()}
+    )
+    human_lease = await lease.store.acquire_viewer(viewer)
+    messages: asyncio.Queue[dict[str, object]] = asyncio.Queue()
+    frame_ready = asyncio.Event()
+    sent: list[str] = []
+
+    class SyntheticWebClient:
+        async def receive(self) -> dict[str, object]:
+            return await messages.get()
+
+        async def send_text(self, value: str) -> None:
+            payload = json.loads(value)
+            if payload.get("pageId") == page_id and payload.get("data"):
+                frame_ready.set()
+
+        async def send_bytes(self, value: bytes) -> None:
+            pytest.fail("Pinned Steel sends text frames")
+
+    class ObservedUpstream:
+        def __init__(self, stream: Any) -> None:
+            self.stream = stream
+
+        async def send(self, value: str) -> None:
+            sent.append(value)
+            await self.stream.send(value)
+
+        def __aiter__(self) -> Any:
+            return self.stream.__aiter__()
+
+    async def send(kind: str, event: dict[str, object], *, target: str = page_id) -> None:
+        await messages.put(
+            {
+                "type": "websocket.receive",
+                "text": json.dumps({"type": kind, "pageId": target, "event": event}),
+            }
+        )
+
+    async def click(selector: str) -> None:
+        bounds = await page.locator(selector).bounding_box()
+        assert bounds is not None
+        for event_type in ("mousePressed", "mouseReleased"):
+            await send(
+                "mouseEvent",
+                {
+                    "type": event_type,
+                    "x": bounds["x"] + bounds["width"] / 2,
+                    "y": bounds["y"] + bounds["height"] / 2,
+                    "button": "left",
+                    "clickCount": 1,
+                    "modifiers": 0,
+                },
+            )
+
+    async def until(selector: str, expected: str, *, input_value: bool = False) -> None:
+        async with asyncio.timeout(5):
+            while (
+                await page.locator(selector).input_value()
+                if input_value
+                else await page.locator(selector).inner_text()
+            ) != expected:
+                await asyncio.sleep(0.05)
+
+    query = urlencode({"pageId": page_id})
+    stream_url = api_url.replace("http://", "ws://", 1) + "/v1/sessions/cast?" + query
+    try:
+        async with connect(stream_url, max_size=2 * 1024 * 1024) as stream:
+            relay = asyncio.create_task(
+                _relay_websocket(
+                    cast(WebSocket, SyntheticWebClient()),
+                    ObservedUpstream(stream),
+                    authorization_check=lambda: lease.store.check_viewer(
+                        viewer, human_lease.lease_id
+                    ),
+                    authorization_renew=lambda: lease.store.renew_viewer(
+                        viewer, human_lease.lease_id
+                    ),
+                    input_guard=lambda: lease.store.viewer_input_guard(
+                        viewer, human_lease.lease_id
+                    ),
+                    page_id=page_id,
+                )
+            )
+            try:
+                await asyncio.wait_for(frame_ready.wait(), timeout=10)
+                await click("#text")
+                for key in "中A":
+                    for event_type in ("keyDown", "keyUp"):
+                        await send(
+                            "keyEvent",
+                            {
+                                "type": event_type,
+                                "key": key,
+                                "text": key,
+                                "code": "",
+                                "keyCode": ord(key),
+                            },
+                        )
+                await until("#text", "中A", input_value=True)
+                await click("#save")
+                await until("#result", "中A")
+                assert await page.locator("#events").inner_text() == "1"
+                count = len(sent)
+                await send(
+                    "keyEvent",
+                    {"type": "keyDown", "key": "x", "text": "x", "code": "KeyX", "keyCode": 88},
+                    target="forged-page",
+                )
+                with pytest.raises(ViewerRejected):
+                    await asyncio.wait_for(relay, timeout=5)
+                assert len(sent) == count
+            finally:
+                relay.cancel()
+                await asyncio.gather(relay, return_exceptions=True)
+    finally:
+        await lease.store.drain_viewer(viewer, human_lease.lease_id)
+        await lease.store.confirm_stopped(viewer.session_id, human_lease.lease_id)

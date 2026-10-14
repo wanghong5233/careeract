@@ -102,6 +102,7 @@ async def test_context_capture_is_scoped_disconnects_and_uses_no_runtime_enable(
         AnyHttpUrl("http://cdp"),
         session_id,
         include_local_storage=changed != "cookie_only",
+        risk_stop=(risk_stop := AsyncMock()),
     )
     if changed in {"owner", "multiple", "site"}:
         with pytest.raises(BossProfileUnavailable):
@@ -116,6 +117,7 @@ async def test_context_capture_is_scoped_disconnects_and_uses_no_runtime_enable(
         cdp.send.Target.attachToTarget.assert_not_awaited()
         cdp.send.Network.getAllCookies.assert_not_awaited()
         cdp.send.DOM.getDocument.assert_not_awaited()
+        risk_stop.assert_awaited_once_with("denied" if changed == "denied" else "challenge")
     else:
         state = await reader.storage_state()
         assert isinstance(state, dict) and state["cookies"] == cookies
@@ -129,3 +131,5 @@ async def test_context_capture_is_scoped_disconnects_and_uses_no_runtime_enable(
                 assert state["origins"][0]["localStorage"] == []
     if changed != "owner":
         cdp.stop.assert_awaited_once()
+    if changed not in {"verify", "denied"}:
+        risk_stop.assert_not_awaited()

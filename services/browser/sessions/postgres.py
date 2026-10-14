@@ -458,7 +458,13 @@ class PostgresLeaseStore:
         row = (
             (
                 await connection.execute(
-                    text("SELECT * FROM browser.sessions WHERE session_id=:session FOR UPDATE"),
+                    # Lease/lifecycle writes never change session_id. NO KEY UPDATE
+                    # still excludes all competing writers, while allowing the
+                    # safety transaction to retain a foreign-key reference to this
+                    # session without waiting for its own executor lock.
+                    text(
+                        "SELECT * FROM browser.sessions WHERE session_id=:session FOR NO KEY UPDATE"
+                    ),
                     {"session": session_id},
                 )
             )

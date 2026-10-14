@@ -7,7 +7,6 @@ import pytest
 from pydantic import AnyHttpUrl
 
 from services.browser.site_adapters.boss_login import (
-    BOSS_CONVERSATIONS_URL,
     BOSS_LOGIN_URL,
     BossLoginNavigator,
     BossLoginUnavailable,
@@ -32,6 +31,8 @@ from services.browser.site_adapters.boss_login import (
         "empty",
         "foreign",
         "conversations",
+        "denied",
+        "challenge",
     ],
 )
 async def test_login_navigation_uses_owned_blank_page_and_disconnects(
@@ -46,13 +47,17 @@ async def test_login_navigation_uses_owned_blank_page_and_disconnects(
     }
     navigation = AsyncMock(return_value={"errorText": "private"} if changed == "navigation" else {})
     retained_url = (
-        ""
+        "https://www.zhipin.com/web/passport/zp/403.html"
+        if changed == "denied"
+        else "https://www.zhipin.com/web/passport/zp/verify.html"
+        if changed == "challenge"
+        else ""
         if changed == "empty"
         else "about:blank"
         if changed == "blank"
         else "https://example.com"
         if changed == "foreign"
-        else BOSS_CONVERSATIONS_URL
+        else "https://www.zhipin.com/web/geek/chat"
         if changed == "conversations"
         else BOSS_LOGIN_URL
     )
@@ -125,7 +130,7 @@ async def test_login_navigation_uses_owned_blank_page_and_disconnects(
         navigator = BossLoginNavigator(
             steel_client,
             AnyHttpUrl("http://cdp:9223"),
-            destination="conversations" if changed == "conversations" else "login",
+            risk_stop=(risk_stop := AsyncMock()),
         )
         if changed in {
             None,
@@ -139,7 +144,7 @@ async def test_login_navigation_uses_owned_blank_page_and_disconnects(
             constructor.assert_called_once_with("ws://cdp:9223/devtools/browser/synthetic")
             navigation.assert_awaited_once_with(
                 params={
-                    "url": BOSS_CONVERSATIONS_URL if changed == "conversations" else BOSS_LOGIN_URL,
+                    "url": BOSS_LOGIN_URL,
                     "transitionType": "address_bar",
                 },
                 session_id="owned-attachment",
@@ -147,8 +152,13 @@ async def test_login_navigation_uses_owned_blank_page_and_disconnects(
         else:
             with pytest.raises(BossLoginUnavailable):
                 await navigator(session_id)
-            if changed not in {"navigation", "blank", "empty", "foreign"}:
+            if changed not in {"navigation", "blank", "empty", "foreign", "denied", "challenge"}:
                 navigation.assert_not_awaited()
+        if changed in {"denied", "challenge"}:
+            risk_stop.assert_awaited_once_with(session_id, changed)
+            assert client.send.Target.getTargetInfo.await_count == 1
+        else:
+            risk_stop.assert_not_awaited()
     if changed == "discovery":
         constructor.assert_not_called()
     else:

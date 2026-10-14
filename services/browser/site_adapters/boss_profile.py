@@ -11,8 +11,9 @@ from pydantic import AnyHttpUrl
 from websockets.exceptions import WebSocketException
 
 from services.browser.sessions.context import SiteScope
+from services.browser.sessions.site_safety import RiskReason
 from services.browser.sessions.steel import SessionsResponse
-from services.browser.site_adapters.boss import boss_auth_page_state
+from services.browser.site_adapters.boss import BossPageState, boss_auth_page_state
 
 BOSS_SCOPE = SiteScope("boss", ("https://www.zhipin.com",), ("zhipin.com", "www.zhipin.com"))
 logger = logging.getLogger(__name__)
@@ -30,11 +31,13 @@ class BossProfileCapture:
         session_id: UUID,
         *,
         include_local_storage: bool = True,
+        risk_stop: Callable[[RiskReason], Awaitable[None]] | None = None,
     ) -> None:
         self.client = client
         self.cdp_origin = str(cdp_origin).rstrip("/")
         self.session_id = session_id
         self.include_local_storage = include_local_storage
+        self.risk_stop = risk_stop
 
     async def storage_state(self) -> object:
         try:
@@ -100,7 +103,14 @@ class BossProfileCapture:
                     page_url.scheme != "https"
                 ):
                     raise ValueError("Browser context is outside its site")
-                if boss_auth_page_state(page_url.geturl()) is not None:
+                auth_state = boss_auth_page_state(page_url.geturl())
+                if auth_state is not None:
+                    if auth_state == BossPageState.RISK and self.risk_stop is not None:
+                        await self.risk_stop(
+                            "denied"
+                            if page_url.path == "/web/passport/zp/403.html"
+                            else "challenge"
+                        )
                     return {"authenticated": False, "cookies": [], "origins": []}
                 attached = await cdp.send.Target.attachToTarget(
                     params={"targetId": page_id, "flatten": True}

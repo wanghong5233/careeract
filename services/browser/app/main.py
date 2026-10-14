@@ -8,6 +8,7 @@ from services.browser.app.settings import settings
 from services.browser.sessions.authentication import CommandVerifier
 from services.browser.sessions.postgres import PostgresLeaseStore
 from services.browser.sessions.profiles import PostgresBrowserProfileStore, ProfileCipher
+from services.browser.sessions.site_safety import PostgresSiteSafetyStore
 from services.browser.sessions.steel import SteelSessionManager
 from services.browser.site_adapters.boss_lifecycle import boss_site_lifecycles
 from services.browser.site_adapters.boss_login import BossLoginNavigator
@@ -34,6 +35,7 @@ else:
         follow_redirects=False,
         timeout=40,
     )
+    boss_safety = PostgresSiteSafetyStore(engine, BOSS_SCOPE)
     app = create_app(
         verifier=CommandVerifier(public_key),
         store=PostgresLeaseStore(engine),
@@ -41,7 +43,9 @@ else:
         steel_sessions=SteelSessionManager(steel_client, engine),
         viewer_public_origin=settings.viewer_public_origin,
         site_lifecycles=boss_site_lifecycles(
-            navigator=BossLoginNavigator(steel_client, settings.steel_cdp_url),
+            navigator=BossLoginNavigator(
+                steel_client, settings.steel_cdp_url, risk_guard=boss_safety.action_guard
+            ),
             profiles=(
                 PostgresBrowserProfileStore(
                     engine, ProfileCipher.from_file(settings.browser_profile_key_file), BOSS_SCOPE
@@ -50,7 +54,10 @@ else:
                 else None
             ),
             reader=lambda session_id: BossProfileCapture(
-                steel_client, settings.steel_cdp_url, session_id
+                steel_client,
+                settings.steel_cdp_url,
+                session_id,
+                risk_stop=lambda reason: boss_safety.record_stop(session_id, reason),
             ),
         ),
     )

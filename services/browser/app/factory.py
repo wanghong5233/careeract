@@ -48,6 +48,7 @@ from services.browser.sessions.viewer import (
     viewer_context,
     viewer_cookie_name,
 )
+from services.browser.sessions.viewer_input import ViewerInputBoundary
 
 
 class SendMessageBody(BaseModel):
@@ -102,9 +103,11 @@ async def _relay_websocket(
     authorization_interval: float = 5.0,
     allow_input: bool = True,
     input_guard: Callable[[], AbstractAsyncContextManager[None]] | None = None,
+    page_id: str | None = None,
 ) -> None:
-    if allow_input and input_guard is None:
-        raise ValueError("Interactive relay requires an input guard")
+    if allow_input and (input_guard is None or page_id is None):
+        raise ValueError("Interactive relay requires an input guard and bound page")
+    input_boundary = ViewerInputBoundary(page_id) if page_id is not None else None
 
     async def from_client() -> None:
         while True:
@@ -117,11 +120,13 @@ async def _relay_websocket(
                         await authorization_check()
                         raise ViewerAuthorizationRevoked
                     assert input_guard is not None
+                    assert page_id is not None
+                    assert input_boundary is not None
+                    payload = input_boundary.validate(
+                        message.get("text") if message.get("bytes") is None else message["bytes"],
+                    )
                     async with input_guard():
-                        if message.get("text") is not None:
-                            await upstream.send(message["text"])
-                        elif message.get("bytes") is not None:
-                            await upstream.send(message["bytes"])
+                        await upstream.send(payload)
             except (CommandRejected, LeaseNotFound, LeaseConflict) as error:
                 raise ViewerAuthorizationRevoked from error
             except (DBAPIError, PoolTimeoutError, TimeoutError) as error:
@@ -132,6 +137,8 @@ async def _relay_websocket(
             if isinstance(message, bytes):
                 await websocket.send_bytes(message)
             else:
+                if input_boundary is not None:
+                    input_boundary.observe_frame(message)
                 await websocket.send_text(message)
 
     async def monitor_authorization() -> None:
@@ -547,6 +554,7 @@ def create_app(
                             authorization_interval=viewer_authorization_interval,
                             allow_input=True,
                             input_guard=lambda: store.viewer_input_guard(active.command, lease_id),
+                            page_id=page_id,
                         )
                     else:
                         await _relay_websocket(
@@ -557,7 +565,13 @@ def create_app(
                             authorization_interval=viewer_authorization_interval,
                             allow_input=False,
                         )
-                except (ViewerAuthorizationRevoked, CommandRejected, LeaseNotFound, LeaseConflict):
+                except (
+                    ViewerRejected,
+                    ViewerAuthorizationRevoked,
+                    CommandRejected,
+                    LeaseNotFound,
+                    LeaseConflict,
+                ):
                     close_code = 1008
                 except (ViewerCoordinationUnavailable, DBAPIError, PoolTimeoutError):
                     close_code = 1013
