@@ -23,6 +23,34 @@ prototype loses state and must never authorize reuse of a surviving Steel sessio
 
 Acceptance gates: [browser release checks](../../../docs/handbook/DEVELOPMENT.md#浏览器开放前检查).
 
+## Bounded normal input
+
+`ui_input.py` uses fixed Patchright 1.63.0 and a caller-owned page under the existing
+transactional `executor_action_guard`. It is not registered as an Agent tool, HTTP
+endpoint or BOSS executor. The caller must validate task/page ownership before assembly.
+An observation binds one exact visible role/name to its element and adapter instance;
+input checks identity, freshness, viewport, hit-testing and focus. Only normal clicks
+and bounded single-line keyboard input are supported; no force, setters or arbitrary
+evaluation. Fixed read-only DOM scripts only check geometry, element identity and focus.
+
+Input consumes the observation. Cancellation, expiry or failed readback after possible
+dispatch prevents further input on that instance; it does not establish a durable result
+or permit replay after constructing a new instance. Business assembly must reuse the
+existing persistent attempt/deduplication boundary. Persistent risk stops and Viewer
+protocol acceptance remain separate release gates.
+
+Synthetic acceptance (no real account or site):
+
+```powershell
+uv run python -m scripts.smoke_normal_ui_input --report-directory data/dev/normal-input-new
+```
+
+This creates a disposable fixed Steel container and reuses the isolated PostgreSQL
+test fixture. It checks real normal input, denial cases, control serialization, expiry,
+cancellation and same-page Viewer frames/reconnection, then verifies physical release.
+Use a new report directory. It neither opens business endpoints nor verifies production
+session registration, BOSS availability or absence of account risk.
+
 ## Persistent control boundary
 
 `postgres.py` persists registered session ownership and lease state in the `browser`

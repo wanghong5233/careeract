@@ -10,6 +10,7 @@ dependencies = [
     "cryptography",
     "fastapi",
     "httpx",
+    "patchright==1.63.0",
     "playwright",
     "pydantic-settings",
     "pyjwt[crypto]",
