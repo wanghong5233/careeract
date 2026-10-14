@@ -147,6 +147,7 @@ async def test_page_observation_waits_for_structure_without_replaying_navigation
         "site",
         "login",
         "verify",
+        "denied",
         "navigation",
         "oversize",
         "malformed",
@@ -177,6 +178,8 @@ async def test_page_snapshot_is_read_only_scoped_and_bounded(
             if changed == "login"
             else "https://www.zhipin.com/web/passport/zp/verify.html?token=synthetic"
             if changed == "verify"
+            else "https://www.zhipin.com/web/passport/zp/403.html?code=32"
+            if changed == "denied"
             else "https://www.zhipin.com/web/geek/chat"
         ),
     }
@@ -367,10 +370,10 @@ async def test_page_snapshot_is_read_only_scoped_and_bounded(
         )
         cdp.stop.assert_awaited_once()
         return
-    if changed is not None and changed not in {"login", "verify", "rendered"}:
+    if changed is not None and changed not in {"login", "verify", "denied", "rendered"}:
         with pytest.raises(BossContextUnavailable):
             await reader.page_snapshot()
-    elif changed in {"login", "verify"}:
+    elif changed in {"login", "verify", "denied"}:
         snapshot = await reader.page_snapshot()
         assert "?" not in snapshot.url and "#" not in snapshot.url
         assert snapshot.html == "" and snapshot.title == ""

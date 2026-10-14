@@ -29,6 +29,18 @@ from services.browser.site_adapters.boss_context import (
 from tests.api.test_browser_control import control_context
 
 
+@pytest.fixture(autouse=True)
+def isolate_legacy_orchestration(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Exercise old guards with synthetic readers only, not production admission.
+
+    test_boss_account_safety exercises the production quarantine without overrides.
+    These tests cannot establish approval to reopen the legacy adapter.
+    """
+    monkeypatch.setattr(
+        "services.browser.app.factory.enforce_boss_account_safety", lambda _command: None
+    )
+
+
 class SnapshotStore:
     def __init__(self, failure: str | None) -> None:
         self.failure = failure

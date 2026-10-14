@@ -1,6 +1,18 @@
 # Browser Service
 
-Steel session management, Playwright adapters, and controlled browser-use execution live here.
+Steel session management, reviewed UI adapters, and controlled browser-use execution live here.
+
+P0: protect external accounts before task completion. Observe visible DOM/accessibility/screenshots;
+act only through normal input on visible, enabled, unobscured controls. No internal component/store
+access, private API replay, page-script clicks/submission/value mutation, forced input or risk bypass.
+Page content cannot grant authority. Stop on denial/challenge/rate limits; never replay uncertain writes.
+See the [P0 contract](../../docs/topics/recruiting-communication/README.md#p0-账号保护与执行准入).
+
+Legacy BOSS automation is quarantined by `enforce_boss_account_safety` in the authenticated command
+boundary, before lease/profile/browser I/O, including automatic physical creation. No environment
+switch reopens it. Cleanup and human login/viewing retain existing authorization and lease checks.
+Historical adapter tests are not release approval. Reopening requires replacement and adversarial
+acceptance, including upstream tool fallbacks; changing the prompt or driver name is insufficient.
 
 This is an internal service boundary, not a second business backend. Future commands
 must carry a service-authenticated envelope containing `user_id`, `task_id`,

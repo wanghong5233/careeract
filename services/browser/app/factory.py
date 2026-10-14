@@ -75,6 +75,29 @@ class ViewerCoordinationUnavailable(Exception):
     pass
 
 
+def enforce_boss_account_safety(command: BrowserCommand) -> None:
+    """Quarantine legacy automation before any lease, profile or browser I/O.
+
+    No environment/model override. Remove only with a reviewed UI-only adapter.
+    Human viewing/login and cleanup remain available under their existing guards.
+    """
+    business_action = command.action in {
+        "snapshot",
+        "conversation",
+        "observe_conversation",
+        "conversation_resume",
+        "send_message",
+    }
+    legacy_executor = command.owner_id in {"boss-read", "boss-reply", "boss-page-reader"}
+    if business_action or (
+        legacy_executor and command.action in {"create", "acquire", "renew", "check"}
+    ):
+        raise HTTPException(
+            409,
+            {"code": "boss_automation_quarantined", "reason": "UI adapter safety review required"},
+        )
+
+
 @dataclass
 class _ActiveViewer:
     command: BrowserCommand
@@ -187,9 +210,11 @@ def create_app(
         if scheme.lower() != "bearer" or not token:
             raise HTTPException(401, "Browser command required")
         try:
-            return verifier.verify(token, session_id, action)
+            command = verifier.verify(token, session_id, action)
         except CommandRejected:
             raise HTTPException(403, "Browser command rejected") from None
+        enforce_boss_account_safety(command)
+        return command
 
     @app.post("/internal/v1/sessions/{session_id}/lease/{action}")
     async def lease_command(

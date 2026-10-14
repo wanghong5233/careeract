@@ -6,6 +6,7 @@ from services.browser.site_adapters.boss import (
     BossMessageSummary,
     BossPageKind,
     BossPageState,
+    boss_auth_page_state,
     parse_boss_page,
 )
 
@@ -64,6 +65,17 @@ def test_login_route_is_a_needs_login_state() -> None:
     assert page.kind == BossPageKind.LOGIN
     assert page.state == BossPageState.NEEDS_LOGIN
     assert page.signals == ("login_required",)
+
+
+@pytest.mark.parametrize("suffix", ["", "?code=32", "?code=32#notice"])
+def test_platform_denial_is_risk_even_without_page_content(suffix: str) -> None:
+    url = "https://www.zhipin.com/web/passport/zp/403.html" + suffix
+    assert boss_auth_page_state(url) == BossPageState.RISK
+    page = parse_boss_page(html="", url=url, title="")
+    assert page.state == BossPageState.RISK
+    assert page.kind == BossPageKind.UNKNOWN
+    assert page.signals == ("security_check",)
+    assert page.conversations == () and page.messages == ()
 
 
 def test_scripts_and_styles_do_not_supply_page_state_or_candidate_data() -> None:

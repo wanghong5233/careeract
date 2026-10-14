@@ -277,7 +277,11 @@ class _TreeParser(HTMLParser):
 
 def boss_auth_page_state(url: str) -> BossPageState | None:
     path = urlsplit(url).path.lower()
-    if any(marker in path for marker in ("_security_check", "/verify", "/security")):
+    # The platform denial page lives below /passport/, but is not evidence that
+    # saved credentials expired. Check it before the broad login-route match.
+    if path == "/web/passport/zp/403.html" or any(
+        marker in path for marker in ("_security_check", "/verify", "/security")
+    ):
         return BossPageState.RISK
     if any(marker in path for marker in ("/web/user/", "/user/login", "/login", "/passport/")):
         return BossPageState.NEEDS_LOGIN
