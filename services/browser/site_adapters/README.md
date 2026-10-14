@@ -50,3 +50,13 @@ upstream fallbacks are not admissible. Only then reconnect the business path acc
 to the [implementation plan](../../../docs/topics/recruiting-communication/README.md#5-实施阶段和验收门槛).
 
 Synthetic tests do not establish live platform availability or immunity from account risk.
+
+`boss_material_observer.py` is an unassembled read-only Patchright adapter for an
+already owned attachment-manager page. It requires both the existing executor lease
+and durable site-stop guards. It creates no session, restores no Profile, navigates
+nowhere and sends nothing. Fixed read-only DOM geometry/text checks reject occluded,
+clipped, transparent, incomplete and ambiguous attachment metadata. Title attributes
+cannot supply an unseen filename; metadata references are not content hashes or send
+authority. URL risk stops before DOM access, and visible risk notices propagate through
+the durable stop guard before a catalog can be accepted. Navigation invalidates results.
+Synthetic browser fixtures intercept all requests; these are not live BOSS contracts.

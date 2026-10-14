@@ -60,6 +60,7 @@ async def acceptance(api_url: str, cdp_url: str, directory: Path) -> None:
                     "-m",
                     "pytest",
                     "tests/browser/test_ui_input.py",
+                    "tests/browser/test_material_browser.py",
                     "-q",
                     "-x",
                     f"--junitxml={directory / 'tests.xml'}",

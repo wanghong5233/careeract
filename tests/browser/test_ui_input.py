@@ -98,7 +98,9 @@ class LeaseHarness:
 async def lease(database_url: str) -> AsyncIterator[LeaseHarness]:
     engine = create_async_engine(database_url)
     store = PostgresLeaseStore(engine)
-    command = BrowserCommand.model_validate(command_payload() | {"action": "acquire"})
+    command = BrowserCommand.model_validate(
+        command_payload() | {"action": "acquire", "sub": "input-" + uuid4().hex}
+    )
     await store.register(command.session_id, command.sub, command.task_id, command.authorization_id)
     acquired = await store.execute(command)
     check = command.model_copy(update={"action": "check", "lease_id": acquired.lease_id})
