@@ -78,6 +78,21 @@ Docker CLI 存在不代表 Linux 引擎已启动。检查可用内存、Docker �
 
 ## 配置与启动
 
+招聘沟通 Worker 通过内部 HTTP 接口调用 API，不加载 API 源码或浏览器签名私钥。
+启动该 Worker 前，一次性生成独立服务凭据（存在时保留），将根 `.env` 的
+`WORKER_API_KEY_FILE` 设为 `data/private/worker-api.key`，`WORKER_API_BASE_URL` 设为
+当前 API 地址；API 与 Worker 读取同一文件。凭据不能替代产品身份，也不能新增目标、
+消息或授权；内部接口只接受持久任务 UUID，不在 Web BFF 或公开 OpenAPI 暴露。
+
+```powershell
+uv run python -c "from pathlib import Path; import secrets; p=Path('data/private/worker-api.key'); p.parent.mkdir(parents=True, exist_ok=True); p.exists() or p.write_text(secrets.token_urlsafe(48), encoding='utf-8')"
+```
+
+缺失配置时内部调用拒绝执行，不回退到产品 JWT、模型 Key 或浏览器私钥。
+部署模板通过 Docker secret 挂载该文件；路径用 `WORKER_API_KEY_PATH` 指定（相对部署目录），
+默认 `../data/private/worker-api.key`。轮换时在没有活动任务后更新文件并重启 API/Worker；
+不为更换凭据重新登录 BOSS。
+
 这些是待运行的启动路径，不是已经通过的集成证明。首次下载镜像、依赖和解析模型需要网络与磁盘空间。
 
 1. 仅当文件不存在时创建配置，保留已有密钥：

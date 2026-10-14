@@ -37,7 +37,8 @@ function taskCard(fetch, blocked = false, globals = {}) {
     },
     "lucide-react": { LoaderCircle: Container, RefreshCw: Container },
     "@/components/browser-scene": { BrowserScene: Container },
-    "@/components/workspace-actions": { AgentAction: Button },
+    "@/components/boss-replies": { BossReplies: Container },
+    "@/components/boss-automation": { BossAutomation: Container },
     "@/components/ui/button": { Button },
     "@/components/ui/dialog": {
       Dialog: ({ open, children }) => open ? children : null,
@@ -173,7 +174,7 @@ test("selected conversation is persisted before execution and restored with mess
   let detailed = false;
   const writes = [];
   const page = { ...observation.page, kind: "conversations", state: "unknown", jobs: [],
-    conversations: [{ conversation_id: "thread-1", recruiter_name: "Synthetic HR", company: null, last_message: "Synthetic preview" }], messages: [] };
+    conversations: [{ conversation_id: "thread-1", recruiter_name: "Synthetic HR", company: null, last_message: "Synthetic preview", last_message_id: "123" }], messages: [] };
   const fixture = taskCard(async (url, options = {}) => {
     if (options.method === "POST") {
       writes.push({ url, options });
@@ -181,9 +182,9 @@ test("selected conversation is persisted before execution and restored with mess
       else current = accepted;
       return Response.json(current);
     }
-    return Response.json(url.endsWith("/result") ? { ...observation, page: { ...page,
+    return Response.json(url.endsWith("/result") ? { ...observation, page: { ...page, state: detailed ? "ready" : "unknown",
       resume_control: detailed ? { conversation_id: "thread-1", state: "unavailable", attachment_reported: false, material_state: "absent" } : null,
-      messages: detailed ? [{ message_id: "123", conversation_id: "thread-1", sender: "recruiter", content: "Synthetic detail", sent_at: null }] : [] } } : current);
+      messages: detailed ? [{ message_id: "123", conversation_id: "thread-1", sender: "recruiter", content: "Synthetic detail", sent_at: null }, { message_id: "124", conversation_id: "thread-1", sender: "recruiter", content: "Synthetic context card", sent_at: null }] : [] } } : current);
   });
   await settle();
   fixture.button("读取会话详情").props.onClick();
@@ -195,10 +196,8 @@ test("selected conversation is persisted before execution and restored with mess
   assert.equal(writes.length, 2);
   assert.match(text(fixture.render()), /招聘方/);
   assert.match(text(fixture.render()), /Synthetic detail/);
-  const draftAction = elements(fixture.render()).find(element => element.props.prompt);
-  assert.ok(draftAction);
-  assert.match(draftAction.props.prompt, /只生成草稿，不发送消息或简历/);
-  assert.match(draftAction.props.prompt, /Synthetic detail/);
+  const replyPanel = elements(fixture.render()).find(element => element.props.source);
+  assert.deepEqual(replyPanel.props.source, { readTaskId: taskId, conversationId: "thread-1", messageId: "123", content: "Synthetic detail" });
   assert.match(text(fixture.render()), /简历入口： 页面当前不可用/);
   assert.match(text(fixture.render()), /不能据此自动发送/);
   fixture.click("核对读取结果");

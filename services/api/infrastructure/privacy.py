@@ -1,4 +1,5 @@
 import json
+import re
 from uuid import uuid4
 
 from starlette.datastructures import Headers
@@ -36,6 +37,37 @@ def validate_structure(value: object) -> None:
             pending.extend((child, depth + 1) for child in current.values())
         elif isinstance(current, list):
             pending.extend((child, depth + 1) for child in current)
+
+
+def content_for_privacy_check(path: str, method: str, payload: object) -> object:
+    # This endpoint accepts references, not caller-supplied message contents.
+    # BOSS opaque IDs can be long decimal strings. The repository must resolve
+    # them from an owned, verified read; only the resolved content goes to Agno.
+    if method != "POST" or not isinstance(payload, dict):
+        return payload
+    if path == "/api/v1/recruiting/automations":
+        scope = payload.get("conversation_ids")
+        if (
+            isinstance(scope, list)
+            and 1 <= len(scope) <= 20
+            and all(
+                isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,200}", value)
+                for value in scope
+            )
+        ):
+            return {key: value for key, value in payload.items() if key != "conversation_ids"}
+        return payload
+    if path != "/api/v1/recruiting/replies":
+        return payload
+    return {
+        key: value
+        for key, value in payload.items()
+        if not (
+            key in {"conversation_id", "message_id"}
+            and isinstance(value, str)
+            and re.fullmatch(r"[A-Za-z0-9_-]{1,200}", value)
+        )
+    }
 
 
 def is_text_run(value: object) -> bool:
@@ -133,7 +165,9 @@ class PrivacyBoundaryMiddleware:
             )
             return
         try:
-            ensure_career_content(payload)
+            ensure_career_content(
+                content_for_privacy_check(scope["path"], scope["method"], payload)
+            )
             text_run_allowed = is_text_run(payload) if is_agent else True
         except RestrictedContent as error:
             await self.reject(scope, receive, send, 422, "restricted_content", str(error))

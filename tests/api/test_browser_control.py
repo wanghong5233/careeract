@@ -29,6 +29,21 @@ def control_context() -> BrowserControlContext:
     )
 
 
+@pytest.mark.parametrize("field", ["message_id", "text_digest", "source_digest"])
+def test_non_send_signatures_reject_any_partial_message_scope(field: str) -> None:
+    signer = BrowserCommandSigner(Ed25519PrivateKey.generate())
+    with pytest.raises(BrowserControlRejected):
+        signer.sign(
+            replace(
+                control_context(),
+                message_id="1" if field == "message_id" else None,
+                text_digest="1" if field == "text_digest" else None,
+                source_digest="1" if field == "source_digest" else None,
+            ),
+            "register",
+        )
+
+
 def test_signer_caps_lifetime_and_allows_expired_authorization_cleanup() -> None:
     key = Ed25519PrivateKey.generate()
     signer = BrowserCommandSigner(key)

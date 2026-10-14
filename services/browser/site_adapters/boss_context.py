@@ -26,6 +26,7 @@ from services.browser.site_adapters.boss import (
     parse_boss_rendered_messages,
     parse_boss_resume_control,
 )
+from services.browser.site_adapters.boss_controls import BOSS_TEXT_CONTROL
 
 BOSS_SCOPE = SiteScope("boss", ("https://www.zhipin.com",), ("zhipin.com", "www.zhipin.com"))
 MAX_PAGE_SNAPSHOT_BYTES = 4 * 1024 * 1024
@@ -48,6 +49,7 @@ class BossPageSnapshot:
     conversations: tuple[BossConversationSummary, ...] = ()
     messages: tuple[BossMessageSummary, ...] = ()
     resume_control: BossResumeControl | None = None
+    control_signals: tuple[str, ...] = ()
 
 
 class BossContextReader:
@@ -147,7 +149,11 @@ class BossContextReader:
                 rendered_conversations=snapshot.conversations,
                 rendered_messages=snapshot.messages,
             )
-            return replace(page, resume_control=snapshot.resume_control)
+            return replace(
+                page,
+                resume_control=snapshot.resume_control,
+                signals=page.signals + snapshot.control_signals,
+            )
         except BossDisconnectUnconfirmed:
             raise
         except (
@@ -278,7 +284,11 @@ class BossContextReader:
                 await cast(Callable[[], Awaitable[None]], cdp.stop)()
 
     async def _page_snapshot(
-        self, *, conversation_id: str | None = None, navigate: bool = True
+        self,
+        *,
+        conversation_id: str | None = None,
+        navigate: bool = True,
+        operation: Callable[[CDPClient, str, BossPageSnapshot], Awaitable[None]] | None = None,
     ) -> BossPageSnapshot:
         inventory = await self.client.get("/v1/sessions", follow_redirects=False, timeout=5)
         inventory.raise_for_status()
@@ -432,6 +442,7 @@ class BossContextReader:
                 conversations: tuple[BossConversationSummary, ...] = ()
                 messages: tuple[BossMessageSummary, ...] = ()
                 resume_control: BossResumeControl | None = None
+                control_signals: tuple[str, ...] = ()
                 if page_url.path == "/web/geek/chat":
                     rendered = await cdp.send.Runtime.evaluate(
                         params={
@@ -466,6 +477,36 @@ class BossContextReader:
                             resume_control = parse_boss_resume_control(
                                 control_value, messages, conversation_id
                             )
+                            # The exact send locator is observed without focusing, editing,
+                            # or clicking. Only fixed readiness codes leave the adapter.
+                            control = BOSS_TEXT_CONTROL.replace(
+                                "__TARGET__", json.dumps(conversation_id)
+                            )
+                            readiness = await cdp.send.Runtime.evaluate(
+                                params={
+                                    "expression": (
+                                        f"(() => {{const c={control};return !c "
+                                        "? 'text_control_unknown' : c.text "
+                                        "? 'text_editor_occupied' : c.disabled "
+                                        "? 'text_control_disabled' : 'text_control_verified';})()"
+                                    ),
+                                    "returnByValue": True,
+                                },
+                                session_id=attached["sessionId"],
+                            )
+                            ready_value = readiness.get("result", {}).get("value")
+                            if (
+                                not readiness.get("exceptionDetails")
+                                and isinstance(ready_value, str)
+                                and ready_value
+                                in {
+                                    "text_control_unknown",
+                                    "text_editor_occupied",
+                                    "text_control_disabled",
+                                    "text_control_verified",
+                                }
+                            ):
+                                control_signals = (ready_value,)
                 current = await cdp.send.Target.getTargetInfo(
                     params={"targetId": pages[0]["targetId"]}
                 )
@@ -486,14 +527,18 @@ class BossContextReader:
                         "BOSS body exceeds capture bound bytes=%d", len(html.encode("utf-8"))
                     )
                     raise ValueError("BOSS page snapshot is too large")
-                return BossPageSnapshot(
+                snapshot = BossPageSnapshot(
                     url=url,
                     title=title,
                     html=html,
                     conversations=conversations,
                     messages=messages,
                     resume_control=resume_control,
+                    control_signals=control_signals,
                 )
+                if operation is not None:
+                    await operation(cdp, attached["sessionId"], snapshot)
+                return snapshot
         finally:
             try:
                 async with asyncio.timeout(5):
@@ -657,7 +702,7 @@ BOSS_MESSAGE_CAPTURE = """(() => {
                 return reject('latest_message');
         }
     }
-    return {messages, reason: 'ready'};
+    return {messages, reason: 'ready', latest_message_id: String(source.lastMsgId)};
 })()"""
 
 BOSS_RENDERED_MESSAGES = f"JSON.stringify(({BOSS_MESSAGE_CAPTURE}).messages)"

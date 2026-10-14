@@ -99,6 +99,9 @@ services:
       LITELLM_BASE_URL: http://litellm:4000
       LITELLM_API_KEY: ${LITELLM_API_KEY:?Initialize the service key first}
       LITELLM_MODEL: ${LITELLM_MODEL}
+      WORKER_API_KEY_FILE: /run/secrets/worker-api-key
+    secrets:
+      - worker-api-key
     depends_on:
       api-migrate:
         condition: service_completed_successfully
@@ -116,7 +119,13 @@ services:
       TEMPORAL_ADDRESS: temporal:7233
       TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE}
       TEMPORAL_TASK_QUEUE: ${TEMPORAL_TASK_QUEUE}
+      WORKER_API_BASE_URL: http://api:8000
+      WORKER_API_KEY_FILE: /run/secrets/worker-api-key
+    secrets:
+      - worker-api-key
     depends_on:
+      api:
+        condition: service_healthy
       temporal-namespace:
         condition: service_completed_successfully
 
@@ -247,6 +256,10 @@ services:
       interval: 5s
       timeout: 5s
       retries: 12
+
+secrets:
+  worker-api-key:
+    file: ${WORKER_API_KEY_PATH:-../data/private/worker-api.key}
 
 volumes:
   caddy-config:

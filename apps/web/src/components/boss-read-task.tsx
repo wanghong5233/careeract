@@ -4,7 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { LoaderCircle, RefreshCw } from "lucide-react";
 
 import { BrowserScene } from "@/components/browser-scene";
-import { AgentAction } from "@/components/workspace-actions";
+import { BossReplies, type ReplySource } from "@/components/boss-replies";
+import { BossAutomation } from "@/components/boss-automation";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogTitle } from "@/components/ui/dialog";
 import { createLatestRequest } from "@/lib/latest-request";
@@ -16,7 +17,7 @@ type ReadResult = {
   page: {
     title: string; url: string; kind: string; state: "ready" | "needs_login" | "risk" | "unstable" | "unknown";
     jobs: { job_id: string; title: string; company: string }[];
-    conversations: { conversation_id: string; recruiter_name: string | null; company: string | null; last_message: string | null }[];
+    conversations: { conversation_id: string; recruiter_name: string | null; company: string | null; last_message: string | null; last_message_id?: string | null }[];
     messages: { message_id: string; conversation_id: string | null; content: string; sender: string; sent_at: string | null; resume_attachment?: { filename: string; sent_by_candidate: boolean; request_message_id: string | null } | null }[];
     resume_control?: { conversation_id: string; state: "available" | "unavailable" | "unknown"; attachment_reported: boolean | null; material_state?: "present_unidentified" | "absent" | "unknown" } | null;
   };
@@ -28,7 +29,9 @@ const labels: Record<TaskStatus, string> = {
 };
 const pageLabels = { ready: "已识别页面", needs_login: "需要重新登录", risk: "需要平台安全验证", unstable: "页面尚未稳定", unknown: "尚未识别页面结构" };
 
-export function BossReadTask({ connectionId, version, blocked }: { connectionId: string; version: string; blocked: boolean }) {
+export function BossReadTask({ connectionId, version, blocked: connectionBlocked }: { connectionId: string; version: string; blocked: boolean }) {
+  const [automationActive, setAutomationActive] = useState(false);
+  const blocked = connectionBlocked || automationActive;
   const [task, setTask] = useState<ReadTask | null>(null);
   const [expiredTaskId, setExpiredTaskId] = useState<string | null>(null);
   const [result, setResult] = useState<ReadResult | null>(null);
@@ -81,7 +84,7 @@ export function BossReadTask({ connectionId, version, blocked }: { connectionId:
   }, [refresh]);
 
   useEffect(() => {
-    if (!executing && task?.task_status !== "running" && task?.task_status !== "waiting") return;
+    if (!executing && task?.task_status !== "accepted" && task?.task_status !== "running" && task?.task_status !== "waiting") return;
     let stopped = false;
     let timer: ReturnType<typeof setTimeout>;
     const poll = async () => {
@@ -227,6 +230,10 @@ export function BossReadTask({ connectionId, version, blocked }: { connectionId:
       if (!controller.signal.aborted) setExecuting(false);
     }
   };
+  const lastHumanMessage = result?.page.messages.find(message => ["recruiter", "candidate"].includes(message.sender) && result.page.conversations.some(conversation => conversation.conversation_id === message.conversation_id && conversation.last_message_id === message.message_id));
+  const replySource: ReplySource | null = task?.task_status === "completed" && result?.page.state === "ready" && lastHumanMessage?.sender === "recruiter" && lastHumanMessage.conversation_id && !lastHumanMessage.resume_attachment
+    ? { readTaskId: task.task_id, conversationId: lastHumanMessage.conversation_id, messageId: lastHumanMessage.message_id, content: lastHumanMessage.content }
+    : null;
   return <section aria-label="BOSS 页面读取" className="mt-5 border-t pt-4">
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div><h3 className="text-sm font-medium">页面读取</h3><p className="mt-1 text-xs text-muted-foreground">从保存登录恢复并打开沟通页，读取结果可在刷新后找回。不会发送消息或简历。</p></div>
@@ -238,7 +245,7 @@ export function BossReadTask({ connectionId, version, blocked }: { connectionId:
         {task?.task_status === "unknown" && <Button disabled={executing || stopping} variant="outline" onClick={() => void reconcile()}>核对释放并结束</Button>}
       </div>
     </div>
-    {blocked && <p className="mt-2 text-xs text-muted-foreground">请先关闭上方观看现场，以释放本机浏览器会话。</p>}
+    {blocked && <p className="mt-2 text-xs text-muted-foreground">{connectionBlocked ? "请先关闭上方观看现场，以释放本机浏览器会话。" : "请先核对或停止自动回复委托，再手动操作会话。"}</p>}
     {task && <p role="status" className="mt-3 text-xs">{returning || task.outcome === "read_handback_started" ? "正在归还控制并重新核验" : humanWaiting ? (manualAuthorized ? "自动执行已暂停 · 当前由你操作" : "人工操作授权已到期 · 请结束并释放现场") : task.outcome === "read_stop_requested" ? "停止已请求 · 等待浏览器释放核验" : labels[task.task_status]}{executing && task.task_status === "accepted" ? " · 执行请求已发出" : ""}</p>}
     {!returning && !stopping && (task?.task_status === "running" || (task?.task_status === "waiting" && (!humanWaiting || manualAuthorized))) && task.browser_session_id && <BrowserScene key={`${task.browser_session_id}:${manualAuthorized ? "control" : "watch"}`} sessionId={task.browser_session_id} controlMode={manualAuthorized ? "control" : "watch"} />}
     {result && <div className="mt-3 rounded-lg border bg-background p-3 text-xs leading-5">
@@ -246,13 +253,15 @@ export function BossReadTask({ connectionId, version, blocked }: { connectionId:
       <p className="mt-1 font-medium">{result.page.title}</p><p className="break-all text-muted-foreground">{result.page.url}</p>
       {task?.task_status !== "completed" && <p className="mt-2 text-amber-700 dark:text-amber-300">{humanWaiting ? "这是接管前的观察。人工操作后的页面将在归还控制时重新核验。" : task?.task_status === "failed" ? "这是已保存的页面观察；本次未完成有效业务读取。" : "这是已保存的页面观察；本次任务尚未确认完成。"}</p>}
       {result.page.jobs.map(job => <p key={job.job_id} className="mt-2">{job.title} · {job.company}</p>)}
-      {result.page.conversations.map(conversation => <div key={conversation.conversation_id} className="mt-2"><div className="flex items-center justify-between gap-2"><p>{conversation.recruiter_name ?? "招聘方"} · {conversation.company ?? ""}</p><div className="flex gap-1"><Button variant="ghost" disabled={blocked || active || loading || task?.task_status === "accepted"} onClick={() => { const selection = { id: conversation.conversation_id, name: conversation.recruiter_name ?? "招聘方" }; setSelectedConversation(selection); void start(false, selection); }}>读取会话详情</Button><Button variant="outline" disabled={blocked || active || loading || task?.task_status === "accepted"} onClick={() => { setSelectedConversation({ id: conversation.conversation_id, name: conversation.recruiter_name ?? "招聘方", humanControl: true }); setConfirmOpen(true); }}>打开并人工操作</Button></div></div><p className="text-muted-foreground">{conversation.last_message}</p>{result.page.messages.filter(message => message.conversation_id === conversation.conversation_id).map(message => <div key={message.message_id} className="mt-2 rounded border p-2"><p className="text-muted-foreground">{({ recruiter: "招聘方", candidate: "我", system: "平台提示" } as Record<string, string>)[message.sender] ?? "方向待核验"} · {message.sent_at ? new Date(message.sent_at).toLocaleString() : "时间待核验"}</p><p className="whitespace-pre-wrap">{message.content}</p>{message.sender === "recruiter" && <AgentAction variant="outline" prompt={`请基于这条已核验的 BOSS 招聘方消息起草一份简洁、个性化的回复。先区分已知事实与未知信息，必要时说明需要我确认的事项；只生成草稿，不发送消息或简历。\n\n招聘方消息（会话 ${conversation.conversation_id}，消息 ${message.message_id}）：\n${message.content.slice(0, 2000)}`}>让 Agent 起草回复</AgentAction>}</div>)}</div>)}
-      {result.page.messages.length > 0 && <p className="mt-2 text-muted-foreground">已核验当前加载的消息与最新消息标识；不代表全部历史记录，尚未开放自动回复或简历发送。</p>}
+      {result.page.conversations.map(conversation => <div key={conversation.conversation_id} className="mt-2"><div className="flex items-center justify-between gap-2"><p>{conversation.recruiter_name ?? "招聘方"} · {conversation.company ?? ""}</p><div className="flex gap-1"><Button variant="ghost" disabled={blocked || active || loading || task?.task_status === "accepted"} onClick={() => { const selection = { id: conversation.conversation_id, name: conversation.recruiter_name ?? "招聘方" }; setSelectedConversation(selection); void start(false, selection); }}>读取会话详情</Button><Button variant="outline" disabled={blocked || active || loading || task?.task_status === "accepted"} onClick={() => { setSelectedConversation({ id: conversation.conversation_id, name: conversation.recruiter_name ?? "招聘方", humanControl: true }); setConfirmOpen(true); }}>打开并人工操作</Button></div></div><p className="text-muted-foreground">{conversation.last_message}</p>{result.page.messages.filter(message => message.conversation_id === conversation.conversation_id).map(message => <div key={message.message_id} className="mt-2 rounded border p-2"><p className="text-muted-foreground">{({ recruiter: "招聘方", candidate: "我", system: "平台提示" } as Record<string, string>)[message.sender] ?? "方向待核验"} · {message.sent_at ? new Date(message.sent_at).toLocaleString() : "时间待核验"}</p><p className="whitespace-pre-wrap">{message.content}</p></div>)}</div>)}
+      {result.page.messages.length > 0 && <p className="mt-2 text-muted-foreground">已核验当前加载的消息与最新消息标识；不代表全部历史记录。下方可审阅单次回复，或设置选定会话的有限自动回复委托。简历发送尚待接入。</p>}
       {result.page.messages.filter(message => message.resume_attachment).map(message => <p key={`resume-${message.message_id}`} className="mt-2 text-muted-foreground">历史简历卡片（{message.sender === "candidate" ? "我方消息" : message.sender === "recruiter" ? "招聘方消息" : "平台消息"}）：{message.resume_attachment!.filename}。这是当前加载的历史记录，不能证明发送成功、待发送材料的版本或再次发送许可。</p>)}
       {result.page.resume_control && <p className="mt-2 text-muted-foreground">简历入口：{({ available: "页面可用", unavailable: "页面当前不可用", unknown: "尚未核验" })[result.page.resume_control.state]}；材料身份：{({ present_unidentified: "入口报告附件，身份待核验", absent: "当前入口未报告附件，账号材料待核验", unknown: "尚未核验" })[result.page.resume_control.material_state ?? "unknown"]}。不能据此自动发送。</p>}
       {result.page.kind === "conversations" && result.page.conversations.length === 0 && result.page.messages.length === 0 && <p className="mt-2 text-muted-foreground">已识别沟通页，尚未提取到可核验的会话或消息。</p>}
     </div>}
     {error && <p role="alert" className="mt-3 text-xs text-destructive">{error}</p>}
+    <BossReplies key={connectionId} connectionId={connectionId} source={replySource} latestReadTaskId={task?.task_status === "completed" ? task.task_id : null} blocked={blocked || active || loading} />
+    <BossAutomation key={`automation-${connectionId}`} connectionId={connectionId} version={version} conversations={result?.page.state === "ready" && task?.task_status === "completed" ? result.page.conversations : []} blocked={connectionBlocked || active || loading} onActiveChange={setAutomationActive} />
     <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}><DialogContent><DialogTitle>{`打开 ${selectedConversation?.name ?? "招聘方"} 的会话并人工操作？`}</DialogTitle><DialogDescription>核验后暂停自动执行，由你操作同一浏览器。打开会话可能标记已读。归还时先断开人工输入，再核验原会话；切换会话或页面不一致时停止。人工操作授权最长 15 分钟，不包含自动消息回复或简历发送。</DialogDescription><DialogFooter><Button variant="outline" onClick={() => setConfirmOpen(false)}>取消</Button><Button onClick={() => void start()}>允许并打开</Button></DialogFooter></DialogContent></Dialog>
   </section>;
 }

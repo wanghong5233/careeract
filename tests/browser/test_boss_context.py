@@ -313,6 +313,8 @@ async def test_page_snapshot_is_read_only_scoped_and_bounded(
                 value = True
             elif expression == BOSS_MESSAGE_DIAGNOSTIC.replace("__TARGET__", '"thread-1"'):
                 value = "selection"
+            elif isinstance(expression, str) and "text_control_verified" in expression:
+                value = "text_control_verified"
             else:
                 captures += 1
                 value = (

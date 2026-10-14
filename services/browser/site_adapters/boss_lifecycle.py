@@ -57,4 +57,9 @@ def boss_site_lifecycles(
 
     reading = ProfiledSiteLifecycle(profiles, prepare=prepare_read)
     viewing = ProfiledSiteLifecycle(profiles, prepare=prepare, capture=capture)
-    return {"boss-login": login, "boss-read": reading, "saved-login-viewer": viewing}
+    return {
+        "boss-login": login,
+        "boss-read": reading,
+        "boss-reply": reading,
+        "saved-login-viewer": viewing,
+    }

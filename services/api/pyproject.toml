@@ -13,6 +13,7 @@ dependencies = [
     "pyjwt[crypto]",
     "pyyaml",
     "sqlalchemy[asyncio]",
+    "temporalio",
     "uvicorn[standard]",
 ]
 

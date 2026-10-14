@@ -278,6 +278,21 @@ class PostgresReadExecutionRepository:
                 or resource["version"] != target.connection_version
             ):
                 raise ExecutionConflict("Read connection is unavailable or has changed")
+            sending = await database.scalar(
+                text(
+                    "SELECT 1 FROM career.execution_resources r "
+                    "JOIN career.execution_tasks t ON t.id=r.task_id "
+                    "JOIN career.communication_sends s ON s.task_id=t.id "
+                    "WHERE r.connection_id=:id AND r.user_id=:user "
+                    "AND (t.status IN ('accepted','running') OR s.cleanup_required "
+                    "OR (t.status='unknown' AND :human))"
+                ),
+                {"id": target.connection_id, "user": actor.user_id, "human": target.human_control},
+            )
+            if sending:
+                raise ExecutionConflict(
+                    "Finish the current send before opening another browser task"
+                )
         else:
             resource = (
                 (

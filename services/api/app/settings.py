@@ -38,6 +38,10 @@ class Settings(DatabaseSettings):
     litellm_model: str = "careeract-default"
     litellm_config_path: Path = Path(__file__).resolve().parents[3] / "infra/litellm/config.yaml"
     synthetic_materials_enabled: bool = False
+    worker_api_key_file: Path | None = None
+    temporal_address: str = "localhost:7233"
+    temporal_namespace: str = "default"
+    temporal_task_queue: str = "careeract"
 
     @field_validator("litellm_api_key")
     @classmethod

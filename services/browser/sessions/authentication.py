@@ -26,6 +26,7 @@ Action = Literal[
     "snapshot",
     "conversation",
     "observe_conversation",
+    "send_message",
 ]
 
 
@@ -53,6 +54,9 @@ class BrowserCommand(BaseModel):
     conversation_id: str | None = Field(
         default=None, min_length=1, max_length=200, pattern=r"^[A-Za-z0-9_-]+$"
     )
+    message_id: str | None = Field(default=None, min_length=1, max_length=200)
+    text_digest: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    source_digest: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
 
     def is_current(self, timestamp: float) -> bool:
         return self.iat - 2 <= timestamp < self.exp and 0 < self.exp - self.iat <= 60
@@ -100,11 +104,16 @@ class CommandVerifier:
                     "snapshot",
                     "conversation",
                     "observe_conversation",
+                    "send_message",
                 )
             )
             != (command.lease_id is None)
-            or (action in {"conversation", "observe_conversation"})
+            or (action in {"conversation", "observe_conversation", "send_message"})
             != (command.conversation_id is not None)
+            or any(
+                (value is not None) != (action == "send_message")
+                for value in (command.message_id, command.text_digest, command.source_digest)
+            )
         ):
             raise CommandRejected("Invalid browser command scope")
         return command

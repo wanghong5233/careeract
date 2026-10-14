@@ -539,6 +539,7 @@ async def test_read_runner_requires_messages_bound_to_the_observed_conversation(
         uuid4(),
         uuid4(),
         "boss-read",
+        conversation_id="c1",
     )
     conversation = BossConversationObservation("c1", None, None, None, None, False, None)
     message = BossMessageObservation(
@@ -572,8 +573,8 @@ async def test_read_runner_requires_messages_bound_to_the_observed_conversation(
         actor, context.task_id, outcome="read_failed", observation=observation
     )
     assert control.mock_calls[-2:] == [
-        call.send(context, "revoke"),
-        call.lifecycle(context, "release"),
+        call.send(replace(context, conversation_id=None), "revoke"),
+        call.lifecycle(replace(context, conversation_id=None), "release"),
     ]
 
 
@@ -1000,7 +1001,8 @@ async def test_read_prototype_runs_once_and_restores_owned_results(
         )
     repository = PostgresReadExecutionRepository(scenario.engine)
     app = create_app(build_settings(), lambda _settings: FakeAgentRuntime())
-    app.state.read_execution_service = ReadExecutionService(repository)
+    dispatcher = AsyncMock()
+    app.state.read_execution_service = ReadExecutionService(repository, dispatcher)
     control, reader = AsyncMock(), AsyncMock()
     observation = BossPageObservation(
         "https://www.zhipin.com/web/geek/chat",
@@ -1061,8 +1063,20 @@ async def test_read_prototype_runs_once_and_restores_owned_results(
             await client.post(task_path + "/run", headers=headers, json={"owner_id": "viewer"})
         ).status_code == 422
         control.send.assert_not_awaited()
-        completed = await client.post(task_path + "/run", headers=headers, json={})
-        assert completed.status_code == 200 and completed.json()["task_status"] == "completed"
+        dispatched = await client.post(task_path + "/run", headers=headers, json={})
+        assert dispatched.status_code == 200 and dispatched.json()["task_status"] == "accepted"
+        dispatcher.dispatch.assert_awaited_once_with(UUID(task_id))
+        reader.read_boss_page.assert_not_awaited()
+        control.send.assert_not_awaited()
+        # The durable consumer, rather than the HTTP request, executes the read.
+        completed_execution = await ReadExecutionService(repository).execute_boss(
+            scenario.actor,
+            scenario.connection_id,
+            UUID(task_id),
+            control=control,
+            page_reader=reader,
+        )
+        assert completed_execution.task.status == "completed"
         restored = await client.get(task_path + "/result", headers=headers)
         assert restored.status_code == 200 and restored.headers["Cache-Control"] == "no-store"
         assert (
@@ -1075,7 +1089,9 @@ async def test_read_prototype_runs_once_and_restores_owned_results(
             "request_message_id": "122",
         }
         assert (await client.get(task_path + "/result", headers=other_headers)).status_code == 404
-        assert (await client.post(task_path + "/run", headers=headers, json={})).status_code == 409
+        completed = await client.post(task_path + "/run", headers=headers, json={})
+        assert completed.status_code == 200 and completed.json()["task_status"] == "completed"
+        dispatcher.dispatch.assert_awaited_once()
         reader.read_boss_page.assert_awaited_once()
         assert (await client.get(path, headers=headers)).json() == completed.json()
     await scenario.engine.dispose()

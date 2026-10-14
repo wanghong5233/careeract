@@ -4,13 +4,14 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
+from hashlib import sha256
 from typing import Any, Literal
 from uuid import UUID, uuid4
 
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Query, Response, WebSocket
 from fastapi.responses import JSONResponse
-from pydantic import AnyHttpUrl
+from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from starlette.websockets import WebSocketDisconnect, WebSocketState
@@ -28,6 +29,7 @@ from services.browser.sessions.authentication import (
 )
 from services.browser.sessions.execution import ExecutorLifecycle, ExecutorUnavailable
 from services.browser.sessions.lease import LeaseConflict, LeaseNotFound, SessionLease
+from services.browser.sessions.message_permit import PostgresMessagePermit
 from services.browser.sessions.postgres import PostgresLeaseStore
 from services.browser.sessions.profiles import (
     BrowserProfileConflict,
@@ -56,6 +58,13 @@ from services.browser.site_adapters.boss_context import (
     BossContextUnavailable,
     BossDisconnectUnconfirmed,
 )
+from services.browser.site_adapters.boss_send import BossSendIntent, BossSendResult, send_boss_text
+
+
+class SendMessageBody(BaseModel):
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+    text: str = Field(min_length=1, max_length=1000)
+    source_text: str = Field(min_length=1, max_length=20000)
 
 
 class ViewerAuthorizationRevoked(Exception):
@@ -332,6 +341,80 @@ def create_app(
             {"session_id": str(session_id), "page": asdict(result)},
             headers={"Cache-Control": "no-store"},
         )
+
+    @app.post("/internal/v1/sessions/{session_id}/boss/send-message")
+    async def send_message(
+        session_id: UUID, body: SendMessageBody, authorization: str = Header(default="")
+    ) -> Response:
+        command = authenticate(session_id, "send_message", authorization)
+        if (
+            command.owner_id != "boss-reply"
+            or command.conversation_id is None
+            or command.message_id is None
+            or command.text_digest != sha256(body.text.encode()).hexdigest()
+            or command.source_digest != sha256(body.source_text.encode()).hexdigest()
+        ):
+            raise HTTPException(403, "Send scope rejected")
+        if context_reader is None or store is None:
+            raise HTTPException(503, "Send adapter unavailable")
+        try:
+            lease = await store.execute(command.model_copy(update={"action": "acquire"}))
+            check = command.model_copy(update={"action": "check", "lease_id": lease.lease_id})
+
+            async def check_lease() -> None:
+                await store.execute(check)
+
+            async def drain() -> None:
+                await store.execute(check.model_copy(update={"action": "stop", "jti": uuid4()}))
+
+            async def disconnected() -> None:
+                pass
+
+            async def release() -> None:
+                await store.confirm_stopped(session_id, lease.lease_id)
+
+            async def perform() -> BossSendResult:
+                async with store.executor_action_guard(check):
+
+                    async def mark_attempt() -> None:
+                        await PostgresMessagePermit(store.engine).consume(command)
+
+                    return await send_boss_text(
+                        context_reader(session_id),
+                        BossSendIntent(
+                            command.conversation_id or "",
+                            command.message_id or "",
+                            body.source_text,
+                            body.text,
+                        ),
+                        mark_attempt,
+                    )
+
+            lifecycle = ExecutorLifecycle(
+                check_lease=check_lease,
+                mark_draining=drain,
+                disconnect=disconnected,
+                release=release,
+            )
+            result = await lifecycle.run(perform)
+            await lifecycle.stop()
+        except CommandRejected:
+            raise HTTPException(403, "Send authorization rejected") from None
+        except (LeaseNotFound, LeaseConflict):
+            raise HTTPException(409, "Send lease unavailable") from None
+        except (
+            DBAPIError,
+            PoolTimeoutError,
+            BossContextUnavailable,
+            ExecutorUnavailable,
+            httpx.HTTPError,
+            OSError,
+            TimeoutError,
+            RuntimeError,
+            ValueError,
+        ):
+            raise HTTPException(503, "Send result requires reconciliation") from None
+        return JSONResponse(asdict(result), headers={"Cache-Control": "no-store"})
 
     @app.post("/internal/v1/sessions/{session_id}/boss/{action}")
     async def read_boss_conversation(

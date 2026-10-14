@@ -16,6 +16,8 @@ from services.api.application.boss_connections import BossConnectionService
 from services.api.application.boss_login import BossLoginService
 from services.api.application.boss_saved_login_viewer import BossSavedLoginViewerService
 from services.api.application.browser_registration import BrowserRegistrationService
+from services.api.application.communication import CommunicationService
+from services.api.application.communication_send import CommunicationSendService
 from services.api.application.conversation_branches import ConversationBranchService
 from services.api.application.materials import MaterialService
 from services.api.application.memories import MemoryService
@@ -26,6 +28,7 @@ from services.api.application.ports.browser_viewer import (
 from services.api.application.profiles import ProfileService
 from services.api.application.projects import ProjectService
 from services.api.application.read_execution import ReadExecutionService
+from services.api.application.recruiting_automation import RecruitingAutomationService
 from services.api.application.side_chats import SideChatService
 from services.api.application.work_sessions import AgentWorkSessionService
 from services.api.domain.boss_connection import (
@@ -36,6 +39,12 @@ from services.api.domain.boss_connection import (
 from services.api.domain.boss_saved_login_viewer import (
     SavedLoginViewerConflict,
     SavedLoginViewerUnavailable,
+)
+from services.api.domain.communication import (
+    CommunicationConflict,
+    CommunicationInvalid,
+    CommunicationNotFound,
+    CommunicationUnavailable,
 )
 from services.api.domain.execution import ExecutionConflict, ExecutionNotFound, ExecutionUnavailable
 from services.api.domain.material import (
@@ -87,6 +96,9 @@ from services.api.infrastructure.browser_control import (
     BrowserControlClient,
 )
 from services.api.infrastructure.browser_viewer import PostgresBrowserViewerTicketIssuer
+from services.api.infrastructure.communication import PostgresCommunicationRepository
+from services.api.infrastructure.communication_dispatch import TemporalReplyDispatcher
+from services.api.infrastructure.communication_send import PostgresSendRepository
 from services.api.infrastructure.conversation_branches import AgnoConversationBranches
 from services.api.infrastructure.conversation_deletion import AgnoConversationDeletion
 from services.api.infrastructure.conversation_titles import AgnoConversationTitleGenerator
@@ -97,12 +109,17 @@ from services.api.infrastructure.memories import PostgresMemoryRepository
 from services.api.infrastructure.privacy import PrivacyBoundaryMiddleware
 from services.api.infrastructure.profiles import PostgresProfileRepository
 from services.api.infrastructure.projects import PostgresProjectRepository
+from services.api.infrastructure.read_dispatch import TemporalReadDispatcher
 from services.api.infrastructure.read_execution import PostgresReadExecutionRepository
+from services.api.infrastructure.recruiting_automation import PostgresAutomationRepository
+from services.api.infrastructure.recruiting_execution import RecruitingExecution
 from services.api.infrastructure.side_chats import AgnoSideChatRuntime
 from services.api.infrastructure.work_sessions import PostgresAgentWorkSessionRepository
 from services.api.routes.agent_sessions import router as agent_session_router
 from services.api.routes.boss_connections import router as boss_connection_router
 from services.api.routes.browser_viewer import router as browser_viewer_router
+from services.api.routes.communication import communication_error
+from services.api.routes.communication import router as communication_router
 from services.api.routes.errors import (
     boss_connection_error,
     browser_viewer_error,
@@ -118,6 +135,8 @@ from services.api.routes.materials import router as materials_router
 from services.api.routes.memories import router as memories_router
 from services.api.routes.profiles import router as profile_router
 from services.api.routes.projects import router as project_router
+from services.api.routes.recruiting_automation import router as recruiting_automation_router
+from services.api.routes.recruiting_execution import router as recruiting_execution_router
 from services.api.routes.system import router as system_router
 
 PUBLIC_PATHS = frozenset({"/health", "/docs", "/openapi.json"})
@@ -138,6 +157,12 @@ def create_app(
     agent_os = runtime_factory(settings)
     app = agent_os.get_app()
     engine = create_engine(settings)
+    app.state.recruiting_execution = RecruitingExecution(engine, settings)
+    worker_key = None
+    if settings.worker_api_key_file is not None:
+        worker_key = settings.worker_api_key_file.read_text(encoding="utf-8").strip()
+        if len(worker_key) < 32:
+            raise RuntimeError("Worker API credential is invalid")
     browser_client: httpx.AsyncClient | None = None
     runtime_lifespan = app.router.lifespan_context
 
@@ -180,7 +205,40 @@ def create_app(
     app.state.boss_saved_login_viewer_service = None
     app.state.browser_control = None
     app.state.boss_page_reader = None
-    app.state.read_execution_service = ReadExecutionService(PostgresReadExecutionRepository(engine))
+    app.state.read_execution_service = ReadExecutionService(
+        PostgresReadExecutionRepository(engine),
+        TemporalReadDispatcher(
+            settings.temporal_address, settings.temporal_namespace, settings.temporal_task_queue
+        ),
+    )
+    app.state.communication_service = CommunicationService(
+        PostgresCommunicationRepository(engine),
+        TemporalReplyDispatcher(
+            settings.temporal_address, settings.temporal_namespace, settings.temporal_task_queue
+        ),
+    )
+    app.state.communication_send_service = CommunicationSendService(
+        PostgresSendRepository(engine),
+        TemporalReadDispatcher(
+            settings.temporal_address,
+            settings.temporal_namespace,
+            settings.temporal_task_queue,
+            workflow_name="RecruitingSendWorkflow",
+            id_prefix="careeract-send",
+        ),
+    )
+    app.state.recruiting_automation_service = RecruitingAutomationService(
+        PostgresAutomationRepository(engine),
+        TemporalReadDispatcher(
+            settings.temporal_address,
+            settings.temporal_namespace,
+            settings.temporal_task_queue,
+            workflow_name="RecruitingAutomationWorkflow",
+            id_prefix="careeract-automation",
+            execution_minutes=490,
+        ),
+        app.state.recruiting_execution,
+    )
     if settings.browser_base_url is not None and settings.browser_command_private_key_file is None:
         raise RuntimeError("Browser control requires a private signing key")
     if settings.browser_command_private_key_file is not None:
@@ -274,6 +332,7 @@ def create_app(
         jwks_timeout_seconds=settings.auth_jwks_timeout_seconds,
         public_paths=PUBLIC_PATHS,
         protected_path_prefixes=PROTECTED_PATH_PREFIXES,
+        worker_api_key=worker_key,
     )
     app.include_router(system_router)
     app.include_router(boss_connection_router)
@@ -283,6 +342,13 @@ def create_app(
     app.include_router(agent_session_router)
     app.include_router(memories_router)
     app.include_router(materials_router)
+    app.include_router(communication_router)
+    app.include_router(recruiting_execution_router)
+    app.include_router(recruiting_automation_router)
+    app.add_exception_handler(CommunicationConflict, communication_error)
+    app.add_exception_handler(CommunicationInvalid, communication_error)
+    app.add_exception_handler(CommunicationNotFound, communication_error)
+    app.add_exception_handler(CommunicationUnavailable, communication_error)
     app.add_exception_handler(ProfileConflict, profile_error)
     app.add_exception_handler(ProfileUnavailable, profile_error)
     app.add_exception_handler(ProjectConflict, project_error)

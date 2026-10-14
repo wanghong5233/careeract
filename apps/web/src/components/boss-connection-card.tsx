@@ -376,7 +376,7 @@ export function BossConnectionCard() {
       </span>
     </div>
     <p className="mt-4 max-w-2xl text-xs leading-5 text-muted-foreground">密码、短信验证码和验证码只应由你在安全浏览器中输入，不会进入 Agent 对话或普通业务记录。</p>
-    <p className="mt-2 max-w-2xl text-xs leading-5 text-muted-foreground">{connection?.status === "connected" ? "登录已核验并加密保存。后续恢复仍可能需要平台安全验证；尚未开启消息回复或简历发送。" : "登录会在隔离浏览器中进行。完成后点击“完成登录并保存”，系统将核验登录状态、加密保存并关闭本次浏览器。"}</p>
+    <p className="mt-2 max-w-2xl text-xs leading-5 text-muted-foreground">{connection?.status === "connected" ? "登录已核验并加密保存。后续恢复仍可能需要平台安全验证。读取会话后可审阅回复或设置有限自动回复；简历发送仍待接入。" : "登录会在隔离浏览器中进行。完成后点击“完成登录并保存”，系统将核验登录状态、加密保存并关闭本次浏览器。"}</p>
     <div className="mt-4 flex flex-wrap items-center gap-3">
       <Button disabled={busy !== null || needsReconciliation || loginAvailable === false || cleanupRequired || savedViewerActive} variant="outline" onClick={() => void startLogin()}>
         {busy === "start" && <LoaderCircle className="size-3.5 animate-spin" />}{connection?.status === "connected" ? "重新登录" : browserReady ? "等待登录" : active ? "开始安全登录" : "重新开始安全登录"}

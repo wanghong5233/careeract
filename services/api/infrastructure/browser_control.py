@@ -63,11 +63,16 @@ class BrowserCommandSigner:
                     "snapshot",
                     "conversation",
                     "observe_conversation",
+                    "send_message",
                 )
             )
             != (lease_id is None)
-            or (action in {"conversation", "observe_conversation"})
+            or (action in {"conversation", "observe_conversation", "send_message"})
             != (context.conversation_id is not None)
+            or any(
+                (value is not None) != (action == "send_message")
+                for value in (context.message_id, context.text_digest, context.source_digest)
+            )
         ):
             raise BrowserControlRejected("Invalid browser control context")
         issued_at = int(datetime.now(UTC).timestamp())
@@ -93,6 +98,9 @@ class BrowserCommandSigner:
                 "action": action,
                 "lease_id": str(lease_id) if lease_id is not None else None,
                 "conversation_id": context.conversation_id,
+                "message_id": context.message_id,
+                "text_digest": context.text_digest,
+                "source_digest": context.source_digest,
             },
             self.private_key,
             algorithm="EdDSA",
@@ -117,6 +125,7 @@ class BrowserControlClient:
             "snapshot",
             "conversation",
             "observe_conversation",
+            "send_message",
         ):
             raise BrowserControlRejected("Browser action requires its dedicated adapter")
         token = self.signer.sign(context, action, lease_id)

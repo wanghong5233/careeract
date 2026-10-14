@@ -292,15 +292,7 @@ async def run_read_execution(
     if control is None or reader is None:
         raise HTTPException(503, "Browser read execution is not configured")
     response.headers["Cache-Control"] = "no-store"
-    return serialize_read(
-        await service.execute_boss(
-            actor,
-            connection_id,
-            task_id,
-            control=cast(BrowserSessionControl, control),
-            page_reader=cast(BossPageReader, reader),
-        )
-    )
+    return serialize_read(await service.dispatch_boss(actor, connection_id, task_id))
 
 
 @router.post("/{connection_id}/read/{task_id}/handback", response_model=ReadExecutionResponse)

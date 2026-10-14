@@ -16,6 +16,7 @@ from services.api.application.ports.browser_control import (
     BrowserControlUncertain,
     BrowserSessionControl,
 )
+from services.api.application.ports.read_dispatch import ReadDispatcher
 from services.api.application.ports.read_execution import ReadExecutionRepository, ReadPageResult
 from services.api.domain.execution import (
     BossReadTarget,
@@ -28,8 +29,21 @@ from services.api.domain.execution import (
 
 
 class ReadExecutionService:
-    def __init__(self, repository: ReadExecutionRepository) -> None:
+    def __init__(
+        self, repository: ReadExecutionRepository, dispatcher: ReadDispatcher | None = None
+    ) -> None:
         self.repository = repository
+        self.dispatcher = dispatcher
+
+    async def dispatch_boss(
+        self, actor: ActorContext, connection_id: UUID, task_id: UUID
+    ) -> ReadExecution:
+        execution = await self.read_boss(actor, connection_id, task_id)
+        if execution.task.status == "accepted":
+            if self.dispatcher is None:
+                raise ExecutionUnavailable("Durable read worker is not configured")
+            await self.dispatcher.dispatch(task_id)
+        return execution
 
     async def accept_boss(
         self,
@@ -225,7 +239,14 @@ class ReadExecutionService:
                 observation.state == "ready"
                 and (
                     observation.kind == "conversations"
-                    and has_bound_conversation_messages(observation)
+                    and (
+                        has_bound_conversation_messages(observation)
+                        or conversation_id is None
+                        and bool(observation.conversations)
+                        and all(item.conversation_id for item in observation.conversations)
+                        and len({item.conversation_id for item in observation.conversations})
+                        == len(observation.conversations)
+                    )
                     or observation.kind in {"job_list", "job_detail"}
                     and bool(observation.jobs)
                 )

@@ -1,4 +1,5 @@
 import asyncio
+import hmac
 from collections.abc import Collection
 
 import jwt
@@ -25,6 +26,7 @@ class JwtAuthenticationMiddleware:
         jwks_timeout_seconds: float,
         public_paths: Collection[str],
         protected_path_prefixes: Collection[str],
+        worker_api_key: str | None = None,
     ) -> None:
         self.app = app
         self.jwks_client = PyJWKClient(jwks_url, timeout=jwks_timeout_seconds)
@@ -33,8 +35,21 @@ class JwtAuthenticationMiddleware:
         self.algorithms = list(algorithms)
         self.public_paths = frozenset(public_paths)
         self.protected_path_prefixes = tuple(protected_path_prefixes)
+        self.worker_api_key = worker_api_key.encode("utf-8") if worker_api_key else None
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http" and scope["path"].startswith("/internal/recruiting/"):
+            scheme, _, token = Headers(scope=scope).get("authorization", "").partition(" ")
+            if (
+                self.worker_api_key is None
+                or scheme.lower() != "bearer"
+                or not hmac.compare_digest(token.encode("utf-8"), self.worker_api_key)
+            ):
+                await self._unauthorized(scope, receive, send)
+                return
+            scope.setdefault("state", {})["recruiting_worker"] = True
+            await self.app(scope, receive, send)
+            return
         if scope["type"] != "http" or scope["path"] in self.public_paths:
             await self.app(scope, receive, send)
             return

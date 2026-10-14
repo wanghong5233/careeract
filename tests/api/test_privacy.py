@@ -20,7 +20,7 @@ from services.api.application.profiles import ProfileService
 from services.api.application.projects import ProjectService
 from services.api.domain.privacy import RestrictedContent, ensure_career_content
 from services.api.domain.profile import ProfileContent, ProfileEntry
-from services.api.infrastructure.privacy import AGENT_BODY_LIMIT
+from services.api.infrastructure.privacy import AGENT_BODY_LIMIT, content_for_privacy_check
 from tests.api.test_health import FakeAgentRuntime, build_settings, create_token, use_signing_key
 
 SYNTHETIC_NUMBER = "000000" + "20000101" + "0000"
@@ -89,6 +89,29 @@ def test_career_text_and_privacy_discussion_remain_usable() -> None:
             "phone": "10000000000",
         }
     )
+
+
+def test_recruiting_references_are_not_scanned_as_message_content() -> None:
+    payload = {"conversation_id": "1234567890123456789", "message_id": "9876543210987654321"}
+    ensure_career_content(content_for_privacy_check("/api/v1/recruiting/replies", "POST", payload))
+    for path, method in [
+        ("/api/v1/profile", "POST"),
+        ("/agui", "POST"),
+        ("/api/v1/recruiting/replies", "PATCH"),
+    ]:
+        with pytest.raises(RestrictedContent):
+            ensure_career_content(content_for_privacy_check(path, method, payload))
+    for extra in [
+        {"content": SYNTHETIC_NUMBER},
+        {"password": "synthetic"},
+        {"message_id": SYNTHETIC_CREDENTIAL},
+    ]:
+        with pytest.raises(RestrictedContent):
+            ensure_career_content(
+                content_for_privacy_check(
+                    "/api/v1/recruiting/replies", "POST", {**payload, **extra}
+                )
+            )
 
 
 async def test_use_cases_guard_writes_from_non_http_callers() -> None:

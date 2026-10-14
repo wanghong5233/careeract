@@ -48,6 +48,18 @@ def test_valid_signed_command_and_wrong_scope() -> None:
         verifier.verify(token, session_id, "stop")
 
 
+@pytest.mark.parametrize("field", ["message_id", "text_digest", "source_digest"])
+def test_verifier_rejects_partial_message_scope_on_read_commands(field: str) -> None:
+    from uuid import UUID
+
+    key = Ed25519PrivateKey.generate()
+    payload = command_payload() | {field: "1"}
+    with pytest.raises(CommandRejected):
+        CommandVerifier(key.public_key()).verify(
+            jwt.encode(payload, key, algorithm="EdDSA"), UUID(str(payload["session_id"])), "acquire"
+        )
+
+
 def test_small_issue_time_skew_is_bounded_and_does_not_extend_expiration() -> None:
     private_key = Ed25519PrivateKey.generate()
     payload = command_payload()

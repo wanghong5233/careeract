@@ -984,6 +984,7 @@ dependencies = [
     { name = "pyjwt", extra = ["crypto"] },
     { name = "pyyaml" },
     { name = "sqlalchemy", extra = ["asyncio"] },
+    { name = "temporalio" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -998,6 +999,7 @@ requires-dist = [
     { name = "pyjwt", extras = ["crypto"] },
     { name = "pyyaml" },
     { name = "sqlalchemy", extras = ["asyncio"] },
+    { name = "temporalio" },
     { name = "uvicorn", extras = ["standard"] },
 ]
 

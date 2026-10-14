@@ -20,6 +20,7 @@ BrowserAction = Literal[
     "snapshot",
     "conversation",
     "observe_conversation",
+    "send_message",
 ]
 
 
@@ -38,6 +39,9 @@ class BrowserControlContext:
     conversation_id: str | None = None
     human_control: bool = False
     observe_only: bool = False
+    message_id: str | None = None
+    text_digest: str | None = None
+    source_digest: str | None = None
 
 
 @dataclass(frozen=True)

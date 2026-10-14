@@ -69,6 +69,20 @@ class BossPageReader(Protocol):
     async def read_boss_page(self, context: BrowserControlContext) -> BossPageObservation: ...
 
 
+def conversation_message_window(
+    page: BossPageObservation, conversation_id: str
+) -> tuple[BossMessageObservation, ...]:
+    """Exclude verified trailing information cards from the incoming-message window."""
+    targets = [c for c in page.conversations if c.conversation_id == conversation_id]
+    if len(targets) != 1 or not targets[0].last_message_id:
+        return ()
+    messages = tuple(m for m in page.messages if m.conversation_id == conversation_id)
+    for index, message in enumerate(messages):
+        if message.message_id == targets[0].last_message_id:
+            return messages[: index + 1]
+    return ()
+
+
 def has_bound_conversation_messages(page: BossPageObservation) -> bool:
     conversation_ids = [item.conversation_id for item in page.conversations]
     message_keys = [(item.conversation_id, item.message_id) for item in page.messages]

@@ -109,6 +109,18 @@ class PostgresBossSavedLoginViewerRepository(BossSavedLoginViewerRepository):
                 )
                 if existing is not None:
                     return viewer_from_row(existing)
+                sending = await database.scalar(
+                    text(
+                        "SELECT 1 FROM career.execution_resources r "
+                        "JOIN career.execution_tasks t ON t.id=r.task_id "
+                        "JOIN career.communication_sends s ON s.task_id=t.id "
+                        "WHERE r.connection_id=:id AND r.user_id=:user "
+                        "AND (t.status IN ('accepted','running','unknown') OR s.cleanup_required)"
+                    ),
+                    {"id": connection_id, "user": actor.user_id},
+                )
+                if sending:
+                    raise SavedLoginViewerConflict("Finish the current send before manual control")
                 row = (
                     (
                         await database.execute(
