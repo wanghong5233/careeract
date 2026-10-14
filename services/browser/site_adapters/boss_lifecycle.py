@@ -8,16 +8,15 @@ from services.browser.sessions.site_lifecycle import (
     SiteLifecycleUnavailable,
     SiteSessionLifecycle,
 )
-from services.browser.site_adapters.boss_context import BossContextReader, BossContextUnavailable
 from services.browser.site_adapters.boss_login import BossLoginUnavailable
+from services.browser.site_adapters.boss_profile import BossProfileCapture, BossProfileUnavailable
 
 
 def boss_site_lifecycles(
     *,
     profiles: PostgresBrowserProfileStore | None,
     navigator: Callable[[UUID], Awaitable[None]] | None,
-    reader: Callable[[UUID], BossContextReader],
-    read_navigator: Callable[[UUID], Awaitable[None]] | None = None,
+    reader: Callable[[UUID], BossProfileCapture],
 ) -> dict[str, SiteSessionLifecycle]:
     async def prepare(session_id: UUID) -> None:
         if navigator is None:
@@ -37,7 +36,7 @@ def boss_site_lifecycles(
             ):
                 return None
             return BrowserContext.from_playwright(captured, profiles.scope)
-        except (BossContextUnavailable, BrowserContextRejected):
+        except (BossProfileUnavailable, BrowserContextRejected):
             raise SiteLifecycleUnavailable("Site context capture unavailable") from None
 
     login = ProfiledSiteLifecycle(
@@ -47,15 +46,7 @@ def boss_site_lifecycles(
         actions=frozenset({"create", "release", "finish", "forget"}),
     )
 
-    async def prepare_read(session_id: UUID) -> None:
-        if read_navigator is None:
-            raise SiteLifecycleUnavailable("Read navigation is not configured")
-        try:
-            await read_navigator(session_id)
-        except BossLoginUnavailable:
-            raise SiteLifecycleUnavailable("Read navigation unavailable") from None
-
-    reading = ProfiledSiteLifecycle(profiles, prepare=prepare_read)
+    reading = ProfiledSiteLifecycle(profiles, actions=frozenset({"release"}))
     viewing = ProfiledSiteLifecycle(profiles, prepare=prepare, capture=capture)
     return {
         "boss-login": login,

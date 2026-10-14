@@ -11,8 +11,13 @@ See the [P0 contract](../../docs/topics/recruiting-communication/README.md#p0-è´
 Legacy BOSS automation is quarantined by `enforce_boss_account_safety` in the authenticated command
 boundary, before lease/profile/browser I/O, including automatic physical creation. No environment
 switch reopens it. Cleanup and human login/viewing retain existing authorization and lease checks.
-Historical adapter tests are not release approval. Reopening requires replacement and adversarial
-acceptance, including upstream tool fallbacks; changing the prompt or driver name is insufficient.
+The legacy Vue reader, script controls, sender, route execution bodies and their fixtures have been
+deleted, not retained as a fallback. Removing the quarantine alone cannot restore execution: the
+compatibility endpoints still fail closed, and automatic lifecycle owners only permit release.
+`boss_profile.py` captures login state only; it cannot read conversations or send messages. Denied
+or challenge pages stop capture before cookies or DOM are read. New execution requires a reviewed
+adapter and adversarial acceptance, including upstream tool fallbacks. Never restore the deleted
+adapter from Git history to bypass these conditions.
 
 This is an internal service boundary, not a second business backend. Future commands
 must carry a service-authenticated envelope containing `user_id`, `task_id`,

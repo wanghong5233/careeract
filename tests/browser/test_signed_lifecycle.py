@@ -27,12 +27,12 @@ from services.browser.sessions.context import BrowserContext
 from services.browser.sessions.postgres import PostgresLeaseStore
 from services.browser.sessions.profiles import PostgresBrowserProfileStore
 from services.browser.sessions.steel import SteelSessionManager
-from services.browser.site_adapters.boss_context import (
-    BOSS_SCOPE,
-    BossContextReader,
-    BossContextUnavailable,
-)
 from services.browser.site_adapters.boss_lifecycle import boss_site_lifecycles
+from services.browser.site_adapters.boss_profile import (
+    BOSS_SCOPE,
+    BossProfileCapture,
+    BossProfileUnavailable,
+)
 from tests.api.test_browser_control import control_context
 from tests.browser.test_postgres_leases import database_url as database_url
 from tests.browser.test_steel_sessions import SyntheticSteel
@@ -85,7 +85,7 @@ async def test_saved_profile_restores_and_capture_failure_still_releases(
         "origins": [],
     }
     if capture_fails:
-        reader.storage_state.side_effect = BossContextUnavailable("unavailable")
+        reader.storage_state.side_effect = BossProfileUnavailable("unavailable")
     async with httpx.AsyncClient(
         base_url="http://steel", transport=httpx.MockTransport(respond)
     ) as steel_client:
@@ -96,9 +96,8 @@ async def test_saved_profile_restores_and_capture_failure_still_releases(
             site_lifecycles=boss_site_lifecycles(
                 profiles=cast(PostgresBrowserProfileStore, profiles),
                 navigator=None,
-                reader=lambda _session: cast(BossContextReader, reader),
+                reader=lambda _session: cast(BossProfileCapture, reader),
             ),
-            context_reader=lambda _session: cast(BossContextReader, reader),
         )
         async with httpx.AsyncClient(
             base_url="http://browser", transport=httpx.ASGITransport(app=app)

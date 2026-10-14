@@ -2,15 +2,13 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import UTC, datetime
-from hashlib import sha256
 from typing import Any, Literal
 from uuid import UUID, uuid4
 
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Query, Response, WebSocket
-from fastapi.responses import JSONResponse
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.exc import TimeoutError as PoolTimeoutError
@@ -27,9 +25,7 @@ from services.browser.sessions.authentication import (
     LifecycleAction,
     SessionAction,
 )
-from services.browser.sessions.execution import ExecutorLifecycle, ExecutorUnavailable
 from services.browser.sessions.lease import LeaseConflict, LeaseNotFound, SessionLease
-from services.browser.sessions.message_permit import PostgresMessagePermit
 from services.browser.sessions.postgres import PostgresLeaseStore
 from services.browser.sessions.profiles import (
     BrowserProfileConflict,
@@ -52,13 +48,6 @@ from services.browser.sessions.viewer import (
     viewer_context,
     viewer_cookie_name,
 )
-from services.browser.site_adapters.boss import BossReadOnlyPage
-from services.browser.site_adapters.boss_context import (
-    BossContextReader,
-    BossContextUnavailable,
-    BossDisconnectUnconfirmed,
-)
-from services.browser.site_adapters.boss_send import BossSendIntent, BossSendResult, send_boss_text
 
 
 class SendMessageBody(BaseModel):
@@ -180,7 +169,6 @@ def create_app(
     steel_ws_connect: Callable[..., Any] | None = None,
     viewer_authorization_interval: float = 5.0,
     site_lifecycles: Mapping[str, SiteSessionLifecycle] | None = None,
-    context_reader: Callable[[UUID], BossContextReader] | None = None,
 ) -> FastAPI:
     if not 0 < viewer_authorization_interval <= 5:
         raise ValueError("Viewer authorization interval must be within 5 seconds")
@@ -341,105 +329,19 @@ def create_app(
             result["login_verified"] = login_verified
         return result
 
+    # Compatibility endpoints fail closed while the reviewed UI adapter is absent.
+    # There is no legacy implementation to re-enable behind the admission gate.
     @app.post("/internal/v1/sessions/{session_id}/boss/page")
     async def read_boss_page(session_id: UUID, authorization: str = Header(default="")) -> Response:
-        command = authenticate(session_id, "snapshot", authorization)
-        if command.owner_id != "boss-page-reader":
-            raise HTTPException(403, "Browser page read rejected")
-        if context_reader is None or store is None:
-            raise HTTPException(503, "Browser page reader is not configured")
-        try:
-            async with store.snapshot_guard(command):
-                result = await context_reader(session_id).read_page()
-        except CommandRejected:
-            raise HTTPException(403, "Browser page read rejected") from None
-        except (LeaseNotFound, LeaseConflict):
-            raise HTTPException(409, "Browser page read conflicts with session state") from None
-        except (DBAPIError, PoolTimeoutError, BossContextUnavailable) as failure:
-            logging.getLogger(__name__).warning(
-                "BOSS page read unavailable session=%s boundary=%s",
-                session_id,
-                type(failure).__name__,
-            )
-            raise HTTPException(503, "Browser page read unavailable") from None
-        return JSONResponse(
-            {"session_id": str(session_id), "page": asdict(result)},
-            headers={"Cache-Control": "no-store"},
-        )
+        authenticate(session_id, "snapshot", authorization)
+        raise HTTPException(503, "Reviewed BOSS UI adapter is not installed")
 
     @app.post("/internal/v1/sessions/{session_id}/boss/send-message")
     async def send_message(
         session_id: UUID, body: SendMessageBody, authorization: str = Header(default="")
     ) -> Response:
-        command = authenticate(session_id, "send_message", authorization)
-        if (
-            command.owner_id != "boss-reply"
-            or command.conversation_id is None
-            or command.message_id is None
-            or command.text_digest != sha256(body.text.encode()).hexdigest()
-            or command.source_digest != sha256(body.source_text.encode()).hexdigest()
-        ):
-            raise HTTPException(403, "Send scope rejected")
-        if context_reader is None or store is None:
-            raise HTTPException(503, "Send adapter unavailable")
-        try:
-            lease = await store.execute(command.model_copy(update={"action": "acquire"}))
-            check = command.model_copy(update={"action": "check", "lease_id": lease.lease_id})
-
-            async def check_lease() -> None:
-                await store.execute(check)
-
-            async def drain() -> None:
-                await store.execute(check.model_copy(update={"action": "stop", "jti": uuid4()}))
-
-            async def disconnected() -> None:
-                pass
-
-            async def release() -> None:
-                await store.confirm_stopped(session_id, lease.lease_id)
-
-            async def perform() -> BossSendResult:
-                async with store.executor_action_guard(check):
-
-                    async def mark_attempt() -> None:
-                        await PostgresMessagePermit(store.engine).consume(command)
-
-                    return await send_boss_text(
-                        context_reader(session_id),
-                        BossSendIntent(
-                            command.conversation_id or "",
-                            command.message_id or "",
-                            body.source_text,
-                            body.text,
-                        ),
-                        mark_attempt,
-                    )
-
-            lifecycle = ExecutorLifecycle(
-                check_lease=check_lease,
-                mark_draining=drain,
-                disconnect=disconnected,
-                release=release,
-            )
-            result = await lifecycle.run(perform)
-            await lifecycle.stop()
-        except CommandRejected:
-            raise HTTPException(403, "Send authorization rejected") from None
-        except (LeaseNotFound, LeaseConflict):
-            raise HTTPException(409, "Send lease unavailable") from None
-        except (
-            DBAPIError,
-            PoolTimeoutError,
-            BossContextUnavailable,
-            ExecutorUnavailable,
-            httpx.HTTPError,
-            OSError,
-            TimeoutError,
-            RuntimeError,
-            ValueError,
-        ):
-            raise HTTPException(503, "Send result requires reconciliation") from None
-        return JSONResponse(asdict(result), headers={"Cache-Control": "no-store"})
+        authenticate(session_id, "send_message", authorization)
+        raise HTTPException(503, "Reviewed BOSS UI adapter is not installed")
 
     @app.post("/internal/v1/sessions/{session_id}/boss/{action}")
     async def read_boss_conversation(
@@ -447,62 +349,8 @@ def create_app(
         action: Literal["conversation", "observe_conversation"],
         authorization: str = Header(default=""),
     ) -> Response:
-        command = authenticate(session_id, action, authorization)
-        if command.owner_id != "boss-page-reader" or command.conversation_id is None:
-            raise HTTPException(403, "Conversation read rejected")
-        if context_reader is None or store is None:
-            raise HTTPException(503, "Browser reader is not configured")
-        try:
-            lease = await store.execute(command.model_copy(update={"action": "acquire"}))
-            check = command.model_copy(update={"action": "check", "lease_id": lease.lease_id})
-
-            async def check_lease() -> None:
-                await store.execute(check)
-
-            async def drain() -> None:
-                await store.execute(check.model_copy(update={"action": "stop", "jti": uuid4()}))
-
-            async def disconnected() -> None:
-                pass
-
-            async def release() -> None:
-                await store.confirm_stopped(session_id, lease.lease_id)
-
-            lifecycle = ExecutorLifecycle(
-                check_lease=check_lease,
-                mark_draining=drain,
-                disconnect=disconnected,
-                release=release,
-            )
-
-            async def observe() -> BossReadOnlyPage | None:
-                async with store.executor_action_guard(check):
-                    try:
-                        reader = context_reader(session_id)
-                        if action == "observe_conversation":
-                            return await reader.read_conversation(
-                                command.conversation_id or "", navigate=False
-                            )
-                        return await reader.read_conversation(command.conversation_id or "")
-                    except BossDisconnectUnconfirmed:
-                        raise
-                    except BossContextUnavailable:
-                        return None
-
-            result = await lifecycle.run(observe)
-            await lifecycle.stop()
-            if result is None:
-                raise HTTPException(503, "Conversation observation unavailable")
-        except CommandRejected:
-            raise HTTPException(403, "Conversation authorization rejected") from None
-        except (LeaseNotFound, LeaseConflict):
-            raise HTTPException(409, "Conversation control requires reconciliation") from None
-        except (DBAPIError, PoolTimeoutError, BossContextUnavailable, ExecutorUnavailable):
-            raise HTTPException(503, "Conversation execution requires reconciliation") from None
-        return JSONResponse(
-            {"session_id": str(session_id), "page": asdict(result)},
-            headers={"Cache-Control": "no-store"},
-        )
+        authenticate(session_id, action, authorization)
+        raise HTTPException(503, "Reviewed BOSS UI adapter is not installed")
 
     @app.get("/internal/v1/sessions/{session_id}/viewer")
     async def viewer_document(

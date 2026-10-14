@@ -3,7 +3,7 @@
 from hashlib import sha256
 from types import SimpleNamespace
 from typing import cast
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock
 
 import httpx
 import jwt
@@ -13,6 +13,8 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from services.browser.app.factory import create_app, enforce_boss_account_safety
 from services.browser.sessions.authentication import BrowserCommand, CommandVerifier
 from services.browser.sessions.postgres import PostgresLeaseStore
+from services.browser.sessions.steel import SteelSessionManager
+from services.browser.site_adapters.boss_lifecycle import boss_site_lifecycles
 from tests.browser.test_command_authentication import command_payload
 
 
@@ -38,7 +40,6 @@ async def test_quarantine_rejects_signed_legacy_commands_before_any_io(
 ) -> None:
     key = Ed25519PrivateKey.generate()
     io = AsyncMock(side_effect=AssertionError("Quarantined command reached storage"))
-    reader = Mock(side_effect=AssertionError("Quarantined command reached browser"))
     store = SimpleNamespace(
         engine=SimpleNamespace(dispose=AsyncMock()),
         execute=io,
@@ -48,7 +49,6 @@ async def test_quarantine_rejects_signed_legacy_commands_before_any_io(
     app = create_app(
         verifier=CommandVerifier(key.public_key()),
         store=cast(PostgresLeaseStore, store),
-        context_reader=reader,
     )
     payload = command_payload() | {"owner_id": owner, "action": action}
     if action in {"conversation", "observe_conversation", "conversation_resume", "send_message"}:
@@ -80,7 +80,54 @@ async def test_quarantine_rejects_signed_legacy_commands_before_any_io(
             assert response.json()["detail"]["code"] == "boss_automation_quarantined"
             assert body["source_text"] not in response.text
     io.assert_not_called()
-    reader.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("route", "action", "owner", "expected"),
+    [
+        ("boss/page", "snapshot", "boss-page-reader", 503),
+        ("boss/conversation", "conversation", "boss-page-reader", 503),
+        ("boss/observe_conversation", "observe_conversation", "boss-page-reader", 503),
+        ("boss/send-message", "send_message", "boss-reply", 503),
+        ("lifecycle/create", "create", "boss-read", 403),
+        ("lifecycle/create", "create", "boss-reply", 403),
+    ],
+)
+async def test_removing_quarantine_cannot_resurrect_deleted_executor(
+    monkeypatch: pytest.MonkeyPatch, route: str, action: str, owner: str, expected: int
+) -> None:
+    # Fault injection: a future accidental removal of the gate must not expose old code.
+    monkeypatch.setattr("services.browser.app.factory.enforce_boss_account_safety", lambda _: None)
+    key = Ed25519PrivateKey.generate()
+    payload = command_payload() | {"owner_id": owner, "action": action}
+    body = {"text": "Synthetic", "source_text": "Synthetic"}
+    if action in {"conversation", "observe_conversation", "send_message"}:
+        payload["conversation_id"] = "synthetic-thread"
+    if action == "send_message":
+        payload.update(
+            message_id="synthetic-message",
+            text_digest=sha256(body["text"].encode()).hexdigest(),
+            source_digest=sha256(body["source_text"].encode()).hexdigest(),
+        )
+    # Empty objects deliberately lack I/O methods: any attempted use fails this test.
+    app = create_app(
+        verifier=CommandVerifier(key.public_key()),
+        store=cast(PostgresLeaseStore, SimpleNamespace()),
+        steel_sessions=cast(SteelSessionManager, SimpleNamespace()),
+        site_lifecycles=boss_site_lifecycles(
+            profiles=None, navigator=None, reader=lambda _: pytest.fail("Unexpected capture")
+        ),
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://synthetic"
+    ) as client:
+        response = await client.post(
+            f"/internal/v1/sessions/{payload['session_id']}/{route}",
+            headers={"Authorization": "Bearer " + jwt.encode(payload, key, algorithm="EdDSA")},
+            json=body if action == "send_message" else None,
+        )
+    assert response.status_code == expected
 
 
 @pytest.mark.parametrize("action", ["stop", "release", "revoke", "block_viewer"])
