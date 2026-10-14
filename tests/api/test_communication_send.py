@@ -11,11 +11,9 @@ from services.api.application.communication_send import CommunicationSendService
 from services.api.application.ports.browser_control import BrowserControlUncertain
 from services.api.application.ports.communication_send import SendClaim
 from services.api.domain.communication import (
-    ACKNOWLEDGEMENT_TEXT,
     CommunicationConflict,
     CommunicationNotFound,
     CommunicationReply,
-    ReplyDecision,
 )
 from services.api.domain.communication_send import SendEvidence
 from services.api.domain.execution import ExecutionConflict, ExecutionUnavailable
@@ -87,26 +85,64 @@ async def test_expired_draft_can_refresh_only_without_external_send_ledger(
 
 @integration
 @pytest.mark.asyncio
-async def test_neutral_acknowledgement_uses_same_source_bound_send_ledger(
-    scenario: Scenario,
+@pytest.mark.parametrize("stage", ["admission", "claim", "permit"])
+async def test_legacy_acknowledgement_cannot_be_admitted_or_executed(
+    scenario: Scenario, stage: str
 ) -> None:
-    reply = await accept(scenario, await read_source(scenario))
-    replies = PostgresCommunicationRepository(scenario.engine)
-    claim = await replies.claim(reply.id)
-    assert claim is not None
-    await replies.finish(
-        claim,
-        decision=ReplyDecision("acknowledgement", ACKNOWLEDGEMENT_TEXT, "请求岗位详情", ()),
-        outcome="decision_completed",
-    )
-    reply = await replies.get(scenario.actor, reply.id)
+    reply = await draft(scenario)
     repo = PostgresSendRepository(scenario.engine)
-    scenario.actor = replace(scenario.actor, request_id=str(uuid4()))
-    action = await repo.accept(scenario.actor, reply.id, reply.version, uuid4())
-    send = await repo.claim(action.id)
-    assert send is not None and send.text == ACKNOWLEDGEMENT_TEXT
-    await repo.finish(action.id, SendEvidence("unknown"))
-    assert await repo.claim(action.id) is None
+    action = (
+        await repo.accept(scenario.actor, reply.id, reply.version, uuid4())
+        if stage in {"claim", "permit"}
+        else None
+    )
+    claim = await repo.claim(action.id) if stage == "permit" and action is not None else None
+    async with scenario.engine.begin() as db:
+        await db.execute(
+            text(
+                "UPDATE career.communication_replies SET decision=jsonb_set(decision, "
+                "'{category}', '\"acknowledgement\"'::jsonb) WHERE id=:id"
+            ),
+            {"id": reply.id},
+        )
+    if action is None:
+        with pytest.raises(CommunicationConflict):
+            await repo.accept(scenario.actor, reply.id, reply.version, uuid4())
+        assert await repo.get(scenario.actor, reply.id) is None
+    elif stage == "claim":
+        assert await repo.claim(action.id) is None
+        saved = await repo.get(scenario.actor, reply.id)
+        assert saved is not None and saved.status == "failed"
+    else:
+        assert claim is not None
+        context = claim.context
+        command = BrowserCommand.model_validate(
+            command_payload()
+            | {
+                "action": "send_message",
+                "owner_id": "boss-reply",
+                "sub": context.user_id,
+                "task_id": context.task_id,
+                "attempt_id": context.attempt_id,
+                "session_id": context.session_id,
+                "authorization_id": context.authorization_id,
+                "request_id": context.request_id,
+                "conversation_id": context.conversation_id,
+                "message_id": claim.message_id,
+                "text_digest": sha256(claim.text.encode()).hexdigest(),
+                "source_digest": sha256(claim.source_text.encode()).hexdigest(),
+            }
+        )
+        with pytest.raises(CommandRejected):
+            await PostgresMessagePermit(scenario.engine).consume(command)
+        async with scenario.engine.connect() as db:
+            assert (
+                await db.scalar(
+                    text("SELECT outcome FROM career.execution_attempts WHERE task_id=:id"),
+                    {"id": action.id},
+                )
+                == "send_preparing"
+            )
 
 
 @integration

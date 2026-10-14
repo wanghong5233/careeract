@@ -14,7 +14,7 @@ type Reply = {
 };
 export type ReplySource = { readTaskId: string; conversationId: string; messageId: string; content: string };
 const labels = { accepted: "已受理，等待 Worker", running: "Agent 正在判断", waiting: "待处理", completed: "无需回复", failed: "判断失败", timed_out: "任务已超时", cancelled: "已停止" };
-const categories: Record<string, string> = { routine: "回复草稿", acknowledgement: "询问岗位信息", resume_request: "请求简历", commitment: "需要确认安排", technical: "需要你回答", unknown: "依据不足", no_action: "无需回复" };
+const categories: Record<string, string> = { routine: "回复草稿", acknowledgement: "旧建议已停用", resume_request: "请求简历", commitment: "需要确认安排", technical: "需要你回答", unknown: "依据不足", no_action: "无需回复" };
 
 export function BossReplies({ connectionId, source, blocked, latestReadTaskId }: { connectionId: string; source: ReplySource | null; blocked: boolean; latestReadTaskId?: string | null }) {
   const [items, setItems] = useState<Reply[]>([]);
@@ -101,7 +101,7 @@ export function BossReplies({ connectionId, source, blocked, latestReadTaskId }:
       {item.decision && <><p className="mt-2">{item.decision.reason}</p>{item.decision.text && <p className="mt-2 whitespace-pre-wrap rounded-md bg-muted p-3">{item.decision.text}</p>}
         {item.decision.facts.length > 0 && <details className="mt-2 text-xs"><summary>已确认的事实依据</summary>{item.decision.facts.map((fact, index) => <p key={index} className="mt-1">{fact.field}：{fact.quote}</p>)}</details>}</>}
       {item.status === "waiting" && item.decision?.text && <p className="mt-2 text-xs text-muted-foreground">回复内容已保存，执行结果见下方。</p>}
-      {item.status === "waiting" && item.decision && ["routine", "acknowledgement"].includes(item.decision.category) && <BossReplySend reply={{ ...item, decision: item.decision }} latestReadTaskId={latestReadTaskId} blocked={blocked || pending} />}
+      {item.status === "waiting" && item.decision && item.decision.category === "routine" && <BossReplySend reply={{ ...item, decision: item.decision }} latestReadTaskId={latestReadTaskId} blocked={blocked || pending} />}
       <div className="mt-2 flex gap-2">
         {item.status === "accepted" && <Button disabled={pending} variant="outline" onClick={() => void mutate(`${base}/${item.id}/resume`, "POST", {})}>恢复任务派发</Button>}
         {["accepted", "running"].includes(item.status) && <Button disabled={pending} variant="ghost" onClick={() => void mutate(`${base}/${item.id}`, "DELETE", { version: item.version })}>停止此任务</Button>}

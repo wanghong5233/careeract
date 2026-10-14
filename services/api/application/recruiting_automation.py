@@ -157,7 +157,7 @@ class RecruitingAutomationRunner:
                 return await self.repository.finish(reference, outcome="judgment_requires_review")
             if reply.decision.category == "no_action":
                 return await self.repository.finish(reference, stage="read", advance=True)
-            if reply.decision.category not in {"routine", "acknowledgement"}:
+            if reply.decision.category != "routine":
                 return await self.repository.finish(reference, outcome=reply.decision.category)
             # This specialized repository operation consumes the delegation budget atomically.
             action = await self.sends.accept(

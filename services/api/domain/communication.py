@@ -16,8 +16,6 @@ ReplyCategory = Literal[
     "no_action",
 ]
 
-ACKNOWLEDGEMENT_TEXT = "您好，感谢联系，请问可以介绍一下岗位职责和任职要求吗？"
-
 
 @dataclass(frozen=True, slots=True, repr=False)
 class ReplyFact:
@@ -97,6 +95,7 @@ def validate_reply_decision(
     for fact in decision.facts:
         if (
             not fact.quote.strip()
+            or fact.field in {"goals", "constraints"}
             or fact.field not in profile_facts
             or fact.quote not in profile_facts[fact.field]
         ):
@@ -105,8 +104,17 @@ def validate_reply_decision(
         if not decision.text.strip() or not decision.facts:
             raise CommunicationInvalid("A factual reply requires confirmed references")
     elif decision.category == "acknowledgement":
-        if decision.text != ACKNOWLEDGEMENT_TEXT or decision.facts:
-            raise CommunicationInvalid("An acknowledgement must use the bounded neutral response")
+        raise CommunicationInvalid("Neutral acknowledgements are no longer permitted")
     elif decision.text or decision.facts:
         raise CommunicationInvalid("An unresolved decision cannot contain a sendable reply")
     return decision
+
+
+def is_factual_reply(decision: ReplyDecision | None, profile_facts: dict[str, str]) -> bool:
+    if decision is None or decision.category != "routine":
+        return False
+    try:
+        validate_reply_decision(decision, profile_facts)
+    except CommunicationInvalid:
+        return False
+    return True

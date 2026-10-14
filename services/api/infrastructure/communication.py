@@ -33,7 +33,7 @@ def profile_facts(content: ProfileContent) -> dict[str, str]:
     result = {
         key: value
         for key, value in asdict(content).items()
-        if isinstance(value, str) and value.strip()
+        if key not in {"goals", "constraints"} and isinstance(value, str) and value.strip()
     }
     for section in ("education", "experience", "projects"):
         for index, entry in enumerate(getattr(content, section)):

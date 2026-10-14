@@ -20,6 +20,8 @@ from services.api.domain.communication import (
     CommunicationConflict,
     CommunicationNotFound,
     CommunicationUnavailable,
+    ReplyDecision,
+    is_factual_reply,
 )
 from services.api.domain.communication_send import CommunicationSend, SendEvidence
 from services.api.infrastructure.communication import reply_from_row
@@ -406,7 +408,7 @@ class PostgresSendRepository:
                     reply.version != version
                     or reply.status != "waiting"
                     or reply.decision is None
-                    or reply.decision.category not in {"routine", "acknowledgement"}
+                    or not is_factual_reply(reply.decision, row["source"]["profile_facts"])
                     or not reply.decision.text.strip()
                     or reply.expires_at <= now
                     or connection["status"] != "connected"
@@ -568,7 +570,8 @@ class PostgresSendRepository:
                                 "attempt,x.request_id,r.conversation_id,c.status AS connected,"
                                 "c.version=r.connection_version AS "
                                 "current_connection,s.text,s.source,p.message_id "
-                                ",p.expires_at AS source_expires,p.status AS reply_status "
+                                ",p.expires_at AS source_expires,p.status AS reply_status,"
+                                "p.decision "
                                 "FROM career.execution_tasks t JOIN "
                                 "career.execution_authorizations a "
                                 "ON a.task_id=t.id JOIN career.execution_attempts x ON "
@@ -614,6 +617,13 @@ class PostgresSendRepository:
                     or not row["current_connection"]
                     or row["source_expires"] <= now
                     or row["reply_status"] != "waiting"
+                    or row["decision"] is None
+                    or row["decision"].get("category") != "routine"
+                    or row["decision"].get("text") != row["text"]
+                    or not is_factual_reply(
+                        TypeAdapter(ReplyDecision).validate_python(row["decision"]),
+                        row["source"]["profile_facts"],
+                    )
                     or profile_version != row["source"]["profile_version"]
                     or [dict(r) for r in rules] != row["source"]["rules"]
                 ):

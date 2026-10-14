@@ -50,7 +50,7 @@ class PostgresMessagePermit:
                 (
                     await db.execute(
                         text(
-                            "SELECT s.text,s.source,p.message_id,x.request_id "
+                            "SELECT s.text,s.source,p.message_id,p.decision,x.request_id "
                             "FROM career.communication_sends s "
                             "JOIN career.communication_replies p ON p.id=s.reply_id "
                             "JOIN career.execution_attempts x ON x.task_id=s.task_id "
@@ -70,7 +70,15 @@ class PostgresMessagePermit:
                 if m["sender"] in {"candidate", "recruiter"}
             ]
             if (
-                not human
+                payload["decision"] is None
+                or payload["decision"].get("category") != "routine"
+                or payload["decision"].get("text") != payload["text"]
+                or not payload["decision"].get("facts")
+                or any(
+                    fact.get("field") in {"goals", "constraints"}
+                    for fact in payload["decision"].get("facts", [])
+                )
+                or not human
                 or human[-1]["sender"] != "recruiter"
                 or payload["message_id"] != command.message_id
                 or payload["request_id"] != command.request_id

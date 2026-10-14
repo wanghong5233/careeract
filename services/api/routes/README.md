@@ -72,10 +72,11 @@ owned connected resource, current version, active authorization and expiry. It u
 existing signed `register`/`create`/`revoke`/`release` lifecycle with owner `boss-read`, then
 hands page capture to the BOSS adapter as `boss-page-reader`. Capture outcomes close the
 attempt as `completed`, `failed`, or `unknown`; an uncertain lifecycle or page result is
-never reported as success. This adapter is currently exercised in isolated tests and has
-an explicit HTTP prototype consumer. `POST /{id}/read/{task_id}/run` with empty JSON
-executes that accepted attempt once within the request; it is not a Temporal worker
-and cannot resume after process interruption. `GET /{id}/read` restores the latest owned
+never reported as success. `POST /{id}/read/{task_id}/run` with empty JSON dispatches
+the accepted task to the configured Temporal worker; the HTTP response reports dispatch,
+not a completed page read. Repeated dispatch uses the same workflow identity, and the
+worker claims the persisted attempt before browser I/O. Interrupted browser work is not
+blindly replayed: uncertain attempts require reconciliation. `GET /{id}/read` restores the latest owned
 task, and `GET /{id}/read/{task_id}/result` restores its bounded structured observation.
 No raw HTML or Cookie is persisted in the result. Unusable observations with confirmed
 cleanup close as failed; unconfirmed lifecycle outcomes remain unknown.

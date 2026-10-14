@@ -15,7 +15,6 @@ from services.api.application.ports.boss_page import (
 )
 from services.api.application.read_execution import ReadExecutionService
 from services.api.domain.communication import (
-    ACKNOWLEDGEMENT_TEXT,
     CommunicationConflict,
     CommunicationInvalid,
     CommunicationNotFound,
@@ -25,7 +24,7 @@ from services.api.domain.communication import (
     validate_reply_decision,
 )
 from services.api.domain.profile import ProfileContent
-from services.api.infrastructure.communication import PostgresCommunicationRepository
+from services.api.infrastructure.communication import PostgresCommunicationRepository, profile_facts
 from services.api.infrastructure.profiles import PostgresProfileRepository
 from services.api.infrastructure.read_execution import PostgresReadExecutionRepository
 from tests.api.test_execution_semantics import Scenario
@@ -50,11 +49,15 @@ DECISION = ReplyDecision(
         replace(DECISION, text=""),
         replace(DECISION, category="commitment"),
         replace(DECISION, category="resume_request", text="", facts=DECISION.facts),
+        replace(DECISION, facts=(ReplyFact("goals", "Python"),)),
+        replace(DECISION, facts=(ReplyFact("constraints", "Python"),)),
     ],
 )
 def test_invalid_facts_or_unresolved_sendable_text_are_rejected(decision: ReplyDecision) -> None:
     with pytest.raises(CommunicationInvalid):
-        validate_reply_decision(decision, {"skills": "Python 项目经验"})
+        validate_reply_decision(
+            decision, {"skills": "Python 项目经验", "goals": "Python", "constraints": "Python"}
+        )
 
 
 def test_known_and_unresolved_decisions_remain_distinct() -> None:
@@ -63,15 +66,17 @@ def test_known_and_unresolved_decisions_remain_distinct() -> None:
     assert validate_reply_decision(unknown, {}) == unknown
 
 
-def test_neutral_acknowledgement_does_not_require_invented_profile_facts() -> None:
-    decision = ReplyDecision("acknowledgement", ACKNOWLEDGEMENT_TEXT, "请对方补充岗位信息", ())
-    assert validate_reply_decision(decision, {}) == decision
-    for invalid in [
-        replace(decision, text="我现在有空，对这个岗位很感兴趣。"),
-        replace(decision, facts=(ReplyFact("skills", "Python"),)),
-    ]:
+def test_subjective_preferences_are_not_reply_fact_sources() -> None:
+    content = ProfileContent(skills="Python", goals="寻找工作", constraints="需要远程办公")
+    assert profile_facts(content) == {"skills": "Python"}
+
+
+def test_legacy_acknowledgements_are_rejected_even_with_confirmed_facts() -> None:
+    for reply_text in ["", "您好，感谢联系，请问可以介绍一下岗位职责和任职要求吗？"]:
         with pytest.raises(CommunicationInvalid):
-            validate_reply_decision(invalid, {"skills": "Python"})
+            validate_reply_decision(
+                ReplyDecision("acknowledgement", reply_text, "历史草稿", ()), {}
+            )
 
 
 @integration

@@ -52,6 +52,19 @@ test("saved decision restores without submitting or dispatching again", async ()
   fixture.cleanup();
 });
 
+test("historical acknowledgement remains readable without a send action", async () => {
+  const fixture = panel(async () => Response.json({
+    items: [{ ...saved, decision: { ...saved.decision, category: "acknowledgement" } }],
+    next_cursor: null,
+  }));
+  await settle();
+  const view = fixture.render();
+  assert.match(text(view), /旧建议已停用/);
+  assert.match(text(view), /Synthetic reply/);
+  assert.equal(elements(view).some(element => element.props.reply), false);
+  fixture.cleanup();
+});
+
 test("lost create response restores durable job without replaying POST", async () => {
   let persisted = false;
   const writes = [];
